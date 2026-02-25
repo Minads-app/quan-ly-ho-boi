@@ -1,0 +1,966 @@
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+
+interface Settings {
+    gate_control_mode: string;
+    pool_open_time: string;
+    pool_close_time: string;
+    business_name?: string;
+    business_address?: string;
+    business_phone?: string;
+    business_email?: string;
+    business_logo?: string;
+    bank_name?: string;
+    bank_account_number?: string;
+    bank_account_name?: string;
+}
+
+interface DaySchedule {
+    open: string;
+    close: string;
+    closed: boolean;
+}
+
+type WeekSchedule = Record<string, DaySchedule>;
+
+interface TicketType {
+    id: string;
+    name: string;
+    category: 'DAILY' | 'MULTI' | 'MONTHLY';
+    price: number;
+    description: string;
+    validity_days: number | null;
+    session_count: number | null;
+    is_active: boolean;
+}
+
+interface Promotion {
+    id: string;
+    name: string;
+    type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
+    value: number;
+    valid_from: string | null;
+    valid_until: string | null;
+    is_active: boolean;
+    applicable_ticket_types: string[] | null;
+}
+
+
+export default function SettingsPage() {
+    const { profile } = useAuth();
+    const [settings, setSettings] = useState<Settings>({
+        gate_control_mode: 'MANUAL_QR',
+        pool_open_time: '06:00',
+        pool_close_time: '20:00',
+    });
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
+
+    // Weekly schedule
+    const defaultSchedule: WeekSchedule = {
+        mon: { open: '06:00', close: '20:00', closed: false },
+        tue: { open: '06:00', close: '20:00', closed: false },
+        wed: { open: '06:00', close: '20:00', closed: false },
+        thu: { open: '06:00', close: '20:00', closed: false },
+        fri: { open: '06:00', close: '20:00', closed: false },
+        sat: { open: '06:00', close: '21:00', closed: false },
+        sun: { open: '06:00', close: '21:00', closed: false },
+    };
+    const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>(defaultSchedule);
+
+    // active tab state
+    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions'>('system');
+
+    // Ticket Types state
+    const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
+    const [showTicketModal, setShowTicketModal] = useState(false);
+    const [editingTicket, setEditingTicket] = useState<TicketType | null>(null);
+
+    // Form state for ticket type
+    const [tName, setTName] = useState('');
+    const [tCategory, setTCategory] = useState<'DAILY' | 'MULTI' | 'MONTHLY'>('DAILY');
+    const [tPrice, setTPrice] = useState(0);
+    const [tDesc, setTDesc] = useState('');
+    const [tDays, setTDays] = useState<number | ''>('');
+    const [tSessions, setTSessions] = useState<number | ''>('');
+
+    // Promotions state
+    const [promotions, setPromotions] = useState<Promotion[]>([]);
+    const [showPromoModal, setShowPromoModal] = useState(false);
+    const [editingPromo, setEditingPromo] = useState<Promotion | null>(null);
+
+    // Form state for promotions
+    const [pName, setPName] = useState('');
+    const [pType, setPType] = useState<'AMOUNT' | 'PERCENT' | 'BONUS_SESSION'>('AMOUNT');
+    const [pValue, setPValue] = useState<number | ''>('');
+    const [isUnlimitedPromo, setIsUnlimitedPromo] = useState(true);
+    const [pFrom, setPFrom] = useState('');
+    const [pUntil, setPUntil] = useState('');
+    const [pAllTickets, setPAllTickets] = useState(true);
+    const [pSelectedTickets, setPSelectedTickets] = useState<string[]>([]);
+
+    useEffect(() => {
+        fetchSettings();
+        fetchTicketTypes();
+        fetchPromotions();
+        fetchWeekSchedule();
+    }, []);
+
+    async function fetchSettings() {
+        const { data } = await supabase
+            .from('system_settings')
+            .select('key, value');
+
+        if (data) {
+            const s: Record<string, string> = {};
+            for (const row of data) {
+                try {
+                    // value is stored as JSONB, parse the quoted string
+                    s[row.key] = typeof row.value === 'string'
+                        ? row.value.replace(/^"|"$/g, '')
+                        : JSON.parse(JSON.stringify(row.value)).replace(/^"|"$/g, '');
+                } catch (e) {
+                    s[row.key] = typeof row.value === 'string' ? row.value : String(row.value);
+                }
+            }
+            setSettings(prev => ({ ...prev, ...s } as Settings));
+        }
+    }
+
+    async function fetchTicketTypes() {
+        const { data } = await supabase
+            .from('ticket_types')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (data) setTicketTypes(data);
+        setLoading(false);
+    }
+
+    async function fetchPromotions() {
+        const { data } = await supabase
+            .from('promotions')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (data) setPromotions(data);
+    }
+
+
+
+    async function saveAllSettings() {
+        setSaving(true);
+        setSaved(false);
+        try {
+            const updates = Object.keys(settings).map((k) => ({
+                key: k,
+                value: JSON.stringify(settings[k as keyof Settings]),
+                updated_at: new Date().toISOString(),
+                updated_by: profile?.id,
+            }));
+
+            for (const item of updates) {
+                await supabase.from('system_settings').upsert(item, { onConflict: 'key' });
+            }
+
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
+        } catch (e: any) {
+            alert('Lỗi lưu cài đặt: ' + e.message);
+        }
+        setSaving(false);
+    }
+
+    function handleModeChange(mode: string) {
+        setSettings(prev => ({ ...prev, gate_control_mode: mode }));
+    }
+
+    // Weekly schedule
+    async function fetchWeekSchedule() {
+        const { data } = await supabase.from('system_settings').select('value').eq('key', 'pool_weekly_schedule').single();
+        if (data?.value) {
+            try {
+                const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                setWeekSchedule(prev => ({ ...prev, ...parsed }));
+            } catch { /* keep default */ }
+        }
+    }
+
+    async function saveWeekSchedule(updated: WeekSchedule) {
+        setWeekSchedule(updated);
+        setSaving(true); setSaved(false);
+        const { error } = await supabase.from('system_settings').upsert({
+            key: 'pool_weekly_schedule',
+            value: updated,
+            updated_at: new Date().toISOString(),
+            updated_by: profile?.id,
+        }, { onConflict: 'key' });
+        if (error) alert('Lỗi lưu lịch: ' + error.message);
+        else { setSaved(true); setTimeout(() => setSaved(false), 2000); }
+        setSaving(false);
+    }
+
+    const dayLabels: Record<string, string> = {
+        mon: 'Thứ 2', tue: 'Thứ 3', wed: 'Thứ 4', thu: 'Thứ 5',
+        fri: 'Thứ 6', sat: 'Thứ 7', sun: 'CN',
+    };
+
+    // --- TICKET TYPE MANAGEMENT ---
+
+    function openNewTicketModal() {
+        setEditingTicket(null);
+        setTName('');
+        setTCategory('DAILY');
+        setTPrice(0);
+        setTDesc('');
+        setTDays(1); // default 1 day for daily
+        setTSessions('');
+        setShowTicketModal(true);
+    }
+
+    function openEditTicketModal(t: TicketType) {
+        setEditingTicket(t);
+        setTName(t.name);
+        setTCategory(t.category);
+        setTPrice(t.price);
+        setTDesc(t.description || '');
+        setTDays(t.validity_days || '');
+        setTSessions(t.session_count || '');
+        setShowTicketModal(true);
+    }
+
+    async function toggleTicketActive(id: string, currentStatus: boolean) {
+        await supabase.from('ticket_types').update({ is_active: !currentStatus }).eq('id', id);
+        fetchTicketTypes();
+    }
+
+    async function handleSaveTicket(e: React.FormEvent) {
+        e.preventDefault();
+        setSaving(true);
+
+        const payload = {
+            name: tName,
+            category: tCategory,
+            price: tPrice,
+            description: tDesc,
+            validity_days: tDays === '' ? null : Number(tDays),
+            session_count: tSessions === '' ? null : Number(tSessions)
+        };
+
+        if (editingTicket) {
+            await supabase.from('ticket_types').update(payload).eq('id', editingTicket.id);
+        } else {
+            await supabase.from('ticket_types').insert([payload]);
+        }
+
+        setShowTicketModal(false);
+        setSaving(false);
+        fetchTicketTypes();
+    }
+
+    async function handleDeleteTicket(id: string) {
+        if (!window.confirm('Bạn có chắc chắn muốn xóa loại vé này? Lưu ý: Không thể xóa nếu đã có khách mua loại vé này.')) return;
+
+        const { error } = await supabase.from('ticket_types').delete().eq('id', id);
+        if (error) {
+            alert('Không thể xóa: ' + (error.code === '23503' ? 'Loại vé này đã phát sinh giao dịch nên không thể xóa. Vui lòng chuyển sang trạng thái "Đã ẩn".' : error.message));
+        } else {
+            fetchTicketTypes();
+        }
+    }
+
+    // --- PROMOTIONS MANAGEMENT ---
+
+    function openNewPromoModal() {
+        setEditingPromo(null);
+        setPName('');
+        setPType('AMOUNT');
+        setPValue('');
+        setIsUnlimitedPromo(true);
+        setPFrom('');
+        setPUntil('');
+        setPAllTickets(true);
+        setPSelectedTickets([]);
+        setShowPromoModal(true);
+    }
+
+    function openEditPromoModal(p: Promotion) {
+        setEditingPromo(p);
+        setPName(p.name);
+        setPType(p.type);
+        setPValue(p.value);
+        setIsUnlimitedPromo(!p.valid_from && !p.valid_until);
+        setPFrom(p.valid_from ? new Date(p.valid_from).toISOString().slice(0, 16) : '');
+        setPUntil(p.valid_until ? new Date(p.valid_until).toISOString().slice(0, 16) : '');
+        setPAllTickets(p.applicable_ticket_types === null);
+        setPSelectedTickets(p.applicable_ticket_types || []);
+        setShowPromoModal(true);
+    }
+
+    async function togglePromoActive(id: string, currentStatus: boolean) {
+        await supabase.from('promotions').update({ is_active: !currentStatus }).eq('id', id);
+        fetchPromotions();
+    }
+
+    async function handleSavePromo(e: React.FormEvent) {
+        e.preventDefault();
+        setSaving(true);
+
+        const payload = {
+            name: pName,
+            type: pType,
+            value: Number(pValue),
+            valid_from: (!isUnlimitedPromo && pFrom) ? new Date(pFrom).toISOString() : null,
+            valid_until: (!isUnlimitedPromo && pUntil) ? new Date(pUntil).toISOString() : null,
+            applicable_ticket_types: pAllTickets ? null : pSelectedTickets
+        };
+
+        let err = null;
+        if (editingPromo) {
+            const { error } = await supabase.from('promotions').update(payload).eq('id', editingPromo.id);
+            err = error;
+        } else {
+            const { error } = await supabase.from('promotions').insert([payload]);
+            err = error;
+        }
+
+        if (err) {
+            alert('Lỗi lưu KM: ' + err.message);
+        } else {
+            setShowPromoModal(false);
+            fetchPromotions();
+        }
+        setSaving(false);
+    }
+
+    async function handleDeletePromo(id: string) {
+        if (!window.confirm('Bạn có chắc chắn muốn xóa chương trình khuyến mãi này?')) return;
+
+        const { error } = await supabase.from('promotions').delete().eq('id', id);
+        if (error) {
+            alert('Không thể xóa: ' + (error.code === '23503' ? 'Khuyến mãi này đã được áp dụng cho vé bán ra nên không thể xóa. Vui lòng chuyển sang trạng thái "Đã tắt".' : error.message));
+        } else {
+            fetchPromotions();
+        }
+    }
+
+    if (loading) return <div className="page-loading">Đang tải...</div>;
+
+    if (profile?.role !== 'ADMIN') {
+        return (
+            <div className="page-container">
+                <div className="alert alert-error">
+                    Chỉ ADMIN mới có quyền truy cập trang Cài đặt.
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="page-container" style={{ maxWidth: '1000px' }}>
+            <div className="page-header">
+                <h1>⚙️ Cài Đặt Hệ Thống</h1>
+                <p>Cấu hình cổng kiểm soát và các loại vé bơi</p>
+                {saved && <span className="save-badge">✓ Đã lưu</span>}
+            </div>
+
+            {/* Tabs Navigation */}
+            <div style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--border-color)', marginBottom: '24px' }}>
+                <button
+                    className={`btn ${activeTab === 'system' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('system')}
+                >
+                    🔧 Cài đặt chung
+                </button>
+                <button
+                    className={`btn ${activeTab === 'business' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('business')}
+                >
+                    🏢 Đơn vị & Thanh toán
+                </button>
+                <button
+                    className={`btn ${activeTab === 'tickets' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('tickets')}
+                >
+                    🎟️ Quản lý Loại Vé
+                </button>
+                <button
+                    className={`btn ${activeTab === 'promotions' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('promotions')}
+                >
+                    🎁 Khuyến Mãi
+                </button>
+            </div>
+
+            {activeTab === 'business' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    <section className="settings-section">
+                        <h2>🏢 Thông tin doanh nghiệp</h2>
+                        <p className="section-desc">Hiển thị trên Sidebar và tiêu đề các mẫu in ấn báo cáo</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '500px' }}>
+                            <div className="form-group">
+                                <label>Tên doanh nghiệp / Công ty</label>
+                                <input type="text" className="form-control"
+                                    value={settings.business_name || ''}
+                                    onChange={e => setSettings({ ...settings, business_name: e.target.value })}
+                                    placeholder="Hệ Thống Vé Bơi"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Địa chỉ</label>
+                                <input type="text" className="form-control"
+                                    value={settings.business_address || ''}
+                                    onChange={e => setSettings({ ...settings, business_address: e.target.value })}
+                                    placeholder="123 Đường XYZ, TP HCM..."
+                                />
+                            </div>
+                            <div className="form-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                <div>
+                                    <label>Số điện thoại</label>
+                                    <input type="text" className="form-control"
+                                        value={settings.business_phone || ''}
+                                        onChange={e => setSettings({ ...settings, business_phone: e.target.value })}
+                                        placeholder="0123.456.789"
+                                    />
+                                </div>
+                                <div>
+                                    <label>Email liên hệ</label>
+                                    <input type="email" className="form-control"
+                                        value={settings.business_email || ''}
+                                        onChange={e => setSettings({ ...settings, business_email: e.target.value })}
+                                        placeholder="lienhe@domain.com"
+                                    />
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label>Link ảnh Logo (URL)</label>
+                                <label>Tiện ích Tải Ảnh Logo</label>
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                                    <div style={{ flex: 1 }}>
+                                        <input type="text" className="form-control"
+                                            value={settings.business_logo || ''}
+                                            onChange={e => setSettings({ ...settings, business_logo: e.target.value })}
+                                            placeholder="https://example.com/logo.png"
+                                            style={{ marginBottom: '8px' }}
+                                        />
+                                        <input type="file" accept="image/*"
+                                            onChange={async (e) => {
+                                                const file = e.target.files?.[0];
+                                                if (!file) return;
+
+                                                const oldUrl = settings.business_logo;
+
+                                                setSaving(true);
+                                                try {
+                                                    const fileExt = file.name.split('.').pop();
+                                                    const fileName = `business_logo_${Date.now()}.${fileExt}`;
+
+                                                    const { data, error } = await supabase.storage.from('assets').upload(fileName, file, { upsert: true });
+                                                    if (error) throw error;
+
+                                                    if (data) {
+                                                        const newUrl = supabase.storage.from('assets').getPublicUrl(fileName).data.publicUrl;
+                                                        setSettings({ ...settings, business_logo: newUrl });
+
+                                                        // Attempt to delete old image to save space
+                                                        if (oldUrl && oldUrl.includes('/storage/v1/object/public/assets/')) {
+                                                            const oldFileName = oldUrl.split('/').pop();
+                                                            if (oldFileName && !oldFileName.includes('?')) {
+                                                                await supabase.storage.from('assets').remove([oldFileName]);
+                                                            }
+                                                        }
+                                                    }
+                                                } catch (err: any) {
+                                                    alert('Lỗi tải ảnh: ' + err.message + '\n\nVui lòng đảm bảo bạn đã chạy script SQL tạo Storage (013_storage_setup).');
+                                                }
+                                                setSaving(false);
+                                            }}
+                                        />
+                                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                            Bạn có thể dán link trực tiếp hoặc chọn ảnh từ máy để tự động tải lên máy chủ. Ảnh cũ sẽ tự động bị xóa.
+                                        </div>
+                                    </div>
+                                    {settings.business_logo && (
+                                        <img src={settings.business_logo} alt="Logo preview" style={{ height: '60px', width: '60px', objectFit: 'contain', borderRadius: '4px', background: '#f8fafc', padding: '4px', border: '1px solid #e2e8f0', flexShrink: 0 }} />
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="settings-section" style={{ marginTop: '24px' }}>
+                        <h2>💳 Thông tin Ngân hàng</h2>
+                        <p className="section-desc">Sử dụng để tạo mã QR chuyển khoản khi bán vé</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '500px' }}>
+                            <div className="form-group">
+                                <label>Ngân hàng nhận (VD: VCB, MBBank...)</label>
+                                <input type="text" className="form-control"
+                                    value={settings.bank_name || ''}
+                                    onChange={e => setSettings({ ...settings, bank_name: e.target.value })}
+                                    placeholder="MBBank"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Số tài khoản</label>
+                                <input type="text" className="form-control"
+                                    value={settings.bank_account_number || ''}
+                                    onChange={e => setSettings({ ...settings, bank_account_number: e.target.value })}
+                                    placeholder="9999999999"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Tên chủ tài khoản</label>
+                                <input type="text" className="form-control"
+                                    value={settings.bank_account_name || ''}
+                                    onChange={e => setSettings({ ...settings, bank_account_name: e.target.value })}
+                                    placeholder="NGUYEN VAN A"
+                                    style={{ textTransform: 'uppercase' }}
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+                    <div style={{ marginTop: '24px' }}>
+                        <button className="btn btn-primary" onClick={saveAllSettings} disabled={saving}>
+                            {saving ? 'Đang lưu...' : 'Lưu Thay Đổi'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'system' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    {/* Gate Control Mode */}
+                    <section className="settings-section">
+                        <h2>Chế độ kiểm soát cổng</h2>
+                        <p className="section-desc">
+                            Chọn cách kiểm soát ra vào hồ bơi
+                        </p>
+                        <div className="mode-toggle">
+                            <button
+                                className={`mode-btn ${settings.gate_control_mode === 'MANUAL_QR' ? 'active' : ''}`}
+                                onClick={() => handleModeChange('MANUAL_QR')}
+                                disabled={saving}
+                            >
+                                <span className="mode-icon">📱</span>
+                                <span className="mode-label">QR Thủ công</span>
+                                <span className="mode-desc">Nhân viên soát vé kiểm tra mã QR</span>
+                            </button>
+                            <button
+                                className={`mode-btn ${settings.gate_control_mode === 'AUTO_GATE' ? 'active' : ''}`}
+                                onClick={() => handleModeChange('AUTO_GATE')}
+                                disabled={saving}
+                            >
+                                <span className="mode-icon">🚧</span>
+                                <span className="mode-label">Cửa tự động</span>
+                                <span className="mode-desc">Quét QR tự mở cổng barrier</span>
+                            </button>
+                        </div>
+                    </section>
+
+                    {/* Weekly Schedule */}
+                    <section className="settings-section">
+                        <h2>📅 Lịch hoạt động từng ngày</h2>
+                        <p className="section-desc">
+                            Vé QR chỉ hợp lệ trong khung giờ hoạt động. Ngoài giờ → quét vào bị từ chối. Ngày nghỉ → tất cả bị từ chối.
+                        </p>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                                <thead>
+                                    <tr>
+                                        <th>Ngày</th>
+                                        <th>Giờ mở cửa</th>
+                                        <th>Giờ đóng cửa</th>
+                                        <th style={{ textAlign: 'center' }}>Nghỉ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Object.entries(dayLabels).map(([key, label]) => {
+                                        const day = weekSchedule[key] || defaultSchedule[key];
+                                        return (
+                                            <tr key={key} style={{ opacity: day.closed ? 0.5 : 1 }}>
+                                                <td style={{ fontWeight: 600, fontSize: '14px' }}>{label}</td>
+                                                <td>
+                                                    <input type="time" value={day.open} disabled={day.closed}
+                                                        onChange={e => {
+                                                            const updated = { ...weekSchedule, [key]: { ...day, open: e.target.value } };
+                                                            setWeekSchedule(updated);
+                                                        }}
+                                                        onBlur={() => saveWeekSchedule(weekSchedule)}
+                                                        style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}
+                                                    />
+                                                </td>
+                                                <td>
+                                                    <input type="time" value={day.close} disabled={day.closed}
+                                                        onChange={e => {
+                                                            const updated = { ...weekSchedule, [key]: { ...day, close: e.target.value } };
+                                                            setWeekSchedule(updated);
+                                                        }}
+                                                        onBlur={() => saveWeekSchedule(weekSchedule)}
+                                                        style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}
+                                                    />
+                                                </td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <input type="checkbox" checked={day.closed}
+                                                        onChange={e => {
+                                                            const updated = { ...weekSchedule, [key]: { ...day, closed: e.target.checked } };
+                                                            setWeekSchedule(updated);
+                                                        }}
+                                                        style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#ef4444' }}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <div style={{ marginTop: '24px' }}>
+                        <button className="btn btn-primary" onClick={() => { saveAllSettings(); saveWeekSchedule(weekSchedule); }} disabled={saving}>
+                            {saving ? 'Đang lưu...' : 'Lưu Thay Đổi'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'tickets' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    <div className="dashboard-content-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>Danh sách Loại vé bơi</h2>
+                            <button className="btn btn-primary btn-sm" onClick={openNewTicketModal}>
+                                ➕ Tạo vé mới
+                            </button>
+                        </div>
+
+                        <div className="table-responsive">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Loại vé</th>
+                                        <th>Mức giá</th>
+                                        <th>Hạn sử dụng</th>
+                                        <th>Số lượt (nếu có)</th>
+                                        <th>Trạng thái (Bán)</th>
+                                        <th>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {ticketTypes.map(t => (
+                                        <tr key={t.id} style={{ opacity: t.is_active ? 1 : 0.5 }}>
+                                            <td>
+                                                <strong>{t.name}</strong>
+                                                <div className="text-sm text-slate-400">
+                                                    {t.category === 'DAILY' ? 'Vé ngày lẻ' : t.category === 'MULTI' ? 'Vé nhiều buổi' : 'Vé tháng'}
+                                                </div>
+                                            </td>
+                                            <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
+                                                {t.price.toLocaleString('vi-VN')}đ
+                                            </td>
+                                            <td>{t.validity_days ? `${t.validity_days} ngày` : 'Không giới hạn'}</td>
+                                            <td>{t.session_count ? `${t.session_count} lượt` : 'K.Giới hạn'}</td>
+                                            <td>
+                                                <button
+                                                    className={`badge ${t.is_active ? 'badge-success' : 'badge-error'}`}
+                                                    onClick={() => toggleTicketActive(t.id, t.is_active)}
+                                                    style={{ cursor: 'pointer', border: 'none' }}
+                                                >
+                                                    {t.is_active ? 'Đang bán' : 'Đã ẩn'}
+                                                </button>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className="btn btn-ghost btn-sm"
+                                                    onClick={() => openEditTicketModal(t)}
+                                                >
+                                                    ✏️ Sửa
+                                                </button>
+                                                <button
+                                                    className="btn btn-ghost btn-sm"
+                                                    style={{ color: 'var(--alert-red)', marginLeft: '8px' }}
+                                                    onClick={() => handleDeleteTicket(t.id)}
+                                                >
+                                                    🗑️ Xóa
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {ticketTypes.length === 0 && (
+                                        <tr><td colSpan={6} style={{ textAlign: 'center' }}>Chưa có loại vé nào.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'promotions' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    <div className="dashboard-content-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>Chương trình Khuyến mãi</h2>
+                            <button className="btn btn-primary btn-sm" onClick={openNewPromoModal}>
+                                ➕ Thêm Khuyến mãi
+                            </button>
+                        </div>
+
+                        <div className="table-responsive">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tên chương trình</th>
+                                        <th>Hình thức</th>
+                                        <th>Giá trị</th>
+                                        <th>Thời hạn áp dụng</th>
+                                        <th>Loại vé áp dụng</th>
+                                        <th>Trạng thái</th>
+                                        <th>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {promotions.map(p => (
+                                        <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.5 }}>
+                                            <td><strong>{p.name}</strong></td>
+                                            <td>
+                                                <span className="badge badge-outline">
+                                                    {p.type === 'AMOUNT' ? 'Giảm tiền mặt' : p.type === 'PERCENT' ? 'Giảm %' : 'Tặng thêm buổi'}
+                                                </span>
+                                            </td>
+                                            <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
+                                                {p.type === 'AMOUNT' && `-${p.value.toLocaleString('vi-VN')}đ`}
+                                                {p.type === 'PERCENT' && `-${p.value}%`}
+                                                {p.type === 'BONUS_SESSION' && `+${p.value} buổi`}
+                                            </td>
+                                            <td>
+                                                <div style={{ fontSize: '13px' }}>
+                                                    {p.valid_from ? new Date(p.valid_from).toLocaleDateString() : 'Bất kỳ'}
+                                                    {' → '}
+                                                    {p.valid_until ? new Date(p.valid_until).toLocaleDateString() : 'Không thời hạn'}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div style={{ fontSize: '13px' }}>
+                                                    {p.applicable_ticket_types === null ? 'Tất cả loại vé' : `${p.applicable_ticket_types.length} loại vé`}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className={`badge ${p.is_active ? 'badge-success' : 'badge-error'}`}
+                                                    onClick={() => togglePromoActive(p.id, p.is_active)}
+                                                    style={{ cursor: 'pointer', border: 'none' }}
+                                                >
+                                                    {p.is_active ? 'Đang bật' : 'Đã tắt'}
+                                                </button>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className="btn btn-ghost btn-sm"
+                                                    onClick={() => openEditPromoModal(p)}
+                                                >
+                                                    ✏️ Sửa
+                                                </button>
+                                                <button
+                                                    className="btn btn-ghost btn-sm"
+                                                    style={{ color: 'var(--alert-red)', marginLeft: '8px' }}
+                                                    onClick={() => handleDeletePromo(p.id)}
+                                                >
+                                                    🗑️ Xóa
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {promotions.length === 0 && (
+                                        <tr><td colSpan={6} style={{ textAlign: 'center' }}>Chưa có chương trình khuyến mãi nào.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showTicketModal && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '500px' }}>
+                        <h2>{editingTicket ? 'Sửa thông tin vé' : 'Tạo loại vé mới'}</h2>
+                        <form onSubmit={handleSaveTicket}>
+                            <div className="form-group">
+                                <label>Tên loại vé (VD: Vé nhóm 10 tặng 2)</label>
+                                <input type="text" required value={tName} onChange={e => setTName(e.target.value)} />
+                            </div>
+
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Loại cấu trúc</label>
+                                    <select value={tCategory} onChange={e => setTCategory(e.target.value as any)}>
+                                        <option value="DAILY">Vé lẻ 1 lần (DAILY)</option>
+                                        <option value="MULTI">Gói nhiều buổi (MULTI)</option>
+                                        <option value="MONTHLY">Vé tháng/năm (MONTHLY)</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label>Giá bán (VND)</label>
+                                    <input type="number" min="0" required value={tPrice} onChange={e => setTPrice(Number(e.target.value))} />
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Ghi chú (Hiển thị cho thu ngân - Không bắt buộc)</label>
+                                <input type="text" value={tDesc} onChange={e => setTDesc(e.target.value)} />
+                            </div>
+
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Hạn sử dụng (Số ngày)</label>
+                                    <input
+                                        type="number" min="1"
+                                        placeholder="Để trống = Không hết hạn"
+                                        value={tDays} onChange={e => setTDays(e.target.value ? Number(e.target.value) : '')}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Số lượt IN qua cổng</label>
+                                    <input
+                                        type="number" min="1"
+                                        placeholder="Để trống = Không giới hạn"
+                                        value={tSessions} onChange={e => setTSessions(e.target.value ? Number(e.target.value) : '')}
+                                        disabled={tCategory === 'DAILY'} // Daily auto assumes 1 behind the scenes
+                                    />
+                                    {tCategory === 'DAILY' && <span style={{ fontSize: '11px', color: 'gray' }}>Vé Lẻ tự mặc định 1 lượt</span>}
+                                </div>
+                            </div>
+
+                            <div className="modal-actions" style={{ marginTop: '24px' }}>
+                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowTicketModal(false)} disabled={saving}>Hủy</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu cài đặt'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Promotions Modal */}
+            {showPromoModal && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '500px' }}>
+                        <h2>{editingPromo ? 'Sửa Khuyến mãi' : 'Thêm Khuyến mãi mới'}</h2>
+                        <form onSubmit={handleSavePromo}>
+                            <div className="form-group">
+                                <label>Tên CT Khuyến Mãi (VD: Khai trương giảm 10%)</label>
+                                <input type="text" required value={pName} onChange={e => setPName(e.target.value)} />
+                            </div>
+
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Hình thức KM</label>
+                                    <select value={pType} onChange={e => setPType(e.target.value as any)}>
+                                        <option value="AMOUNT">Trừ tiền gộp (VND)</option>
+                                        <option value="PERCENT">Biết khấu tỷ lệ (%)</option>
+                                        <option value="BONUS_SESSION">Tặng thêm luợt bơi</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label>Giá trị (Tiền / Tỷ lệ / Số buổi)</label>
+                                    <input type="number" min="1" required value={pValue} onChange={e => setPValue(Number(e.target.value))} />
+                                </div>
+                            </div>
+
+                            <div className="form-group" style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px' }}>Thời hạn áp dụng</label>
+                                <div style={{ display: 'flex', gap: '20px' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', margin: 0 }}>
+                                        <input
+                                            type="radio"
+                                            name="promoUnlimited"
+                                            checked={isUnlimitedPromo}
+                                            onChange={() => setIsUnlimitedPromo(true)}
+                                        />
+                                        Bất kỳ lúc nào (Không bao giờ hết hạn)
+                                    </label>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', margin: 0 }}>
+                                        <input
+                                            type="radio"
+                                            name="promoUnlimited"
+                                            checked={!isUnlimitedPromo}
+                                            onChange={() => setIsUnlimitedPromo(false)}
+                                        />
+                                        Có thời hạn cụ thể
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="form-group" style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px' }}>Áp dụng cho loại vé</label>
+                                <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', margin: 0 }}>
+                                        <input
+                                            type="radio"
+                                            checked={pAllTickets}
+                                            onChange={() => setPAllTickets(true)}
+                                        />
+                                        Tất cả loại vé
+                                    </label>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', margin: 0 }}>
+                                        <input
+                                            type="radio"
+                                            checked={!pAllTickets}
+                                            onChange={() => setPAllTickets(false)}
+                                        />
+                                        Chỉ các vé được chọn
+                                    </label>
+                                </div>
+                                {!pAllTickets && (
+                                    <div style={{ background: 'var(--bg-hover, #f8fafc)', padding: '12px', borderRadius: '8px', maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color, #e2e8f0)' }}>
+                                        {ticketTypes.map(t => (
+                                            <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', marginBottom: '8px', fontSize: '14px' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={pSelectedTickets.includes(t.id)}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) {
+                                                            setPSelectedTickets(prev => [...prev, t.id]);
+                                                        } else {
+                                                            setPSelectedTickets(prev => prev.filter(id => id !== t.id));
+                                                        }
+                                                    }}
+                                                />
+                                                {t.name} <span style={{ color: 'var(--text-secondary, #64748b)' }}>({t.category === 'DAILY' ? 'Vé lẻ' : t.category === 'MULTI' ? 'Gói nhiều buổi' : 'Vé tháng/năm'})</span>
+                                            </label>
+                                        ))}
+                                        {ticketTypes.length === 0 && <div style={{ fontSize: '13px', color: 'gray' }}>Chưa có loại vé nào.</div>}
+                                    </div>
+                                )}
+                            </div>
+
+                            {!isUnlimitedPromo && (
+                                <div className="form-row" style={{ animation: 'fadeIn 0.3s ease' }}>
+                                    <div className="form-group">
+                                        <label>Từ ngày (Bắt buộc)</label>
+                                        <input type="datetime-local" required value={pFrom} onChange={e => setPFrom(e.target.value)} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Đến ngày (Bắt buộc)</label>
+                                        <input type="datetime-local" required value={pUntil} onChange={e => setPUntil(e.target.value)} />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="modal-actions" style={{ marginTop: '24px' }}>
+                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPromoModal(false)} disabled={saving}>Hủy</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu cài đặt'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
