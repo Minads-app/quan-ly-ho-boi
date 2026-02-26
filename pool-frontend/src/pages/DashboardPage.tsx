@@ -189,9 +189,10 @@ export default function DashboardPage() {
     }
 
     // --- Computed data ---
-    const dailyTickets = tickets.filter(t => t.category === 'DAILY');
-    const multiTickets = tickets.filter(t => t.category === 'MULTI');
-    const monthlyTickets = tickets.filter(t => t.category === 'MONTHLY');
+    const dailyTickets = tickets.filter(t => t.category === 'DAILY' && t.price_paid > 0);
+    const multiTickets = tickets.filter(t => t.category === 'MULTI' && t.price_paid > 0);
+    const monthlyTickets = tickets.filter(t => t.category === 'MONTHLY' && t.price_paid > 0);
+    const lessonTickets = tickets.filter(t => t.price_paid === 0);
     const totalRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
     const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
     const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0);
@@ -329,7 +330,8 @@ export default function DashboardPage() {
                 {renderDateFilter()}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
                     {[{ label: 'Tổng doanh thu', value: fmt(totalRevenue), color: '#10b981' },
-                    { label: 'Số vé bán', value: `${tickets.length} vé`, color: '#3b82f6' },
+                    { label: 'Số vé bán', value: `${tickets.length - lessonTickets.length} vé`, color: '#3b82f6' },
+                    { label: 'Vé học bơi / KM 100%', value: `${lessonTickets.length} vé`, color: '#ec4899' },
                     { label: 'Tiền mặt', value: fmt(revCash), color: '#64748b' },
                     { label: 'Chuyển khoản', value: fmt(revTransfer), color: '#f59e0b' },
                     { label: 'Thẻ POS', value: fmt(revCard), color: '#8b5cf6' }
@@ -361,6 +363,7 @@ export default function DashboardPage() {
             { title: 'Khách Lẻ (Vé lượt)', data: dailyTickets, color: '#f59e0b' },
             { title: 'Khách Nhiều Buổi', data: multiTickets, color: '#8b5cf6' },
             { title: 'Khách Vé Tháng', data: monthlyTickets, color: '#3b82f6' },
+            { title: 'Học Bơi (Vé 0đ)', data: lessonTickets, color: '#ec4899' },
         ];
 
         const allTableHtml = sections.map(s => `<h3 style="margin:16px 0 4px">${s.title} (${s.data.length} lượt)</h3>` +

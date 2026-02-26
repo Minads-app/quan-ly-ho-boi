@@ -1014,49 +1014,72 @@ export default function POSPage() {
                             <button onClick={() => setShowPaymentModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
                         </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CASH' ? 'var(--bg-hover)' : 'transparent' }}>
-                                <input type="radio" name="payment" value="CASH" checked={selectedPaymentMethod === 'CASH'} onChange={() => setSelectedPaymentMethod('CASH')} />
-                                <span style={{ fontSize: '16px', fontWeight: 500 }}>💵 Tiền mặt</span>
-                            </label>
+                        {(() => {
+                            let actualPrice = pendingTicketData.ticketType.price;
+                            if (pendingTicketData.promoId) {
+                                const promo = promotions.find(p => p.id === pendingTicketData.promoId);
+                                if (promo) {
+                                    if (promo.type === 'AMOUNT') actualPrice = Math.max(0, actualPrice - promo.value);
+                                    if (promo.type === 'PERCENT') actualPrice = Math.floor(actualPrice * (1 - promo.value / 100));
+                                }
+                            }
+                            const isFreeTicket = actualPrice === 0;
 
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER' ? 'var(--bg-hover)' : 'transparent' }}>
-                                <input type="radio" name="payment" value="TRANSFER" checked={selectedPaymentMethod === 'TRANSFER'} onChange={() => setSelectedPaymentMethod('TRANSFER')} />
-                                <span style={{ fontSize: '16px', fontWeight: 500 }}>🏦 Chuyển khoản</span>
-                            </label>
+                            return (
+                                <>
+                                    {!isFreeTicket ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CASH' ? 'var(--bg-hover)' : 'transparent' }}>
+                                                <input type="radio" name="payment" value="CASH" checked={selectedPaymentMethod === 'CASH'} onChange={() => setSelectedPaymentMethod('CASH')} />
+                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>💵 Tiền mặt</span>
+                                            </label>
 
-                            {selectedPaymentMethod === 'TRANSFER' && bizInfo.bank_account_number && (
-                                <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', marginLeft: '32px', border: '1px dashed #cbd5e1' }}>
-                                    <div>Ngân hàng: <strong>{bizInfo.bank_name}</strong></div>
-                                    <div>Số tài khoản: <strong style={{ color: '#0f172a', fontSize: '15px' }}>{bizInfo.bank_account_number}</strong></div>
-                                    <div>Chủ TK: <strong>{bizInfo.bank_account_name}</strong></div>
-                                    <div style={{ marginTop: '8px', color: '#64748b', fontStyle: 'italic' }}>
-                                        (Vui lòng kiểm tra màn hình chuyển khoản của khách)
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER' ? 'var(--bg-hover)' : 'transparent' }}>
+                                                <input type="radio" name="payment" value="TRANSFER" checked={selectedPaymentMethod === 'TRANSFER'} onChange={() => setSelectedPaymentMethod('TRANSFER')} />
+                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>🏦 Chuyển khoản</span>
+                                            </label>
+
+                                            {selectedPaymentMethod === 'TRANSFER' && bizInfo.bank_account_number && (
+                                                <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', marginLeft: '32px', border: '1px dashed #cbd5e1' }}>
+                                                    <div>Ngân hàng: <strong>{bizInfo.bank_name}</strong></div>
+                                                    <div>Số tài khoản: <strong style={{ color: '#0f172a', fontSize: '15px' }}>{bizInfo.bank_account_number}</strong></div>
+                                                    <div>Chủ TK: <strong>{bizInfo.bank_account_name}</strong></div>
+                                                    <div style={{ marginTop: '8px', color: '#64748b', fontStyle: 'italic' }}>
+                                                        (Vui lòng kiểm tra màn hình chuyển khoản của khách)
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CARD' ? 'var(--bg-hover)' : 'transparent' }}>
+                                                <input type="radio" name="payment" value="CARD" checked={selectedPaymentMethod === 'CARD'} onChange={() => setSelectedPaymentMethod('CARD')} />
+                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>💳 Quẹt thẻ (POS)</span>
+                                            </label>
+                                        </div>
+                                    ) : (
+                                        <div style={{ marginBottom: '24px', textAlign: 'center', color: 'var(--accent-green)' }}>
+                                            <p style={{ fontSize: '16px', fontWeight: 600 }}>Vé miễn phí (0đ)</p>
+                                            <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Vui lòng xác nhận để phát hành vé.</p>
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'flex', gap: '12px' }}>
+                                        <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPaymentModal(false)}>Hủy</button>
+                                        <button type="button" className="btn btn-primary" style={{ flex: 2 }} disabled={selling} onClick={() => {
+                                            doSellTicket(
+                                                pendingTicketData.ticketType,
+                                                pendingTicketData.name,
+                                                pendingTicketData.phone,
+                                                pendingTicketData.promoId,
+                                                pendingTicketData.code,
+                                                isFreeTicket ? 'CASH' : selectedPaymentMethod
+                                            );
+                                        }}>
+                                            {selling ? 'Đang xử lý...' : (isFreeTicket ? 'PHÁT HÀNH VÉ' : 'THANH TOÁN & IN VÉ')}
+                                        </button>
                                     </div>
-                                </div>
-                            )}
-
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CARD' ? 'var(--bg-hover)' : 'transparent' }}>
-                                <input type="radio" name="payment" value="CARD" checked={selectedPaymentMethod === 'CARD'} onChange={() => setSelectedPaymentMethod('CARD')} />
-                                <span style={{ fontSize: '16px', fontWeight: 500 }}>💳 Quẹt thẻ (POS)</span>
-                            </label>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPaymentModal(false)}>Hủy</button>
-                            <button type="button" className="btn btn-primary" style={{ flex: 2 }} disabled={selling} onClick={() => {
-                                doSellTicket(
-                                    pendingTicketData.ticketType,
-                                    pendingTicketData.name,
-                                    pendingTicketData.phone,
-                                    pendingTicketData.promoId,
-                                    pendingTicketData.code,
-                                    selectedPaymentMethod
-                                );
-                            }}>
-                                {selling ? 'Đang xử lý...' : 'THANH TOÁN & IN VÉ'}
-                            </button>
-                        </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
