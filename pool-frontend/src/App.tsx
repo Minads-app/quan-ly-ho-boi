@@ -15,6 +15,7 @@ function AppRoutes() {
   const { user, profile, loading, signOut } = useAuth();
   const [bizName, setBizName] = useState('Vé Bơi');
   const [bizLogo, setBizLogo] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     async function loadBiz() {
@@ -50,8 +51,25 @@ function AppRoutes() {
 
   return (
     <div className="app-layout">
+      {/* Mobile Header */}
+      <div className="mobile-header">
+        <button className="menu-btn" onClick={() => setIsSidebarOpen(true)}>
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <span className="mobile-brand">{bizName}</span>
+      </div>
+
+      {/* Sidebar Overlay for Mobile */}
+      {isSidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)}></div>
+      )}
+
       {/* Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {bizLogo ? (
             <img src={bizLogo} alt="Logo" style={{ height: '32px', width: '32px', objectFit: 'contain', borderRadius: '4px' }} />
@@ -65,15 +83,15 @@ function AppRoutes() {
           {/* Menu Bán Vé: Dành cho Admin và Cashier (và Staff mới) */}
           {['ADMIN', 'CASHIER', 'STAFF'].includes(profile.role) && (
             <>
-              <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
                 <span className="nav-icon">🎫</span>
                 <span>Bán Vé</span>
               </NavLink>
-              <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
                 <span className="nav-icon">👥</span>
                 <span>Khách Hàng</span>
               </NavLink>
-              <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
                 <span className="nav-icon">📈</span>
                 <span>Báo Cáo</span>
               </NavLink>
@@ -82,7 +100,7 @@ function AppRoutes() {
 
           {/* Menu Soát Vé: Dành cho Admin và Gate Keeper */}
           {['ADMIN', 'GATE_KEEPER'].includes(profile.role) && (
-            <NavLink to="/gate" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <NavLink to="/gate" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
               <span className="nav-icon">🔍</span>
               <span>Soát Vé</span>
             </NavLink>
@@ -91,11 +109,11 @@ function AppRoutes() {
           {/* Menu Quản lý: Chỉ dành cho Admin */}
           {profile.role === 'ADMIN' && (
             <>
-              <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
                 <span className="nav-icon">👥</span>
                 <span>Tài Khoản</span>
               </NavLink>
-              <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
                 <span className="nav-icon">⚙️</span>
                 <span>Cài Đặt</span>
               </NavLink>

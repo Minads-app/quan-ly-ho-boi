@@ -955,7 +955,59 @@ body {
 
 /* ── Responsive ─────────────────────────────────────────── */
 
+.mobile-header {
+  display: none;
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
 @media (max-width: 768px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: #1a1d27;
+    color: #f0f2f5;
+    border-bottom: 1px solid #2a2e3b;
+    z-index: 40;
+  }
+
+  .menu-btn {
+    background: transparent;
+    border: none;
+    color: #f0f2f5;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+  }
+
+  .mobile-brand {
+    font-size: 18px;
+    font-weight: 700;
+    background: var(--gradient-blue);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 45;
+    animation: fadeIn 0.2s ease;
+  }
+
   .sidebar {
     position: fixed;
     left: 0;
@@ -968,10 +1020,13 @@ body {
 
   .sidebar.open {
     transform: translateX(0);
+    box-shadow: var(--shadow-lg);
   }
 
   .main-content {
     width: 100%;
+    flex: 1;
+    overflow-y: auto;
   }
 
   .page-container {
