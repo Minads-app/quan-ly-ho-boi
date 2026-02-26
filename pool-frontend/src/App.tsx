@@ -129,6 +129,19 @@ function AppRoutes() {
           <button className="btn btn-ghost btn-sm" onClick={signOut}>
             Đăng xuất
           </button>
+
+          {/* Copyright Info */}
+          <div className="copyright-info" style={{
+            marginTop: '8px',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+            textAlign: 'center',
+            borderTop: '1px dotted #2a2e3b',
+            paddingTop: '12px'
+          }}>
+            &copy; {new Date().getFullYear()} <strong>Minads Soft</strong><br />
+            All rights reserved.
+          </div>
         </div>
       </aside>
 
