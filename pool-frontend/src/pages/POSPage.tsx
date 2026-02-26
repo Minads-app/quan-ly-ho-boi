@@ -367,16 +367,21 @@ export default function POSPage() {
         <title>In Vé</title>
         <style>
           @media print {
-            @page { size: 80mm auto; margin: 0; }
-            body { width: 72mm; padding: 4mm; }
+            @page { margin: 0; }
+            body { 
+              width: 100% !important; 
+              margin: 0 !important; 
+              padding: 4mm !important; 
+            }
           }
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body {
             font-family: 'Times New Roman', Times, serif;
-            width: 302px;
-            padding: 16px;
+            width: 100%;
+            max-width: 320px;
             margin: 0 auto;
-            font-size: 13px;
+            padding: 16px;
+            font-size: 15px; /* Tăng size chữ lên một chút cho dễ đọc */
             color: #000;
             background: #fff;
           }
@@ -386,6 +391,7 @@ export default function POSPage() {
             border-bottom: 2px dashed #000;
             padding-bottom: 24px;
             margin-bottom: 24px;
+            width: 100%;
           }
           .ticket-print:last-child {
             page-break-after: auto;
@@ -393,10 +399,10 @@ export default function POSPage() {
             padding-bottom: 0;
             margin-bottom: 0;
           }
-          .ticket-print h2 { font-size: 18px; margin-bottom: 4px; }
-          .ticket-print .subtitle { color: #666; font-size: 11px; margin-bottom: 12px; }
-          .ticket-print .qr-wrapper { margin: 12px 0; }
-          .ticket-print .qr-wrapper svg { width: 200px; height: 200px; }
+          .ticket-print h2 { font-size: 22px; margin-bottom: 6px; text-transform: uppercase; }
+          .ticket-print .subtitle { color: #444; font-size: 12px; margin-bottom: 12px; font-weight: bold; }
+          .ticket-print .qr-wrapper { margin: 16px 0; text-align: center; }
+          .ticket-print .qr-wrapper svg { width: 180px; height: 180px; margin: 0 auto; display: block; }
           .ticket-print .info-row {
             display: flex;
             justify-content: space-between;
