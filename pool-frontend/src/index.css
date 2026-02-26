@@ -592,6 +592,14 @@ body {
 .sold-ticket-actions {
   display: flex;
   gap: 12px;
+  position: sticky;
+  bottom: 20px;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px;
+  border-radius: var(--border-radius);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05), var(--shadow-lg);
+  backdrop-filter: blur(8px);
 }
 
 /* ── Gate Check Page ────────────────────────────────────── */

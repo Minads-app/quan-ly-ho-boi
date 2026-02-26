@@ -70,13 +70,13 @@ function AppRoutes() {
 
       {/* Sidebar */}
       <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="sidebar-brand" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '16px 0' }}>
           {bizLogo ? (
-            <img src={bizLogo} alt="Logo" style={{ height: '32px', width: '32px', objectFit: 'contain', borderRadius: '4px' }} />
+            <img src={bizLogo} alt="Logo" style={{ height: '64px', width: 'auto', maxWidth: '80%', objectFit: 'contain', borderRadius: '4px' }} />
           ) : (
-            <span className="brand-icon">🏊</span>
+            <span className="brand-icon" style={{ fontSize: '32px' }}>🏊</span>
           )}
-          <span className="brand-text" style={{ fontSize: bizName.length > 15 ? '16px' : '20px' }}>{bizName}</span>
+          <span className="brand-text" style={{ fontSize: bizName.length > 15 ? '14px' : '16px', textAlign: 'center', lineHeight: 1.3 }}>{bizName}</span>
         </div>
 
         <nav className="sidebar-nav">
