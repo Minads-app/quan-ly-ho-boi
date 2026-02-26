@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { CheckQrResult } from '../types';
@@ -12,49 +12,60 @@ export default function GateCheckPage() {
     const [history, setHistory] = useState<CheckQrResult[]>([]);
     const [showCamera, setShowCamera] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
-    const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+    const scannerRef = useRef<Html5Qrcode | null>(null);
+    const checkingRef = useRef(checking);
+
+    useEffect(() => {
+        checkingRef.current = checking;
+    }, [checking]);
 
     // Re-initialize or destroy scanner when toggle changes
     useEffect(() => {
+        let isMounted = true;
+
         if (showCamera) {
-            scannerRef.current = new Html5QrcodeScanner(
-                "qr-reader",
+            const html5QrCode = new Html5Qrcode("qr-reader", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+            scannerRef.current = html5QrCode;
+
+            html5QrCode.start(
+                { facingMode: "environment" },
                 {
                     fps: 10,
                     qrbox: { width: 250, height: 250 },
                     aspectRatio: 1.0,
-                    supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-                    formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
                 },
-                false
-            );
-
-            scannerRef.current.render(
                 (decodedText) => {
                     // Prevent crazy loops if already checking
-                    if (!checking) {
+                    if (!checkingRef.current && isMounted) {
                         setTicketId(decodedText);
                         // Briefly pause scanner to prevent double scans
                         if (scannerRef.current) {
-                            scannerRef.current.pause(true);
+                            try { scannerRef.current.pause(true); } catch (e) { }
                         }
                     }
                 },
                 (_errorMessage) => {
                     // Ignore background scan noise
                 }
-            );
-        } else {
-            if (scannerRef.current) {
-                scannerRef.current.clear().catch(e => console.error("Failed to clear scanner", e));
-                scannerRef.current = null;
-            }
+            ).catch(err => {
+                console.error("Camera start error:", err);
+            });
         }
 
         return () => {
+            isMounted = false;
             if (scannerRef.current) {
-                scannerRef.current.clear().catch(e => console.error(e));
+                const scanner = scannerRef.current;
                 scannerRef.current = null;
+                try {
+                    scanner.stop().then(() => {
+                        scanner.clear();
+                    }).catch(() => {
+                        try { scanner.clear(); } catch (e) { }
+                    });
+                } catch (e) {
+                    try { scanner.clear(); } catch (e) { }
+                }
             }
         };
     }, [showCamera]);
@@ -153,7 +164,7 @@ export default function GateCheckPage() {
         if (scannerRef.current && showCamera) {
             // Resume camera scanning after processing
             setTimeout(() => {
-                scannerRef.current?.resume();
+                try { scannerRef.current?.resume(); } catch (e) { }
             }, 1500);
         }
     }
