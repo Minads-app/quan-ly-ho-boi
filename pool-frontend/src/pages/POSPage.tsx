@@ -154,9 +154,29 @@ export default function POSPage() {
         const { data } = await supabase
             .from('system_settings')
             .select('value')
+            .eq('key', 'pool_weekly_schedule')
+            .single();
+
+        if (data?.value) {
+            try {
+                const schedule = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+                const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                const today = days[new Date().getDay()];
+                if (schedule[today] && schedule[today].close) {
+                    return schedule[today].close;
+                }
+            } catch (e) {
+                // Ignore parse error
+            }
+        }
+
+        // Fallback
+        const fallback = await supabase
+            .from('system_settings')
+            .select('value')
             .eq('key', 'pool_close_time')
             .single();
-        let val = data?.value ? String(data.value) : '20:00';
+        let val = fallback.data?.value ? String(fallback.data.value) : '20:00';
         return val.replace(/"/g, '');
     }
 
