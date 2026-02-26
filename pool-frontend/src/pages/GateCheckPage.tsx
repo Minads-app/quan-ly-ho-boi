@@ -46,6 +46,17 @@ export default function GateCheckPage() {
             p_scanned_by: profile?.id ?? null
         });
 
+        const speak = (text: string) => {
+            if ('speechSynthesis' in window) {
+                // Cancel any ongoing speech
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'vi-VN';
+                utterance.rate = 1.1; // Slightly faster for gate checking
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
         if (error) {
             const errResult: CheckQrResult = {
                 success: false,
@@ -54,6 +65,7 @@ export default function GateCheckPage() {
             };
             setResult(errResult);
             setHistory(prev => [errResult, ...prev].slice(0, 20));
+            speak('Lỗi hệ thống');
         } else {
             // New RPC returns data.ticket for success
             const resData: any = data;
@@ -74,6 +86,11 @@ export default function GateCheckPage() {
 
             setResult(finalResult);
             setHistory(prev => [finalResult, ...prev].slice(0, 20));
+
+            // Speak the result message
+            if (finalResult.message) {
+                speak(finalResult.message);
+            }
         }
 
         setTicketId('');
