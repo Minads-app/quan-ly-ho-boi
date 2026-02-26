@@ -19,6 +19,7 @@ interface TicketRow {
     remaining_sessions: number | null;
     type_name: string;
     category: string;
+    type_price: number;
     sold_by_name: string | null;
     payment_method: string;
 }
@@ -99,7 +100,7 @@ export default function DashboardPage() {
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
                 valid_from, valid_until, remaining_sessions, payment_method,
-                ticket_types!inner (name, category),
+                ticket_types!inner (name, category, price),
                 profiles:sold_by (full_name)
             `)
             .gte('sold_at', from + 'T00:00:00+07:00')
@@ -130,6 +131,7 @@ export default function DashboardPage() {
                 remaining_sessions: t.remaining_sessions,
                 type_name: t.ticket_types?.name || '',
                 category: t.ticket_types?.category || '',
+                type_price: t.ticket_types?.price || 0,
                 sold_by_name: t.profiles?.full_name || '—',
                 payment_method: t.payment_method || 'CASH'
             }));
@@ -151,7 +153,7 @@ export default function DashboardPage() {
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
                 valid_from, valid_until, remaining_sessions, payment_method,
-                ticket_types!inner (name, category),
+                ticket_types!inner (name, category, price),
                 profiles:sold_by (full_name)
             `)
             .in('ticket_types.category', ['MONTHLY', 'MULTI'])
@@ -171,6 +173,7 @@ export default function DashboardPage() {
             remaining_sessions: t.remaining_sessions,
             type_name: t.ticket_types?.name || '',
             category: t.ticket_types?.category || '',
+            type_price: t.ticket_types?.price || 0,
             sold_by_name: t.profiles?.full_name || '—',
             payment_method: t.payment_method || 'CASH'
         }));
@@ -189,10 +192,10 @@ export default function DashboardPage() {
     }
 
     // --- Computed data ---
-    const dailyTickets = tickets.filter(t => t.category === 'DAILY' && t.price_paid > 0);
-    const multiTickets = tickets.filter(t => t.category === 'MULTI' && t.price_paid > 0);
-    const monthlyTickets = tickets.filter(t => t.category === 'MONTHLY' && t.price_paid > 0);
-    const lessonTickets = tickets.filter(t => t.price_paid === 0);
+    const dailyTickets = tickets.filter(t => t.category === 'DAILY' && t.type_price > 0);
+    const multiTickets = tickets.filter(t => t.category === 'MULTI');
+    const monthlyTickets = tickets.filter(t => t.category === 'MONTHLY');
+    const lessonTickets = tickets.filter(t => t.type_price === 0);
     const totalRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
     const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
     const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0);
@@ -331,7 +334,7 @@ export default function DashboardPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
                     {[{ label: 'Tổng doanh thu', value: fmt(totalRevenue), color: '#10b981' },
                     { label: 'Số vé bán', value: `${tickets.length - lessonTickets.length} vé`, color: '#3b82f6' },
-                    { label: 'Vé học bơi / KM 100%', value: `${lessonTickets.length} vé`, color: '#ec4899' },
+                    { label: 'Khách Học Bơi', value: `${lessonTickets.length} vé`, color: '#ec4899' },
                     { label: 'Tiền mặt', value: fmt(revCash), color: '#64748b' },
                     { label: 'Chuyển khoản', value: fmt(revTransfer), color: '#f59e0b' },
                     { label: 'Thẻ POS', value: fmt(revCard), color: '#8b5cf6' }
