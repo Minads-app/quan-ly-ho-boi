@@ -157,7 +157,7 @@ export default function POSPage() {
             .eq('key', 'pool_close_time')
             .single();
         let val = data?.value ? String(data.value) : '20:00';
-        return val.replace(/^"|"$/g, '');
+        return val.replace(/"/g, '');
     }
 
     async function sellTicket(ticketType: TicketType) {
@@ -196,7 +196,9 @@ export default function POSPage() {
             validFrom = localISOTime.split('T')[0];
 
             const expDate = new Date(today);
-            expDate.setDate(today.getDate() + ticketType.validity_days);
+            // Một vé trong ngày (1 ngày) thì expiration date phải là ngày hôm nay.
+            const daysToAdd = ticketType.validity_days > 0 ? ticketType.validity_days - 1 : 0;
+            expDate.setDate(today.getDate() + daysToAdd);
             const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
             validUntil = localISOExp.split('T')[0];
         }
@@ -442,7 +444,7 @@ export default function POSPage() {
 
           <div class="row"><span class="lbl">Loại vé:</span><span class="val">${info.ticketName}</span></div>
           ${info.sessions !== null ? `<div class="row"><span class="lbl">Số lượt bơi:</span><span class="val">${info.sessions} lượt</span></div>` : '<div class="row"><span class="lbl">Số lượt:</span><span class="val">Không giới hạn</span></div>'}
-          ${info.validFrom ? `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">${info.validFrom} → ${info.validUntil}</span></div>` : ''}
+          ${info.validFrom ? (info.validFrom === info.validUntil ? `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">Trong ngày</span></div>` : `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">${info.validFrom} → ${info.validUntil}</span></div>`) : ''}
 
           <div class="divider"></div>
 
