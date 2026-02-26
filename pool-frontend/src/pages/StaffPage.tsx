@@ -24,6 +24,7 @@ interface Profile {
     role: 'ADMIN' | 'CASHIER' | 'GATE_KEEPER' | 'STAFF';
     created_at: string;
     is_active?: boolean;
+    can_use_camera?: boolean;
 }
 
 export default function StaffPage() {
@@ -111,6 +112,24 @@ export default function StaffPage() {
             alert(`Lỗi khi ${actionName}: ` + error.message);
         } else {
             setStaffList(prev => prev.map(p => p.id === userId ? { ...p, is_active: newStatus } : p));
+        }
+        setUpdatingId(null);
+    }
+
+    async function handleToggleCameraAuth(userId: string, currentStatus: boolean | undefined) {
+        const newStatus = !currentStatus;
+        if (!confirm(`Bạn có muốn ${newStatus ? 'CẤP' : 'HỦY'} quyền dùng Camera điện thoại quét vé của nhân viên này?`)) return;
+
+        setUpdatingId(userId);
+        const { error } = await supabase
+            .from('profiles')
+            .update({ can_use_camera: newStatus })
+            .eq('id', userId);
+
+        if (error) {
+            alert(`Lỗi khi cập nhật quyền Camera: ` + error.message);
+        } else {
+            setStaffList(prev => prev.map(p => p.id === userId ? { ...p, can_use_camera: newStatus } : p));
         }
         setUpdatingId(null);
     }
@@ -252,16 +271,29 @@ export default function StaffPage() {
                                         </select>
                                     </td>
                                     <td>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                            <button
-                                                className={`btn ${staff.is_active === false ? 'btn-primary' : 'btn-danger'}`}
-                                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem', margin: 0 }}
-                                                onClick={() => handleToggleActive(staff.id, staff.is_active)}
-                                                disabled={updatingId === staff.id || staff.id === profile.id}
-                                            >
-                                                {staff.is_active === false ? 'Mở khóa' : 'Vô hiệu hóa'}
-                                            </button>
-                                            {staff.id === profile.id && <span className="text-sm text-slate-400">(Bạn)</span>}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                <button
+                                                    className={`btn ${staff.is_active === false ? 'btn-primary' : 'btn-danger'}`}
+                                                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem', margin: 0, width: '100px' }}
+                                                    onClick={() => handleToggleActive(staff.id, staff.is_active)}
+                                                    disabled={updatingId === staff.id || staff.id === profile.id}
+                                                >
+                                                    {staff.is_active === false ? 'Mở khóa' : 'Vô hiệu hóa'}
+                                                </button>
+                                                {staff.id === profile.id && <span className="text-sm text-slate-400">(Bạn)</span>}
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                <button
+                                                    className={`btn ${staff.can_use_camera ? 'btn-danger' : 'btn-secondary'}`}
+                                                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem', margin: 0, width: '100px' }}
+                                                    onClick={() => handleToggleCameraAuth(staff.id, staff.can_use_camera)}
+                                                    disabled={updatingId === staff.id}
+                                                    title={staff.can_use_camera ? "Thu hồi quyền dùng Camera điện thoại để quét mã" : "Cấp quyền dùng Camera điện thoại quét mã"}
+                                                >
+                                                    {staff.can_use_camera ? 'Cấm Camera' : 'Cấp Camera'}
+                                                </button>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>

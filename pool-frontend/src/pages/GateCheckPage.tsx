@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { CheckQrResult } from '../types';
@@ -9,7 +10,61 @@ export default function GateCheckPage() {
     const [checking, setChecking] = useState(false);
     const [result, setResult] = useState<CheckQrResult | null>(null);
     const [history, setHistory] = useState<CheckQrResult[]>([]);
+    const [showCamera, setShowCamera] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
+    const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+
+    // Re-initialize or destroy scanner when toggle changes
+    useEffect(() => {
+        if (showCamera) {
+            scannerRef.current = new Html5QrcodeScanner(
+                "qr-reader",
+                {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1.0,
+                    supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+                    formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
+                },
+                false
+            );
+
+            scannerRef.current.render(
+                (decodedText) => {
+                    // Prevent crazy loops if already checking
+                    if (!checking) {
+                        setTicketId(decodedText);
+                        // Briefly pause scanner to prevent double scans
+                        if (scannerRef.current) {
+                            scannerRef.current.pause(true);
+                        }
+                    }
+                },
+                (_errorMessage) => {
+                    // Ignore background scan noise
+                }
+            );
+        } else {
+            if (scannerRef.current) {
+                scannerRef.current.clear().catch(e => console.error("Failed to clear scanner", e));
+                scannerRef.current = null;
+            }
+        }
+
+        return () => {
+            if (scannerRef.current) {
+                scannerRef.current.clear().catch(e => console.error(e));
+                scannerRef.current = null;
+            }
+        };
+    }, [showCamera]);
+
+    // Triggers handleCheck when ticketId is scanned from camera
+    useEffect(() => {
+        if (showCamera && ticketId && !checking) {
+            handleCheck();
+        }
+    }, [ticketId]);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -95,6 +150,12 @@ export default function GateCheckPage() {
 
         setTicketId('');
         setChecking(false);
+        if (scannerRef.current && showCamera) {
+            // Resume camera scanning after processing
+            setTimeout(() => {
+                scannerRef.current?.resume();
+            }, 1500);
+        }
     }
 
     function handleKeyDown(e: React.KeyboardEvent) {
@@ -103,10 +164,31 @@ export default function GateCheckPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header">
-                <h1>🔍 Soát Vé</h1>
-                <p>Quét hoặc nhập mã QR trên vé của khách</p>
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                    <h1>🔍 Soát Vé</h1>
+                    <p>Quét hoặc nhập mã QR trên vé của khách</p>
+                </div>
+                {(profile as any)?.can_use_camera === true && (
+                    <button
+                        className={`btn ${showCamera ? 'btn-danger' : 'btn-secondary'}`}
+                        onClick={() => setShowCamera(!showCamera)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                    >
+                        {showCamera ? '❌ Đóng Camera' : '📷 Mở Camera quét nhanh'}
+                    </button>
+                )}
             </div>
+
+            {/* Camera View */}
+            {showCamera && (
+                <div style={{ marginBottom: '24px', background: 'var(--bg-card)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                    <div id="qr-reader" style={{ width: '100%', maxWidth: '500px', margin: '0 auto', overflow: 'hidden', borderRadius: '8px' }}></div>
+                    <p style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                        * Vui lòng cấp quyền sử dụng máy ảnh cho trình duyệt nếu được yêu cầu.
+                    </p>
+                </div>
+            )}
 
             {/* Scanner input */}
             <div className="gate-scanner">
