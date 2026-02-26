@@ -156,7 +156,8 @@ export default function POSPage() {
             .select('value')
             .eq('key', 'pool_close_time')
             .single();
-        return data?.value ? String(data.value) : '20:00';
+        let val = data?.value ? String(data.value) : '20:00';
+        return val.replace(/^"|"$/g, '');
     }
 
     async function sellTicket(ticketType: TicketType) {
@@ -610,17 +611,8 @@ export default function POSPage() {
                             </div>
                             <h2>🏊 VÉ BƠI</h2>
 
-                            {soldTicket.valid_from && soldTicket.valid_until ? (
-                                <>
-                                    <div><strong>Khách hàng:</strong> {soldTicket.customer_name || 'Khách Vãng Lai'}</div>
-                                    <div><strong>Hiệu lực:</strong> {new Date(soldTicket.valid_from).toLocaleDateString('vi-VN')} - {new Date(soldTicket.valid_until).toLocaleDateString('vi-VN')}</div>
-                                </>
-                            ) : (
-                                <>
-                                    <div><strong>Sử dụng trong ngày</strong></div>
-                                    <div><strong>Đóng cửa:</strong> {soldTicket.pool_close_time}</div>
-                                </>
-                            )}
+                            <div><strong>Khách hàng:</strong> {soldTicket.customer_name || 'Khách Vãng Lai'}</div>
+                            <div><strong>Hiệu lực:</strong> Trong ngày</div>
 
                             {soldTicket.remaining_sessions !== undefined && soldTicket.remaining_sessions !== null && (
                                 <div style={{ marginTop: '4px', fontWeight: 'bold', borderTop: '1px dashed #ccc', paddingTop: '4px' }}>
