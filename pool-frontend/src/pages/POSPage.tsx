@@ -38,7 +38,10 @@ export default function POSPage() {
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
     const [loading, setLoading] = useState(true);
     const [selling, setSelling] = useState(false);
-    const [soldTicket, setSoldTicket] = useState<SoldTicket | null>(null);
+    const [soldTickets, setSoldTickets] = useState<SoldTicket[]>([]); // Array of sold tickets
+
+    // Daily tickets quantity mapping
+    const [dailyQuantities, setDailyQuantities] = useState<Record<string, number>>({});
 
     // Modal states for Advanced Tickets (MULTI / MONTHLY)
     const [customerName, setCustomerName] = useState('');
@@ -67,6 +70,7 @@ export default function POSPage() {
         phone: string | null;
         promoId: string | null;
         code: string | null;
+        quantity: number; // New parameter
     } | null>(null);
 
     // Active Tab (Bán Vé | Check-in Thẻ)
@@ -133,7 +137,15 @@ export default function POSPage() {
             .eq('is_active', true)
             .order('category')
             .order('name');
-        setTicketTypes(data ?? []);
+
+        if (data) {
+            setTicketTypes(data);
+            const initialQuantities: Record<string, number> = {};
+            data.filter(t => t.category === 'DAILY').forEach(t => {
+                initialQuantities[t.id] = 1;
+            });
+            setDailyQuantities(initialQuantities);
+        }
         setLoading(false);
     }
 
@@ -240,7 +252,8 @@ export default function POSPage() {
             }
         }
 
-        const payload = {
+        const quantity = pendingTicketData?.quantity || 1;
+        const payloads = Array.from({ length: quantity }).map(() => ({
             ticket_type_id: ticketType.id,
             status: 'UNUSED',
             customer_name: name,
@@ -254,13 +267,12 @@ export default function POSPage() {
             promotion_id: promoId || null,
             card_code: code || null,
             payment_method: paymentMethod
-        };
+        }));
 
         const { data, error } = await supabase
             .from('tickets')
-            .insert(payload)
-            .select()
-            .single();
+            .insert(payloads)
+            .select();
 
         if (error) {
             alert('Lỗi bán vé: ' + error.message);
@@ -270,13 +282,14 @@ export default function POSPage() {
 
         // Only show QR print if daily
         if (ticketType.category === 'DAILY') {
-            setSoldTicket({
-                ...data,
+            const newSoldTickets = data.map((d: any) => ({
+                ...d,
                 type_name: ticketType.name,
                 pool_close_time: closeTime,
-                remaining_sessions: payload.remaining_sessions,
+                remaining_sessions: finalSessions,
                 payment_method: paymentMethod as 'CASH' | 'TRANSFER' | 'CARD'
-            } as SoldTicket);
+            }));
+            setSoldTickets(newSoldTickets);
         } else {
             // Advanced ticket: Print receipt and show success
             printReceipt({
@@ -321,7 +334,8 @@ export default function POSPage() {
             name: customerName || null,
             phone: customerPhone || null,
             promoId: selectedPromoId || null,
-            code: cardCode.trim() || null
+            code: cardCode.trim() || null,
+            quantity: 1
         });
         setSelectedPaymentMethod('CASH');
         setShowPaymentModal(true);
@@ -333,7 +347,8 @@ export default function POSPage() {
             name: null,
             phone: null,
             promoId: null,
-            code: null
+            code: null,
+            quantity: dailyQuantities[ticketType.id] || 1
         });
         setSelectedPaymentMethod('CASH');
         setShowPaymentModal(true);
@@ -367,6 +382,16 @@ export default function POSPage() {
           }
           .ticket-print {
             text-align: center;
+            page-break-after: always;
+            border-bottom: 2px dashed #000;
+            padding-bottom: 24px;
+            margin-bottom: 24px;
+          }
+          .ticket-print:last-child {
+            page-break-after: auto;
+            border-bottom: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
           }
           .ticket-print h2 { font-size: 18px; margin-bottom: 4px; }
           .ticket-print .subtitle { color: #666; font-size: 11px; margin-bottom: 12px; }
@@ -541,7 +566,7 @@ export default function POSPage() {
             speakMessage('Xin mời vào');
 
             // Cập nhật giao diện in vé con
-            setSoldTicket({
+            setSoldTickets([{
                 id: data.new_ticket.id,
                 ticket_type_id: '',
                 status: 'UNUSED',
@@ -560,7 +585,7 @@ export default function POSPage() {
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 payment_method: 'CASH' // check-in vé mồ côi
-            });
+            }]);
             setCheckinCode('');
         }
         setCheckingIn(false);
@@ -596,7 +621,7 @@ export default function POSPage() {
                 onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'; }}>
                 {/* Top accent */}
                 <div style={{ height: '4px', background: `linear-gradient(90deg, ${colors[0]}, ${colors[1]})` }} />
-                <div style={{ padding: '18px 20px' }}>
+                <div style={{ padding: '18px 20px', paddingBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                         <span style={{ fontSize: '28px' }}>{icons}</span>
                         <div>
@@ -607,7 +632,7 @@ export default function POSPage() {
                     <div style={{ fontSize: '26px', fontWeight: 800, background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
                         {t.price.toLocaleString('vi-VN')} đ
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: isDaily ? '12px' : '0' }}>
                         <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
                             {t.validity_days ? `⏱ ${t.validity_days} ngày` : '⏱ Trong ngày'}
                         </span>
@@ -615,71 +640,99 @@ export default function POSPage() {
                             {t.session_count ? `🏊 ${t.session_count} lượt` : '🏊 Không giới hạn'}
                         </span>
                     </div>
+
+                    {isDaily && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-hover)', borderRadius: '8px', padding: '4px', marginTop: '12px' }} onClick={e => e.stopPropagation()}>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, padding: '4px 0', fontSize: '18px', fontWeight: 'bold' }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDailyQuantities(prev => ({
+                                        ...prev,
+                                        [t.id]: Math.max(1, (prev[t.id] || 1) - 1)
+                                    }));
+                                }}>−</button>
+                            <div style={{ fontSize: '16px', fontWeight: 600, width: '40px', textAlign: 'center' }}>
+                                {dailyQuantities[t.id] || 1}
+                            </div>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, padding: '4px 0', fontSize: '18px', fontWeight: 'bold' }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDailyQuantities(prev => ({
+                                        ...prev,
+                                        [t.id]: Math.min(50, (prev[t.id] || 1) + 1)
+                                    }));
+                                }}>+</button>
+                        </div>
+                    )}
                 </div>
             </button>
         );
     };
 
     // Show sold ticket with QR
-    if (soldTicket) {
+    if (soldTickets.length > 0) {
         return (
             <div className="page-container">
                 <div className="sold-ticket-view">
                     <div className="sold-ticket-card" ref={printRef}>
-                        <div className="ticket-print">
-                            <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-                                {bizInfo.business_logo && <img src={bizInfo.business_logo} alt="Logo" style={{ maxHeight: '40px', marginBottom: '4px' }} />}
-                                <div className="subtitle" style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>{bizInfo.business_name || 'Hệ Thống Vé Bơi'}</div>
-                            </div>
-                            <h2>🏊 VÉ BƠI</h2>
-
-                            <div><strong>Khách hàng:</strong> {soldTicket.customer_name || 'Khách Vãng Lai'}</div>
-                            <div><strong>Hiệu lực:</strong> Trong ngày</div>
-
-                            {soldTicket.remaining_sessions !== undefined && soldTicket.remaining_sessions !== null && (
-                                <div style={{ marginTop: '4px', fontWeight: 'bold', borderTop: '1px dashed #ccc', paddingTop: '4px' }}>
-                                    Số lượt tổng cộng: {soldTicket.remaining_sessions} lượt
+                        {soldTickets.map((ticket, index) => (
+                            <div className="ticket-print" key={ticket.id}>
+                                <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+                                    {bizInfo.business_logo && <img src={bizInfo.business_logo} alt="Logo" style={{ maxHeight: '40px', marginBottom: '4px' }} />}
+                                    <div className="subtitle" style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>{bizInfo.business_name || 'Hệ Thống Vé Bơi'}</div>
                                 </div>
-                            )}<div className="info-row">
-                                <span className="label">Giá</span>
-                                <span className="value">{formatPrice(soldTicket.price_paid)}</span>
-                            </div>
-                            <div className="info-row">
-                                <span className="label">Bán lúc</span>
-                                <span className="value">{formatTime(soldTicket.sold_at)}</span>
-                            </div>
-                            <div className="info-row">
-                                <span className="label">Hết hạn</span>
-                                <span className="value">Hôm nay, {soldTicket.pool_close_time}</span>
-                            </div>
-                            {soldTicket.customer_name && (
+                                <h2>🏊 VÉ BƠI</h2>
+
+                                <div><strong>Khách hàng:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                <div><strong>Hiệu lực:</strong> {ticket.valid_from === ticket.valid_until ? 'Trong ngày' : `${ticket.valid_from} → ${ticket.valid_until}`}</div>
+
+                                {ticket.remaining_sessions !== undefined && ticket.remaining_sessions !== null && (
+                                    <div style={{ marginTop: '4px', fontWeight: 'bold', borderTop: '1px dashed #ccc', paddingTop: '4px' }}>
+                                        Số lượt tổng cộng: {ticket.remaining_sessions} lượt
+                                    </div>
+                                )}
                                 <div className="info-row">
-                                    <span className="label">Khách</span>
-                                    <span className="value">{soldTicket.customer_name}</span>
+                                    <span className="label">Giá</span>
+                                    <span className="value">{formatPrice(ticket.price_paid)}</span>
                                 </div>
-                            )}
+                                <div className="info-row">
+                                    <span className="label">Bán lúc</span>
+                                    <span className="value">{formatTime(ticket.sold_at)}</span>
+                                </div>
+                                <div className="info-row">
+                                    <span className="label">Hết hạn</span>
+                                    <span className="value">Hôm nay, {ticket.pool_close_time}</span>
+                                </div>
+                                {ticket.customer_name && (
+                                    <div className="info-row">
+                                        <span className="label">Khách</span>
+                                        <span className="value">{ticket.customer_name}</span>
+                                    </div>
+                                )}
 
-                            <div className="qr-wrapper">
-                                <QRCodeSVG
-                                    value={soldTicket.id}
-                                    size={180}
-                                    level="H"
-                                    includeMargin
-                                />
+                                <div className="qr-wrapper">
+                                    <QRCodeSVG
+                                        value={ticket.id}
+                                        size={180}
+                                        level="H"
+                                        includeMargin
+                                    />
+                                </div>
+
+                                <p className="footer">
+                                    Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
+                                    Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
+                                    {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
+                                </p>
                             </div>
-
-                            <p className="footer">
-                                Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
-                                Mã vé: {soldTicket.id.substring(0, 8).toUpperCase()}
-                            </p>
-                        </div>
+                        ))}
                     </div>
 
                     <div className="sold-ticket-actions">
                         <button className="btn btn-primary" onClick={handlePrint}>
                             🖨️ In Vé
                         </button>
-                        <button className="btn btn-secondary" onClick={() => setSoldTicket(null)}>
+                        <button className="btn btn-secondary" onClick={() => setSoldTickets([])}>
                             ← Bán vé tiếp
                         </button>
                     </div>
