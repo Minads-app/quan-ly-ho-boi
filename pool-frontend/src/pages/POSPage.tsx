@@ -357,7 +357,7 @@ export default function POSPage() {
     function handlePrint() {
         if (!printRef.current) return;
         const printContent = printRef.current.innerHTML;
-        const win = window.open('', '_blank', 'width=400,height=700,scrollbars=yes');
+        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
         if (!win) return;
         win.document.write(`
       <!DOCTYPE html>

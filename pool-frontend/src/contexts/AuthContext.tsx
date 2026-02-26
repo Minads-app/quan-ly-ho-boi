@@ -49,13 +49,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .select('*')
             .eq('id', userId)
             .single();
-        setProfile(data);
+
+        if (data && data.is_active === false) {
+            await supabase.auth.signOut();
+            setProfile(null);
+            setUser(null);
+        } else {
+            setProfile(data);
+        }
         setLoading(false);
     }
 
     async function signIn(email: string, password: string): Promise<string | null> {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        return error ? error.message : null;
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) return error.message;
+
+        if (data.user) {
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('is_active')
+                .eq('id', data.user.id)
+                .single();
+
+            if (profileData && profileData.is_active === false) {
+                await supabase.auth.signOut();
+                return 'Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ Quản trị viên.';
+            }
+        }
+
+        return null;
     }
 
     async function signOut() {

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
-type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'MY_SALES';
+type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
 interface TicketRow {
@@ -38,6 +38,8 @@ export default function DashboardPage() {
     const [bizInfo, setBizInfo] = useState<{ name: string; address: string; phone: string; logo: string }>({
         name: 'Hệ Thống Vé Bơi', address: '', phone: '', logo: ''
     });
+
+    const [dailyPassFilter, setDailyPassFilter] = useState<'ALL' | 'UNUSED' | 'VERIFIED'>('ALL');
 
     // Compute date range
     function getDateBounds(): { from: string; to: string } {
@@ -453,6 +455,99 @@ export default function DashboardPage() {
         );
     }
 
+    function renderDailyPassesTab() {
+        const { from, to } = getDateBounds();
+
+        let filteredTickets = dailyTickets;
+        if (dailyPassFilter === 'UNUSED') filteredTickets = filteredTickets.filter(t => t.status === 'UNUSED');
+        if (dailyPassFilter === 'VERIFIED') filteredTickets = filteredTickets.filter(t => t.status !== 'UNUSED');
+
+        const totalSold = dailyTickets.length;
+        const totalUsed = dailyTickets.filter(t => t.status !== 'UNUSED').length;
+        const totalUnused = dailyTickets.filter(t => t.status === 'UNUSED').length;
+
+        const tableHtml = `<table><thead><tr><th>STT</th><th>Mã vé</th><th>Loại vé</th><th>Trạng thái</th><th>Giá bán</th><th>Người bán</th><th>Giờ bán</th></tr></thead><tbody>
+            ${filteredTickets.map((t, i) => `<tr><td>${i + 1}</td><td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${t.id.substring(0, 8).toUpperCase()}</code></td><td>${t.type_name}</td><td>${t.status === 'UNUSED' ? 'Chưa quét' : 'Đã quét'}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`).join('')}
+            <tr class="total-row"><td colspan="4">TỔNG CỘNG (${filteredTickets.length} vé)</td><td style="text-align:right">${fmt(filteredTickets.reduce((s, t) => s + t.price_paid, 0))}</td><td></td><td></td></tr></tbody></table>`;
+
+        return (
+            <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+                    {renderDateFilter()}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Trạng thái:</span>
+                        <select className="input" style={{ width: '140px', padding: '6px 12px', fontSize: '13px' }} value={dailyPassFilter} onChange={(e: any) => setDailyPassFilter(e.target.value)}>
+                            <option value="ALL">Tất cả vé</option>
+                            <option value="UNUSED">Chưa quét cổng</option>
+                            <option value="VERIFIED">Đã quét cổng</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '140px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
+                        <div style={{ fontSize: '22px', fontWeight: 700, color: '#3b82f6' }}>{totalSold}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Tổng vé bán ra</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '140px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '12px', padding: '14px 16px' }}>
+                        <div style={{ fontSize: '22px', fontWeight: 700, color: '#10b981' }}>{totalUsed}</div>
+                        <div style={{ fontSize: '12px', color: '#047857' }}>Khách đã vào cổng</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '140px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '12px', padding: '14px 16px' }}>
+                        <div style={{ fontSize: '22px', fontWeight: 700, color: '#ef4444' }}>{totalUnused}</div>
+                        <div style={{ fontSize: '12px', color: '#b91c1c' }}>Khách chưa đến</div>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                    <button className="btn btn-secondary" onClick={() => handlePrintReport(`Danh sách Vé Lẻ (${dailyPassFilter === 'ALL' ? 'Tất cả' : dailyPassFilter === 'UNUSED' ? 'Chưa quét' : 'Đã quét'}) — ${from} → ${to}`, tableHtml)}>🖨️ In A4</button>
+                    <button className="btn btn-secondary" onClick={() => exportExcel(`ve_le_${from}_${to}`, ['STT', 'Mã vé', 'Loại vé', 'Trạng thái', 'H/T Thanh toán', 'Giá bán', 'Người bán', 'Thời gian'],
+                        filteredTickets.map((t, i) => [
+                            String(i + 1), t.id.substring(0, 8).toUpperCase(), t.type_name,
+                            t.status === 'UNUSED' ? 'Chưa quét' : 'Đã quét',
+                            t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
+                            String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at)
+                        ])
+                    )}>📊 Xuất Excel</button>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                    <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr>
+                                <th style={thS}>#</th><th style={thS}>Mã vé</th><th style={thS}>Loại vé</th><th style={thS}>Trạng thái</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Giờ bán</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filteredTickets.length === 0 ? (
+                                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có khách ở mục này.</td></tr>
+                            ) : filteredTickets.map((t, i) => (
+                                <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                    <td style={tdS}>{i + 1}</td>
+                                    <td style={tdS}><code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.id.substring(0, 8).toUpperCase()}</code></td>
+                                    <td style={tdS}>{t.type_name}</td>
+                                    <td style={tdS}>
+                                        <span style={{
+                                            background: t.status === 'UNUSED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                            color: t.status === 'UNUSED' ? '#ef4444' : '#10b981',
+                                            padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600
+                                        }}>
+                                            {t.status === 'UNUSED' ? '🔴 Chưa dùng' : '🟢 Đã quét cổng'}
+                                        </span>
+                                    </td>
+                                    <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                    <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
+                                    <td style={tdS}>{t.sold_by_name}</td>
+                                    <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </>
+        );
+    }
+
     function renderMySalesTab() {
         const { from, to } = getDateBounds();
         const myRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
@@ -548,8 +643,9 @@ export default function DashboardPage() {
     const tabs: { key: ReportTab; label: string; icon: string; adminOnly?: boolean }[] = [
         { key: 'REVENUE', label: 'Doanh thu', icon: '💰', adminOnly: true },
         { key: 'SESSIONS', label: 'Lượt khách', icon: '🏊', adminOnly: true },
+        { key: 'DAILY_PASSES', label: 'Vé lẻ hôm nay', icon: '🎫', adminOnly: true },
         { key: 'WARNINGS', label: 'Cảnh báo', icon: '⚠️', adminOnly: true },
-        { key: 'MY_SALES', label: 'Vé đã bán', icon: '🎫' },
+        { key: 'MY_SALES', label: 'Vé đã bán', icon: '🛒' },
     ];
 
     return (
@@ -557,7 +653,7 @@ export default function DashboardPage() {
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                     <h1>📈 Báo Cáo</h1>
-                    <p>Xem doanh thu, lượt khách và cảnh báo</p>
+                    <p>Xem doanh thu, danh sách vé và cảnh báo</p>
                 </div>
                 <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '12px', flexWrap: 'wrap' }}>
                     {tabs.filter(t => !t.adminOnly || isAdmin).map(t => (
@@ -575,6 +671,7 @@ export default function DashboardPage() {
 
             {!loading && activeTab === 'REVENUE' && renderRevenueTab()}
             {!loading && activeTab === 'SESSIONS' && renderSessionsTab()}
+            {!loading && activeTab === 'DAILY_PASSES' && renderDailyPassesTab()}
             {!loading && activeTab === 'WARNINGS' && renderWarningsTab()}
             {!loading && activeTab === 'MY_SALES' && renderMySalesTab()}
         </div>

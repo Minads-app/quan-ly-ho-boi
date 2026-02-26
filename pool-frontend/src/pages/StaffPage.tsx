@@ -23,6 +23,7 @@ interface Profile {
     full_name: string;
     role: 'ADMIN' | 'CASHIER' | 'GATE_KEEPER' | 'STAFF';
     created_at: string;
+    is_active?: boolean;
 }
 
 export default function StaffPage() {
@@ -77,6 +78,43 @@ export default function StaffPage() {
         setUpdatingId(null);
     }
 
+    async function handleChangeName(userId: string, currentName: string) {
+        const newName = prompt('Nhập họ tên mới cho nhân sự này:', currentName);
+        if (!newName || newName.trim() === '' || newName === currentName) return;
+
+        setUpdatingId(userId);
+        const { error } = await supabase
+            .from('profiles')
+            .update({ full_name: newName.trim() })
+            .eq('id', userId);
+
+        if (error) {
+            alert('Lỗi cập nhật tên: ' + error.message);
+        } else {
+            setStaffList(prev => prev.map(p => p.id === userId ? { ...p, full_name: newName.trim() } : p));
+        }
+        setUpdatingId(null);
+    }
+
+    async function handleToggleActive(userId: string, currentStatus: boolean | undefined) {
+        const newStatus = currentStatus === false ? true : false;
+        const actionName = newStatus ? 'mở khóa' : 'vô hiệu hóa';
+        if (!confirm(`Bạn có chắc chắn muốn ${actionName} tài khoản này?`)) return;
+
+        setUpdatingId(userId);
+        const { error } = await supabase
+            .from('profiles')
+            .update({ is_active: newStatus })
+            .eq('id', userId);
+
+        if (error) {
+            alert(`Lỗi khi ${actionName}: ` + error.message);
+        } else {
+            setStaffList(prev => prev.map(p => p.id === userId ? { ...p, is_active: newStatus } : p));
+        }
+        setUpdatingId(null);
+    }
+
     async function handleCreateStaff(e: React.FormEvent) {
         e.preventDefault();
         setCreateError('');
@@ -102,14 +140,17 @@ export default function StaffPage() {
             await new Promise(resolve => setTimeout(resolve, 800));
 
             // 2. The trigger created a 'STAFF' role profile. Now we update it to the selected role using the main Admin client.
+            const updatePayload: any = { full_name: newFullName };
             if (newRole !== 'STAFF') {
-                const { error: updateError } = await supabase
-                    .from('profiles')
-                    .update({ role: newRole })
-                    .eq('id', authData.user.id);
-
-                if (updateError) throw new Error('Cập nhật quyền thất bại: ' + updateError.message);
+                updatePayload.role = newRole;
             }
+
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update(updatePayload)
+                .eq('id', authData.user.id);
+
+            if (updateError) throw new Error('Cập nhật quyền thất bại: ' + updateError.message);
 
             alert('Tạo tài khoản thành công!');
             setShowModal(false);
@@ -160,8 +201,9 @@ export default function StaffPage() {
                     <table className="data-table">
                         <thead>
                             <tr>
-                                <th>Email / Họ tên</th>
+                                <th>Mã NV / Họ tên</th>
                                 <th>Ngày đăng ký</th>
+                                <th>Trạng thái</th>
                                 <th>Vai trò (Phân quyền)</th>
                                 <th>Thao tác</th>
                             </tr>
@@ -170,18 +212,32 @@ export default function StaffPage() {
                             {staffList.map(staff => (
                                 <tr key={staff.id}>
                                     <td>
-                                        <strong>{staff.full_name || 'Chưa nhập tên'}</strong>
-                                        <div className="text-sm text-slate-400">{staff.id.substring(0, 8)}...</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <strong>{staff.full_name || 'Chưa nhập tên'}</strong>
+                                            <button
+                                                className="btn btn-ghost"
+                                                style={{ padding: '2px 6px', fontSize: '10px', minHeight: 0, height: 'auto' }}
+                                                onClick={() => handleChangeName(staff.id, staff.full_name)}
+                                                title="Sửa báo danh"
+                                            >
+                                                ✏️
+                                            </button>
+                                        </div>
+                                        <div className="text-sm text-slate-400">ID: {staff.id.substring(0, 8)}</div>
                                     </td>
                                     <td>{new Date(staff.created_at).toLocaleDateString('vi-VN')}</td>
                                     <td>
-                                        <span className={`badge ${staff.role === 'ADMIN' ? 'badge-error' : staff.role === 'CASHIER' ? 'badge-success' : staff.role === 'GATE_KEEPER' ? 'badge-warning' : ''}`}>
+                                        <span className={`badge ${staff.is_active === false ? 'badge-error' : 'badge-success'}`}>
+                                            {staff.is_active === false ? 'Đã khóa' : 'Đang hoạt động'}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span className={`badge ${staff.role === 'ADMIN' ? 'badge-error' : staff.role === 'CASHIER' ? 'badge-success' : staff.role === 'GATE_KEEPER' ? 'badge-warning' : ''}`} style={{ marginBottom: '4px', display: 'inline-block' }}>
                                             {staff.role === 'ADMIN' ? 'Quản trị viên' :
                                                 staff.role === 'CASHIER' ? 'NV Bán vé' :
                                                     staff.role === 'GATE_KEEPER' ? 'NV Soát vé' : 'Nhân viên mới'}
                                         </span>
-                                    </td>
-                                    <td>
+                                        <br />
                                         <select
                                             className="input"
                                             style={{ width: '150px', padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
@@ -190,11 +246,23 @@ export default function StaffPage() {
                                             disabled={updatingId === staff.id || staff.id === profile.id}
                                         >
                                             <option value="STAFF">Chưa phân quyền</option>
-                                            <option value="CASHIER">NV Bán vé (Chỉ xem nút Bán Vé)</option>
-                                            <option value="GATE_KEEPER">NV Soát vé (Chỉ xem nút Soát Vé)</option>
-                                            <option value="ADMIN">Quản trị viên (Toàn quyền)</option>
+                                            <option value="CASHIER">NV Bán vé</option>
+                                            <option value="GATE_KEEPER">NV Soát vé</option>
+                                            <option value="ADMIN">Quản trị viên</option>
                                         </select>
-                                        {staff.id === profile.id && <span className="text-sm text-slate-400 ml-2">(Bạn)</span>}
+                                    </td>
+                                    <td>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                            <button
+                                                className={`btn ${staff.is_active === false ? 'btn-primary' : 'btn-danger'}`}
+                                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem', margin: 0 }}
+                                                onClick={() => handleToggleActive(staff.id, staff.is_active)}
+                                                disabled={updatingId === staff.id || staff.id === profile.id}
+                                            >
+                                                {staff.is_active === false ? 'Mở khóa' : 'Vô hiệu hóa'}
+                                            </button>
+                                            {staff.id === profile.id && <span className="text-sm text-slate-400">(Bạn)</span>}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
