@@ -924,6 +924,7 @@ body {
   z-index: 100;
   animation: fadeIn 0.2s ease;
   backdrop-filter: blur(4px);
+  padding: 20px;
 }
 
 .modal-card {
@@ -933,6 +934,8 @@ body {
   padding: 28px;
   width: 90%;
   max-width: 460px;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: var(--shadow-lg);
   animation: slideUp 0.3s ease;
 }

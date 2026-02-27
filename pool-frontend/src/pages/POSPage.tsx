@@ -11,6 +11,8 @@ interface SoldTicket extends Ticket {
     customer_phone: string | null;
     sold_by: string | null;
     payment_method: 'CASH' | 'TRANSFER' | 'CARD';
+    pass_category?: string | null;
+    pass_remaining_sessions?: number | null;
 }
 
 interface Promotion {
@@ -20,7 +22,9 @@ interface Promotion {
     value: number;
     valid_from: string | null;
     valid_until: string | null;
+    is_active: boolean;
     applicable_ticket_types: string[] | null;
+    applicable_lesson_types: string[] | null;
 }
 
 interface BusinessInfo {
@@ -52,7 +56,7 @@ export default function POSPage() {
     // New/Existing customer toggle
     const [customerMode, setCustomerMode] = useState<'NEW' | 'EXISTING'>('NEW');
     const [custSearchTerm, setCustSearchTerm] = useState('');
-    const [custSearchResults, setCustSearchResults] = useState<{ name: string, phone: string, card_code: string }[]>([]);
+    const [custSearchResults, setCustSearchResults] = useState<{ name: string, phone: string, card_code: string, birth_year?: number | null }[]>([]);
     const [searchingCust, setSearchingCust] = useState(false);
 
     // Promotions
@@ -80,6 +84,20 @@ export default function POSPage() {
     const [checkingIn, setCheckingIn] = useState(false);
     const [checkinError, setCheckinError] = useState('');
     const scannerInputRef = useRef<HTMLInputElement>(null);
+
+    // Private lesson (1:1 / 1:2) registration fields
+    const [privateSessions, setPrivateSessions] = useState<number | ''>(10);
+    const [privateDurationVal, setPrivateDurationVal] = useState<number | ''>('');
+    const [privateDurationUnit, setPrivateDurationUnit] = useState<'months' | 'days'>('months');
+    const [privateUnlimited, setPrivateUnlimited] = useState(true);
+    const [privateBirthYear, setPrivateBirthYear] = useState<number | ''>('');
+    const [customerName2, setCustomerName2] = useState('');
+    const [privateBirthYear2, setPrivateBirthYear2] = useState<number | ''>('');
+
+    // Multi-package selection state
+    const [showPackageSelectModal, setShowPackageSelectModal] = useState(false);
+    const [availablePackages, setAvailablePackages] = useState<any[]>([]);
+    const [pendingCheckinCode, setPendingCheckinCode] = useState('');
 
     useEffect(() => {
         fetchTicketTypes();
@@ -203,6 +221,14 @@ export default function POSPage() {
         setCustomerMode('NEW');
         setCustSearchTerm('');
         setCustSearchResults([]);
+        // Reset private lesson fields
+        setPrivateSessions(10);
+        setPrivateDurationVal('');
+        setPrivateDurationUnit('months');
+        setPrivateUnlimited(true);
+        setPrivateBirthYear('');
+        setCustomerName2('');
+        setPrivateBirthYear2('');
     }
 
     async function doSellTicket(
@@ -211,7 +237,9 @@ export default function POSPage() {
         phone: string | null,
         promoId: string | null,
         code: string | null,
-        paymentMethod: 'CASH' | 'TRANSFER' | 'CARD'
+        paymentMethod: 'CASH' | 'TRANSFER' | 'CARD',
+        name2?: string | null,
+        birthYear2?: number | null
     ) {
         setSelling(true);
         const closeTime = await getPoolCloseTime();
@@ -220,24 +248,74 @@ export default function POSPage() {
         let validUntil = null;
         let validFrom = null;
 
-        if (ticketType.validity_days) {
-            const today = new Date();
-            // Lấy Local Date (YYYY-MM-DD) thay vì UTC
-            const tzOffset = today.getTimezoneOffset() * 60000; // offset in milliseconds
-            const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
-            validFrom = localISOTime.split('T')[0];
+        if (ticketType.category === 'DAILY') {
+            // Daily tickets: set valid_from and valid_until immediately
+            if (ticketType.validity_days) {
+                const today = new Date();
+                const tzOffset = today.getTimezoneOffset() * 60000;
+                const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
+                validFrom = localISOTime.split('T')[0];
 
-            const expDate = new Date(today);
-            // Một vé trong ngày (1 ngày) thì expiration date phải là ngày hôm nay.
-            const daysToAdd = ticketType.validity_days > 0 ? ticketType.validity_days - 1 : 0;
-            expDate.setDate(today.getDate() + daysToAdd);
-            const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
-            validUntil = localISOExp.split('T')[0];
+                const expDate = new Date(today);
+                const daysToAdd = ticketType.validity_days > 0 ? ticketType.validity_days - 1 : 0;
+                expDate.setDate(today.getDate() + daysToAdd);
+                const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
+                validUntil = localISOExp.split('T')[0];
+            }
+        } else {
+            // MULTI / MONTHLY / LESSON: Deferred activation
+            // valid_from = NULL, valid_until = NULL → sẽ được kích hoạt khi check-in lần đầu
+            validFrom = null;
+            validUntil = null;
+
+            // For private lessons with specific duration entered by staff
+            const isPrivateLesson = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
+            if (isPrivateLesson && !privateUnlimited && privateDurationVal) {
+                // Store duration info on the ticket_type temporarily — but actually we need
+                // to pass it directly since the ticket type doesn't have this info for private lessons.
+                // The deferred activation in checkin function will use the ticket_type's duration_unit/duration_months/validity_days.
+                // For private lessons, we need to set valid_from and valid_until at sell time if they have a custom duration.
+                // Actually, since deferred activation calculates valid_until from ticket_type fields,
+                // and for private lessons those are null, we just set the dates here directly.
+                const today = new Date();
+                const tzOffset = today.getTimezoneOffset() * 60000;
+                const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
+                validFrom = localISOTime.split('T')[0];
+                if (privateDurationUnit === 'months') {
+                    const expDate = new Date(today);
+                    expDate.setDate(today.getDate() + Math.round(Number(privateDurationVal) * 30));
+                    const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
+                    validUntil = localISOExp.split('T')[0];
+                } else {
+                    const expDate = new Date(today);
+                    expDate.setDate(today.getDate() + Number(privateDurationVal));
+                    const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
+                    validUntil = localISOExp.split('T')[0];
+                }
+            }
         }
 
         // Calculate Promo impacts
         let finalPrice = ticketType.price;
         let finalSessions = ticketType.session_count || null;
+
+        // For private lessons (1:1 / 1:2): price = unit price × sessions entered by staff
+        const isPrivateLesson = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
+        if (isPrivateLesson && privateSessions) {
+            finalSessions = Number(privateSessions);
+
+            // Calculate age-based price if tiers exist
+            let unitPrice = ticketType.price;
+            if (ticketType.age_price_tiers && ticketType.age_price_tiers.length > 0 && privateBirthYear) {
+                const currentYear = new Date().getFullYear();
+                const age = currentYear - Number(privateBirthYear);
+                const matchingTier = ticketType.age_price_tiers.find(tier => age >= tier.minAge && age <= tier.maxAge);
+                if (matchingTier) {
+                    unitPrice = matchingTier.price;
+                }
+            }
+            finalPrice = unitPrice * finalSessions;
+        }
 
         if (promoId) {
             const promo = promotions.find(p => p.id === promoId);
@@ -266,7 +344,10 @@ export default function POSPage() {
             total_sessions: finalSessions,
             promotion_id: promoId || null,
             card_code: code || null,
-            payment_method: paymentMethod
+            payment_method: paymentMethod,
+            customer_birth_year: (isPrivateLesson && privateBirthYear) ? Number(privateBirthYear) : null,
+            customer_name_2: (isPrivateLesson && name2) ? name2 : null,
+            customer_birth_year_2: (isPrivateLesson && birthYear2) ? Number(birthYear2) : null
         }));
 
         const { data, error } = await supabase
@@ -291,7 +372,8 @@ export default function POSPage() {
             }));
             setSoldTickets(newSoldTickets);
         } else {
-            // Advanced ticket: Print receipt and show success
+            // For LESSON/MULTI/MONTHLY: show note about deferred activation
+            const isDeferred = !validFrom;
             printReceipt({
                 ticketName: ticketType.name,
                 customerName: name || 'Khách hàng',
@@ -300,11 +382,14 @@ export default function POSPage() {
                 pricePaid: finalPrice,
                 originalPrice: ticketType.price,
                 sessions: finalSessions,
-                validFrom: validFrom,
-                validUntil: validUntil,
+                validFrom: isDeferred ? null : validFrom,
+                validUntil: isDeferred ? null : validUntil,
                 soldAt: new Date().toLocaleString('vi-VN'),
                 promoName: promoId ? promotions.find(p => p.id === promoId)?.name || null : null,
-                paymentMethod: paymentMethod
+                paymentMethod: paymentMethod,
+                isDeferred: isDeferred,
+                lessonClassType: (ticketType as any).lesson_class_type || null,
+                customerBirthYear: (isPrivateLesson && privateBirthYear) ? Number(privateBirthYear) : null
             });
             alert('✅ Thu tiền và lưu thẻ thành công!\nPhiếu thu đang được in...');
         }
@@ -328,6 +413,48 @@ export default function POSPage() {
             return;
         }
 
+        // Validate age for 1:1 and 1:2 private lessons
+        const isPrivateLesson = selectedAdvancedType.category === 'LESSON' &&
+            ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO');
+
+        if (isPrivateLesson) {
+            if (!privateBirthYear) {
+                alert('Vui lòng nhập năm sinh học viên' + ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? ' 1!' : '!'));
+                return;
+            }
+
+            if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
+                if (!customerName2.trim()) {
+                    alert('Vui lòng nhập tên học viên 2!');
+                    return;
+                }
+                if (!privateBirthYear2) {
+                    alert('Vui lòng nhập năm sinh học viên 2!');
+                    return;
+                }
+            }
+
+            if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                const currentYear = new Date().getFullYear();
+                const age1 = currentYear - Number(privateBirthYear);
+                const isAge1Valid = selectedAdvancedType.age_price_tiers.some(tier => age1 >= tier.minAge && age1 <= tier.maxAge);
+
+                if (!isAge1Valid) {
+                    alert('Học viên 1 không thỏa điều kiện tuổi học bơi');
+                    return;
+                }
+
+                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
+                    const age2 = currentYear - Number(privateBirthYear2);
+                    const isAge2Valid = selectedAdvancedType.age_price_tiers.some(tier => age2 >= tier.minAge && age2 <= tier.maxAge);
+                    if (!isAge2Valid) {
+                        alert('Học viên 2 không thỏa điều kiện tuổi học bơi');
+                        return;
+                    }
+                }
+            }
+        }
+
         // Prepare data and show payment modal instead of selling directly
         setPendingTicketData({
             ticketType: selectedAdvancedType,
@@ -335,8 +462,10 @@ export default function POSPage() {
             phone: customerPhone || null,
             promoId: selectedPromoId || null,
             code: cardCode.trim() || null,
-            quantity: 1
-        });
+            quantity: 1,
+            name2: (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? customerName2 : null,
+            birthYear2: (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? Number(privateBirthYear2) : null
+        } as any);
         setSelectedPaymentMethod('CASH');
         setShowPaymentModal(true);
     }
@@ -442,6 +571,9 @@ export default function POSPage() {
         soldAt: string;
         promoName: string | null;
         paymentMethod: 'CASH' | 'TRANSFER' | 'CARD';
+        isDeferred?: boolean;
+        lessonClassType?: string | null;
+        customerBirthYear?: number | null;
     }
 
     function printReceipt(info: ReceiptInfo) {
@@ -489,13 +621,15 @@ export default function POSPage() {
 
           <div class="row"><span class="lbl">Khách hàng:</span><span class="val">${info.customerName}</span></div>
           ${info.customerPhone ? `<div class="row"><span class="lbl">SĐT:</span><span class="val">${info.customerPhone}</span></div>` : ''}
+          ${info.customerBirthYear ? `<div class="row"><span class="lbl">Năm sinh:</span><span class="val">${info.customerBirthYear} (${new Date().getFullYear() - info.customerBirthYear} tuổi)</span></div>` : ''}
           ${info.cardCode ? `<div class="row"><span class="lbl">Mã thẻ:</span><span class="val">${info.cardCode}</span></div>` : ''}
 
           <div class="divider"></div>
 
           <div class="row"><span class="lbl">Loại vé:</span><span class="val">${info.ticketName}</span></div>
           ${info.sessions !== null ? `<div class="row"><span class="lbl">Số lượt bơi:</span><span class="val">${info.sessions} lượt</span></div>` : '<div class="row"><span class="lbl">Số lượt:</span><span class="val">Không giới hạn</span></div>'}
-          ${info.validFrom ? (info.validFrom === info.validUntil ? `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">Trong ngày</span></div>` : `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">${info.validFrom} → ${info.validUntil}</span></div>`) : ''}
+          ${info.isDeferred ? '<div class="row"><span class="lbl">Hiệu lực:</span><span class="val" style="color:#f59e0b;">Kích hoạt khi check-in lần đầu</span></div>' : (info.validFrom ? (info.validFrom === info.validUntil ? `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">Trong ngày</span></div>` : `<div class="row"><span class="lbl">Hiệu lực:</span><span class="val">${info.validFrom} → ${info.validUntil}</span></div>`) : '')}
+          ${info.lessonClassType ? `<div class="row"><span class="lbl">Loại lớp:</span><span class="val">${info.lessonClassType === 'GROUP' ? 'Lớp nhóm' : info.lessonClassType === 'ONE_ON_ONE' ? '1 kèm 1' : '1 kèm 2'}</span></div>` : ''}
 
           <div class="divider"></div>
 
@@ -543,57 +677,119 @@ export default function POSPage() {
     }
 
     // --- CHECK IN LOGIC ---
+    async function doCheckin(passId: string, confirmNewPackage: boolean = false, selectedTicketId?: string) {
+        const payload: any = {
+            p_pass_id: passId,
+            p_staff_id: profile?.id,
+            p_confirm_new_package: confirmNewPackage
+        };
+        if (selectedTicketId) {
+            payload.p_selected_ticket_id = selectedTicketId;
+        }
+
+        const { data, error } = await supabase.rpc('checkin_pass_and_issue_ticket', payload);
+
+        if (error) {
+            setCheckinError(error.message);
+            speakMessage('Lỗi hệ thống');
+            return;
+        }
+
+        // --- Handle Multi-Package Selection ---
+        if (!data.success && data.needs_package_selection) {
+            setAvailablePackages(data.available_packages || []);
+            setPendingCheckinCode(passId);
+            setShowPackageSelectModal(true);
+            return;
+        }
+
+        // --- Cảnh báo kích hoạt gói mới ---
+        if (!data.success && data.needs_confirmation) {
+            speakMessage('Gói hiện tại đã hết buổi');
+            const info = data.new_package_info;
+            const catLabel = info.category === 'LESSON' ? 'Gói học bơi' : 'Gói bơi';
+            const confirmed = window.confirm(
+                `⚠️ GÓI HIỆN TẠI ĐÃ HẾT BUỔI!\n\n` +
+                `Tìm thấy gói mới chưa kích hoạt:\n` +
+                `• Khách: ${info.customer_name || 'N/A'}\n` +
+                `• Loại: ${catLabel} — ${info.type_name}\n` +
+                `• Số buổi: ${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}\n\n` +
+                `Bấm OK để KÍCH HOẠT GÓI MỚI và trừ 1 buổi.\n` +
+                `Bấm Hủy để KHÔNG kích hoạt.`
+            );
+
+            if (confirmed) {
+                // Gọi lại với confirm = true
+                await doCheckin(passId, true);
+            }
+            return;
+        }
+
+        if (!data.success) {
+            setCheckinError(data.message);
+            if (data.message.includes('đóng cửa')) speakMessage('Hồ bơi đang đóng cửa');
+            else if (data.message.includes('Chưa đến giờ') || data.message.includes('quá giờ')) speakMessage('Chưa đến giờ mở cửa');
+            else if (data.message.includes('Hết hạn')) speakMessage('Thẻ đã hết hạn');
+            else if (data.message.includes('Hết lượt')) speakMessage('Thẻ đã hết lượt bơi');
+            else speakMessage('Vé không hợp lệ');
+            return;
+        }
+
+        // --- Success ---
+        const passCategory = data.pass_status.category || '';
+        const remainLabel = passCategory === 'LESSON' ? 'buổi học' : 'buổi bơi';
+        const newPkgNote = data.is_new_package ? '\n🆕 Đã kích hoạt GÓI MỚI!' : '';
+        alert(`✅ ${data.message}\n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} ${remainLabel}.` : 'Không giới hạn lượt.') + newPkgNote);
+        speakMessage('Xin mời vào');
+
+        // Cập nhật giao diện in vé con
+        let newTix = [];
+        if (data.new_tickets && Array.isArray(data.new_tickets)) {
+            newTix = data.new_tickets;
+        } else if (data.new_ticket) {
+            newTix = [data.new_ticket];
+        }
+
+        setSoldTickets(newTix.map((t: any) => ({
+            id: t.id,
+            ticket_type_id: '',
+            status: 'UNUSED',
+            customer_birth_year: null,
+            price_paid: t.price_paid,
+            sold_at: t.sold_at,
+            valid_from: new Date().toISOString().split('T')[0],
+            valid_until: new Date().toISOString().split('T')[0],
+            type_name: t.type_name,
+            pool_close_time: t.pool_close_time,
+            remaining_sessions: 1,
+            customer_name: t.customer_name,
+            customer_phone: null,
+            sold_by: profile?.id || null,
+            last_scan_direction: null,
+            last_scan_at: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            payment_method: 'CASH',
+            pass_category: passCategory,
+            pass_remaining_sessions: data.pass_status.remaining_sessions
+        })));
+        setCheckinCode('');
+    }
+
     async function handleCheckinSubmit(e: React.FormEvent) {
         e.preventDefault();
         setCheckinError('');
         if (!checkinCode.trim()) return;
 
         setCheckingIn(true);
-        // Call RPC Check-in
-        const { data, error } = await supabase.rpc('checkin_pass_and_issue_ticket', {
-            p_pass_id: checkinCode.trim(),
-            p_staff_id: profile?.id
-        });
+        await doCheckin(checkinCode.trim());
+        setCheckingIn(false);
+    }
 
-        if (error) {
-            setCheckinError(error.message);
-            speakMessage('Lỗi hệ thống');
-        } else if (!data.success) {
-            setCheckinError(data.message);
-            // Translate common DB error msgs to TTS
-            if (data.message.includes('đóng cửa')) speakMessage('Hồ bơi đang đóng cửa');
-            else if (data.message.includes('Chưa đến giờ') || data.message.includes('quá giờ')) speakMessage('Chưa đến giờ mở cửa');
-            else if (data.message.includes('Hết hạn')) speakMessage('Thẻ đã hết hạn');
-            else if (data.message.includes('Hết lượt')) speakMessage('Thẻ đã hết lượt bơi');
-            else speakMessage('Vé không hợp lệ');
-        } else {
-            // Success
-            alert(`✅ ${data.message}\n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} lượt.` : 'Không giới hạn lượt.'));
-            speakMessage('Xin mời vào');
-
-            // Cập nhật giao diện in vé con
-            setSoldTickets([{
-                id: data.new_ticket.id,
-                ticket_type_id: '',
-                status: 'UNUSED',
-                price_paid: data.new_ticket.price_paid,
-                sold_at: data.new_ticket.sold_at,
-                valid_from: new Date().toISOString().split('T')[0], // local date 
-                valid_until: new Date().toISOString().split('T')[0],
-                type_name: data.new_ticket.type_name,
-                pool_close_time: data.new_ticket.pool_close_time,
-                remaining_sessions: 1,
-                customer_name: data.new_ticket.customer_name,
-                customer_phone: null,
-                sold_by: profile?.id || null,
-                last_scan_direction: null,
-                last_scan_at: null,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                payment_method: 'CASH' // check-in vé mồ côi
-            }]);
-            setCheckinCode('');
-        }
+    async function handleSelectPackage(ticketId: string) {
+        setShowPackageSelectModal(false);
+        setCheckingIn(true);
+        await doCheckin(pendingCheckinCode, false, ticketId);
         setCheckingIn(false);
     }
 
@@ -606,6 +802,25 @@ export default function POSPage() {
 
     const dailyTypes = ticketTypes.filter(t => t.category === 'DAILY');
     const advancedTypes = ticketTypes.filter(t => t.category === 'MONTHLY' || t.category === 'MULTI');
+    const lessonTypes = ticketTypes.filter(t => t.category === 'LESSON');
+
+    // Lesson schedule data
+    const [lessonSchedulesMap, setLessonSchedulesMap] = useState<Record<string, any[]>>({});
+    useEffect(() => {
+        (async () => {
+            const { data } = await supabase.from('lesson_schedules').select('*');
+            if (data) {
+                const map: Record<string, any[]> = {};
+                data.forEach((s: any) => {
+                    if (!map[s.ticket_type_id]) map[s.ticket_type_id] = [];
+                    map[s.ticket_type_id].push(s);
+                });
+                setLessonSchedulesMap(map);
+            }
+        })();
+    }, [ticketTypes]);
+
+    const dayNamesShort: Record<number, string> = { 0: 'CN', 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7' };
 
     if (loading) return <div className="page-loading">Đang tải...</div>;
 
@@ -675,6 +890,58 @@ export default function POSPage() {
         );
     };
 
+    const renderLessonButton = (t: TicketType) => {
+        const colors = ['#10b981', '#059669', '#d1fae5', '#047857']; // green
+        const classLabel = (t as any).lesson_class_type === 'GROUP' ? '👥 Nhóm' : (t as any).lesson_class_type === 'ONE_ON_ONE' ? '🧑‍🏫 1:1' : '🧑‍🏫 1:2';
+        const scheds = lessonSchedulesMap[t.id] || [];
+        const schedText = (t as any).lesson_schedule_type === 'FIXED' && scheds.length > 0
+            ? scheds.map((s: any) => `${dayNamesShort[s.day_of_week]} ${s.start_time?.substring(0, 5)}`).join(', ')
+            : 'Lịch tự do';
+        const durationText = (t as any).lesson_class_type === 'GROUP'
+            ? ((t as any).duration_unit === 'months' ? `${(t as any).duration_months} tháng` : (t as any).duration_unit === 'days' ? `${t.validity_days} ngày` : '')
+            : 'Tự chọn khi ĐK';
+        const isPrivate = (t as any).lesson_class_type === 'ONE_ON_ONE' || (t as any).lesson_class_type === 'ONE_ON_TWO';
+        return (
+            <button key={t.id} onClick={() => sellTicket(t)} disabled={selling}
+                style={{
+                    background: '#fff', border: 'none', borderRadius: '14px', padding: 0,
+                    cursor: 'pointer', textAlign: 'left', overflow: 'hidden',
+                    boxShadow: '0 2px 12px rgba(0,0,0,0.08)', transition: 'all 0.2s ease',
+                    transform: 'translateY(0)',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${colors[0]}30`; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'; }}>
+                <div style={{ height: '4px', background: `linear-gradient(90deg, ${colors[0]}, ${colors[1]})` }} />
+                <div style={{ padding: '18px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '28px' }}>📚</span>
+                        <div>
+                            <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1d27' }}>{t.name}</div>
+                            {t.description && <div style={{ fontSize: '12px', color: '#64748b' }}>{t.description}</div>}
+                        </div>
+                    </div>
+                    <div style={{ fontSize: '26px', fontWeight: 800, background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
+                        {t.price.toLocaleString('vi-VN')} đ{isPrivate ? ' / buổi' : ''}
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                            {classLabel}
+                        </span>
+                        <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                            🏊 {isPrivate ? 'Tự chọn số buổi' : `${t.session_count} buổi`}
+                        </span>
+                        {durationText && <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                            ⏱ {durationText}
+                        </span>}
+                    </div>
+                    <div style={{ marginTop: '8px', fontSize: '11px', color: '#64748b' }}>
+                        📅 {schedText}
+                    </div>
+                </div>
+            </button>
+        );
+    };
+
     // Show sold ticket with QR
     if (soldTickets.length > 0) {
         return (
@@ -687,34 +954,34 @@ export default function POSPage() {
                                     {bizInfo.business_logo && <img src={bizInfo.business_logo} alt="Logo" style={{ maxHeight: '40px', marginBottom: '4px' }} />}
                                     <div className="subtitle" style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>{bizInfo.business_name || 'Hệ Thống Vé Bơi'}</div>
                                 </div>
-                                <h2>🏊 VÉ BƠI</h2>
+                                {/* Tiêu đề vé phân biệt theo loại */}
+                                <h2>{ticket.pass_category === 'LESSON' ? '📚 VÉ HỌC BƠI' : ticket.pass_category ? '🏊 VÉ BƠI TRẢ TRƯỚC' : '🏊 VÉ BƠI'}</h2>
 
-                                <div><strong>Khách hàng:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
                                 <div><strong>Hiệu lực:</strong> {ticket.valid_from === ticket.valid_until ? 'Trong ngày' : `${ticket.valid_from} → ${ticket.valid_until}`}</div>
 
-                                {ticket.remaining_sessions !== undefined && ticket.remaining_sessions !== null && (
-                                    <div style={{ marginTop: '4px', fontWeight: 'bold', borderTop: '1px dashed #ccc', paddingTop: '4px' }}>
-                                        Số lượt tổng cộng: {ticket.remaining_sessions} lượt
+                                {/* Số buổi còn lại (từ gói gốc) cho vé trả trước / học bơi */}
+                                {ticket.pass_category && ticket.pass_remaining_sessions !== undefined && ticket.pass_remaining_sessions !== null && (
+                                    <div style={{ marginTop: '6px', fontWeight: 'bold', borderTop: '1px dashed #ccc', paddingTop: '6px', fontSize: '14px' }}>
+                                        {ticket.pass_category === 'LESSON' ? 'Số buổi học còn lại' : 'Số buổi bơi còn lại'}: {ticket.pass_remaining_sessions} buổi
+                                    </div>
+                                )}
+
+                                {/* Chỉ hiển thị giá cho vé bơi thường (không phải check-in trả trước) */}
+                                {!ticket.pass_category && (
+                                    <div className="info-row">
+                                        <span className="label">Giá</span>
+                                        <span className="value">{formatPrice(ticket.price_paid)}</span>
                                     </div>
                                 )}
                                 <div className="info-row">
-                                    <span className="label">Giá</span>
-                                    <span className="value">{formatPrice(ticket.price_paid)}</span>
-                                </div>
-                                <div className="info-row">
-                                    <span className="label">Bán lúc</span>
+                                    <span className="label">{ticket.pass_category ? 'Check-in lúc' : 'Bán lúc'}</span>
                                     <span className="value">{formatTime(ticket.sold_at)}</span>
                                 </div>
                                 <div className="info-row">
                                     <span className="label">Hết hạn</span>
                                     <span className="value">Hôm nay, {ticket.pool_close_time}</span>
                                 </div>
-                                {ticket.customer_name && (
-                                    <div className="info-row">
-                                        <span className="label">Khách</span>
-                                        <span className="value">{ticket.customer_name}</span>
-                                    </div>
-                                )}
 
                                 <div className="qr-wrapper">
                                     <QRCodeSVG
@@ -761,8 +1028,8 @@ export default function POSPage() {
             </div>
 
             {activeTab === 'SELL' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', animation: 'fadeIn 0.3s ease' }}>
-                    {/* LEFT COLUMN — Vé Lượt */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', animation: 'fadeIn 0.3s ease' }}>
+                    {/* COL 1 — Vé Lượt */}
                     <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
                             <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #3b82f6, #6366f1)' }} />
@@ -773,7 +1040,7 @@ export default function POSPage() {
                         </div>
                     </div>
 
-                    {/* RIGHT COLUMN — Vé Nhiều Buổi / Vé Tháng */}
+                    {/* COL 2 — Vé Nhiều Buổi / Vé Tháng */}
                     <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
                             <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #8b5cf6, #a855f7)' }} />
@@ -781,6 +1048,17 @@ export default function POSPage() {
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             {advancedTypes.length > 0 ? advancedTypes.map(renderTicketButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có loại vé đặc biệt nào.</p>}
+                        </div>
+                    </div>
+
+                    {/* COL 3 — Gói Khóa Học Bơi */}
+                    <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                            <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #10b981, #059669)' }} />
+                            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>📚 Gói Khóa Học Bơi</h2>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {lessonTypes.length > 0 ? lessonTypes.map(renderLessonButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có gói khóa học nào.</p>}
                         </div>
                     </div>
                 </div>
@@ -871,6 +1149,109 @@ export default function POSPage() {
                             </div>
                         </div>
 
+                        {/* PRIVATE LESSON (1:1 / 1:2) — Staff enters sessions & duration */}
+                        {selectedAdvancedType.category === 'LESSON' && ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') && (
+                            <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
+                                    🧑‍🏫 Thông tin đăng ký lớp {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}
+                                </div>
+                                <div className="form-group" style={{ marginBottom: '12px' }}>
+                                    <label>Năm sinh học viên {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? '1 ' : ''}<span style={{ color: 'red' }}>*</span></label>
+                                    <input type="number" min="1900" max={new Date().getFullYear()} required
+                                        value={privateBirthYear}
+                                        onChange={e => setPrivateBirthYear(e.target.value ? Number(e.target.value) : '')}
+                                        placeholder="Nhập năm sinh (VD: 2010)"
+                                        style={{ fontSize: '15px' }}
+                                    />
+                                    {privateBirthYear && (
+                                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                            Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear)} tuổi</strong>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && (
+                                    <>
+                                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                                            <label>Họ và Tên học viên 2 <span style={{ color: 'red' }}>*</span></label>
+                                            <input type="text" required
+                                                value={customerName2}
+                                                onChange={e => setCustomerName2(e.target.value)}
+                                                placeholder="Nhập tên học viên 2"
+                                                style={{ fontSize: '15px' }}
+                                            />
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                                            <label>Năm sinh học viên 2 <span style={{ color: 'red' }}>*</span></label>
+                                            <input type="number" min="1900" max={new Date().getFullYear()} required
+                                                value={privateBirthYear2}
+                                                onChange={e => setPrivateBirthYear2(e.target.value ? Number(e.target.value) : '')}
+                                                placeholder="Nhập năm sinh (VD: 2010)"
+                                                style={{ fontSize: '15px' }}
+                                            />
+                                            {privateBirthYear2 && (
+                                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                    Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear2)} tuổi</strong>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+
+                                <div className="form-group" style={{ marginBottom: '12px' }}>
+                                    <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
+                                    <input type="number" min="1" required
+                                        value={privateSessions}
+                                        onChange={e => setPrivateSessions(e.target.value ? Number(e.target.value) : '')}
+                                        style={{ fontSize: '16px', fontWeight: 'bold' }}
+                                    />
+                                    {(() => {
+                                        let unitPrice = selectedAdvancedType.price;
+                                        if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0 && privateBirthYear) {
+                                            const age = new Date().getFullYear() - Number(privateBirthYear);
+                                            const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && age <= t.maxAge);
+                                            if (tier) unitPrice = tier.price;
+                                        }
+                                        const totalPrice = Number(privateSessions || 0) * unitPrice;
+
+                                        return (
+                                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {unitPrice.toLocaleString('vi-VN')}đ/buổi)
+                                                {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                                <div className="form-group">
+                                    <label>Thời hạn học</label>
+                                    <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
+                                            <input type="radio" checked={privateUnlimited} onChange={() => setPrivateUnlimited(true)} />
+                                            Không thời hạn
+                                        </label>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
+                                            <input type="radio" checked={!privateUnlimited} onChange={() => setPrivateUnlimited(false)} />
+                                            Có thời hạn
+                                        </label>
+                                    </div>
+                                    {!privateUnlimited && (
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <input type="number" min="1" step="1"
+                                                value={privateDurationVal}
+                                                onChange={e => setPrivateDurationVal(e.target.value ? Number(e.target.value) : '')}
+                                                placeholder="Nhập số..."
+                                                style={{ flex: 1 }}
+                                            />
+                                            <select value={privateDurationUnit} onChange={e => setPrivateDurationUnit(e.target.value as any)} style={{ width: '100px' }}>
+                                                <option value="months">Tháng</option>
+                                                <option value="days">Ngày</option>
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         <form onSubmit={handleAdvancedSubmit}>
                             <div className="form-group">
                                 <label>Áp dụng Khuyến mãi (Tùy chọn)</label>
@@ -881,7 +1262,17 @@ export default function POSPage() {
                                 >
                                     <option value="">-- Không áp dụng KM --</option>
                                     {promotions
-                                        .filter(p => p.applicable_ticket_types === null || p.applicable_ticket_types.includes(selectedAdvancedType.id))
+                                        .filter(p => {
+                                            if (!p.is_active) return false;
+                                            // Check date range
+                                            if (p.valid_from && new Date() < new Date(p.valid_from)) return false;
+                                            if (p.valid_until && new Date() > new Date(p.valid_until)) return false;
+                                            if (selectedAdvancedType.category === 'LESSON') {
+                                                // For lessons: only show promos that EXPLICITLY list this lesson type
+                                                return p.applicable_lesson_types !== null && p.applicable_lesson_types.includes(selectedAdvancedType.id);
+                                            }
+                                            return p.applicable_ticket_types === null || p.applicable_ticket_types.includes(selectedAdvancedType.id);
+                                        })
                                         .map(p => {
                                             let label = p.name;
                                             if (p.type === 'AMOUNT') label += ` (-${p.value.toLocaleString()}đ)`;
@@ -920,9 +1311,9 @@ export default function POSPage() {
                                                     setSearchingCust(true);
                                                     const { data } = await supabase
                                                         .from('tickets')
-                                                        .select('customer_name, customer_phone, card_code, ticket_types!inner(category)')
+                                                        .select('customer_name, customer_phone, customer_birth_year, card_code, ticket_types!inner(category)')
                                                         .or(`card_code.ilike.%${term}%,customer_phone.ilike.%${term}%,customer_name.ilike.%${term}%`)
-                                                        .in('ticket_types.category', ['MONTHLY', 'MULTI'])
+                                                        .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
                                                         .limit(20);
                                                     // Deduplicate by phone
                                                     const seen = new Set<string>();
@@ -931,7 +1322,12 @@ export default function POSPage() {
                                                         if (!key || seen.has(key)) return false;
                                                         seen.add(key);
                                                         return true;
-                                                    }).map((d: any) => ({ name: d.customer_name || '', phone: d.customer_phone || '', card_code: d.card_code || '' }));
+                                                    }).map((d: any) => ({
+                                                        name: d.customer_name || '',
+                                                        phone: d.customer_phone || '',
+                                                        card_code: d.card_code || '',
+                                                        birth_year: d.customer_birth_year || null
+                                                    }));
                                                     setCustSearchResults(unique);
                                                     setSearchingCust(false);
                                                 }}
@@ -945,6 +1341,7 @@ export default function POSPage() {
                                                             setCustomerName(c.name);
                                                             setCustomerPhone(c.phone);
                                                             setCardCode(c.card_code);
+                                                            if (c.birth_year) setPrivateBirthYear(c.birth_year);
                                                             setCustSearchResults([]);
                                                             setCustSearchTerm('');
                                                         }} style={{
@@ -1071,18 +1468,88 @@ export default function POSPage() {
                                                 pendingTicketData.phone,
                                                 pendingTicketData.promoId,
                                                 pendingTicketData.code,
-                                                isFreeTicket ? 'CASH' : selectedPaymentMethod
+                                                isFreeTicket ? 'CASH' : selectedPaymentMethod,
+                                                (pendingTicketData as any).name2,
+                                                (pendingTicketData as any).birthYear2
                                             );
                                         }}>
                                             {selling ? 'Đang xử lý...' : (isFreeTicket ? 'PHÁT HÀNH VÉ' : 'THANH TOÁN & IN VÉ')}
                                         </button>
-                                    </div>
+                                    </div >
                                 </>
                             );
                         })()}
                     </div>
                 </div>
             )}
-        </div>
+
+            {/* MODAL LỰA CHỌN GÓI VÉ CHECK-IN */}
+            {showPackageSelectModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+                    onClick={() => setShowPackageSelectModal(false)}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '500px', width: '90%', boxShadow: 'var(--shadow-lg)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+                        onClick={e => e.stopPropagation()}>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>🗂️ Chọn gói vé sử dụng</h2>
+                            <button onClick={() => setShowPackageSelectModal(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
+                        </div>
+
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '14px' }}>
+                            Thẻ này đang chứa nhiều gói khả dụng. Vui lòng hỏi khách muốn dùng gói nào hôm nay:
+                        </p>
+
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {availablePackages.map((pkg, idx) => {
+                                const isLesson = pkg.category === 'LESSON';
+                                const isActive = pkg.is_active;
+                                return (
+                                    <button
+                                        key={idx}
+                                        onClick={() => handleSelectPackage(pkg.id)}
+                                        style={{
+                                            display: 'flex', flexDirection: 'column', gap: '8px',
+                                            padding: '16px', borderRadius: '12px',
+                                            background: isLesson ? '#f0fdf4' : '#f8fafc',
+                                            border: `1px solid ${isLesson ? '#bbf7d0' : '#e2e8f0'}`,
+                                            cursor: 'pointer', textAlign: 'left',
+                                            transition: 'all 0.2s', position: 'relative', overflow: 'hidden'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.borderColor = isLesson ? '#22c55e' : '#3b82f6'}
+                                        onMouseLeave={e => e.currentTarget.style.borderColor = isLesson ? '#bbf7d0' : '#e2e8f0'}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span style={{ fontSize: '20px' }}>{isLesson ? '📚' : '🏊'}</span>
+                                                <strong style={{ fontSize: '15px', color: '#1e293b' }}>{pkg.type_name}</strong>
+                                            </div>
+                                            {!isActive && (
+                                                <span style={{ fontSize: '11px', background: '#fef08a', color: '#854d0e', padding: '4px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                                                    Chưa kích hoạt
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div style={{ fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                            <div>👤 <span style={{ fontWeight: 500 }}>{pkg.customer_name || 'Khách'}</span></div>
+                                            <div>
+                                                🎟️ Còn lại: <strong style={{ color: '#0f172a' }}>{pkg.remaining_sessions !== null ? `${pkg.remaining_sessions} buổi` : 'Không giới hạn'}</strong>
+                                                <span style={{ color: '#94a3b8', margin: '0 4px' }}>/</span>
+                                                {pkg.total_sessions !== null ? pkg.total_sessions : '∞'} buổi
+                                            </div>
+                                            {(pkg.valid_from || pkg.valid_until) && (
+                                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                                                    Hạn: {pkg.valid_from ? new Date(pkg.valid_from).toLocaleDateString('vi-VN') : '---'} → {pkg.valid_until ? new Date(pkg.valid_until).toLocaleDateString('vi-VN') : 'Không giới hạn'}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div >
     );
 }

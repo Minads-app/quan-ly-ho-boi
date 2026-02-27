@@ -1,6 +1,7 @@
 export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER';
-export type TicketCategory = 'DAILY' | 'MONTHLY';
+export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
 export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED';
+export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO';
 
 export interface Profile {
     id: string;
@@ -13,12 +14,25 @@ export interface Profile {
 export interface TicketType {
     id: string;
     name: string;
-    category: 'DAILY' | 'MULTI' | 'MONTHLY';
+    category: 'DAILY' | 'MULTI' | 'MONTHLY' | 'LESSON';
     price: number;
     description: string;
     validity_days: number | null;
     session_count: number | null;
     is_active: boolean;
+    duration_months: number | null;
+    duration_unit: 'days' | 'months' | null;
+    lesson_class_type: LessonClassType | null;
+    lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
+    age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
+}
+
+export interface LessonSchedule {
+    id: string;
+    ticket_type_id: string;
+    day_of_week: number;
+    start_time: string;
+    end_time: string;
 }
 
 export interface Ticket {
@@ -27,6 +41,7 @@ export interface Ticket {
     status: TicketStatus;
     customer_name: string | null;
     customer_phone: string | null;
+    customer_birth_year: number | null;
     valid_from: string | null;
     valid_until: string | null;
     sold_by: string | null;

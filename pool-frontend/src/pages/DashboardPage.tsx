@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
-type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES';
+type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
 interface TicketRow {
@@ -17,11 +17,14 @@ interface TicketRow {
     valid_from: string | null;
     valid_until: string | null;
     remaining_sessions: number | null;
+    total_sessions: number | null;
     type_name: string;
     category: string;
     type_price: number;
     sold_by_name: string | null;
     payment_method: string;
+    lesson_class_type: string | null;
+    lesson_schedule_type: string | null;
 }
 
 export default function DashboardPage() {
@@ -99,8 +102,8 @@ export default function DashboardPage() {
             .from('tickets')
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
-                valid_from, valid_until, remaining_sessions, payment_method,
-                ticket_types!inner (name, category, price),
+                valid_from, valid_until, remaining_sessions, total_sessions, payment_method,
+                ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
                 profiles:sold_by (full_name)
             `)
             .gte('sold_at', from + 'T00:00:00+07:00')
@@ -129,11 +132,14 @@ export default function DashboardPage() {
                 valid_from: t.valid_from,
                 valid_until: t.valid_until,
                 remaining_sessions: t.remaining_sessions,
+                total_sessions: t.total_sessions,
                 type_name: t.ticket_types?.name || '',
                 category: t.ticket_types?.category || '',
                 type_price: t.ticket_types?.price || 0,
                 sold_by_name: t.profiles?.full_name || '—',
-                payment_method: t.payment_method || 'CASH'
+                payment_method: t.payment_method || 'CASH',
+                lesson_class_type: t.ticket_types?.lesson_class_type || null,
+                lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null
             }));
             setTickets(mapped);
         }
@@ -152,11 +158,11 @@ export default function DashboardPage() {
             .from('tickets')
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
-                valid_from, valid_until, remaining_sessions, payment_method,
-                ticket_types!inner (name, category, price),
+                valid_from, valid_until, remaining_sessions, total_sessions, payment_method,
+                ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
                 profiles:sold_by (full_name)
             `)
-            .in('ticket_types.category', ['MONTHLY', 'MULTI'])
+            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .neq('status', 'EXPIRED')
             .order('valid_until', { ascending: true });
 
@@ -171,11 +177,14 @@ export default function DashboardPage() {
             valid_from: t.valid_from,
             valid_until: t.valid_until,
             remaining_sessions: t.remaining_sessions,
+            total_sessions: t.total_sessions,
             type_name: t.ticket_types?.name || '',
             category: t.ticket_types?.category || '',
             type_price: t.ticket_types?.price || 0,
             sold_by_name: t.profiles?.full_name || '—',
-            payment_method: t.payment_method || 'CASH'
+            payment_method: t.payment_method || 'CASH',
+            lesson_class_type: t.ticket_types?.lesson_class_type || null,
+            lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null
         }));
 
         // Filter: expiring within 7 days OR remaining_sessions <= 3
@@ -646,10 +655,116 @@ export default function DashboardPage() {
         );
     }
 
+    // --- LESSON PACKAGES TAB ---
+    function renderLessonPackagesTab() {
+        const lessonTickets = tickets.filter(t => t.category === 'LESSON');
+
+        function getLessonStatus(t: TicketRow): { label: string; color: string; bg: string } {
+            if (t.status === 'EXPIRED' || (t.remaining_sessions !== null && t.remaining_sessions <= 0))
+                return { label: 'Hoàn thành', color: '#64748b', bg: '#f1f5f9' };
+            if (t.valid_until && new Date(t.valid_until) < new Date())
+                return { label: 'Hết hạn', color: '#dc2626', bg: '#fef2f2' };
+            if (!t.valid_from)
+                return { label: 'Chưa KH', color: '#f59e0b', bg: '#fffbeb' };
+            return { label: 'Đang học', color: '#10b981', bg: '#ecfdf5' };
+        }
+
+        const classLabel = (ct: string | null) => ct === 'GROUP' ? '👥 Nhóm' : ct === 'ONE_ON_ONE' ? '🧑‍🏫 1:1' : ct === 'ONE_ON_TWO' ? '🧑‍🏫 1:2' : '—';
+
+        const tableRef = `<table id="lesson-table"><thead><tr><th>#</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>Gói</th><th>Loại lớp</th><th>Buổi còn</th><th>Hiệu lực</th><th>Giá</th><th>Trạng thái</th><th>Ngày ĐK</th></tr></thead><tbody>${lessonTickets.map((t, i) => { const st = getLessonStatus(t); return `<tr><td>${i + 1}</td><td>${t.customer_name || 'N/A'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${t.type_name}</td><td>${t.lesson_class_type === 'GROUP' ? 'Nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}</td><td>${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}</td><td>${t.valid_from ? fmtDate(t.valid_from) + ' → ' + fmtDate(t.valid_until) : 'Chưa KH'}</td><td>${fmt(t.price_paid)}</td><td>${st.label}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`; }).join('')}</tbody></table>`;
+
+        return (
+            <div style={{ animation: 'fadeIn 0.3s ease' }}>
+                {renderDateFilter()}
+                <div className="dashboard-content-card" style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                        <h2 style={{ margin: 0, fontSize: '16px' }}>📚 Gói Khóa Học Bơi ({lessonTickets.length} gói)</h2>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handlePrintReport('📚 Gói Khóa Học Bơi', tableRef)}>🖨️ In A4</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => exportExcel(
+                                'goi_hoc_boi',
+                                ['#', 'Khách', 'SĐT', 'Mã thẻ', 'Gói', 'Loại lớp', 'Buổi còn', 'Hiệu lực', 'Giá', 'Trạng thái', 'Ngày ĐK'],
+                                lessonTickets.map((t, i) => {
+                                    const st = getLessonStatus(t);
+                                    return [
+                                        String(i + 1), t.customer_name || '', t.customer_phone || '', t.card_code || '',
+                                        t.type_name, classLabel(t.lesson_class_type),
+                                        `${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}`,
+                                        t.valid_from ? `${fmtDate(t.valid_from)} → ${fmtDate(t.valid_until)}` : 'Chưa KH',
+                                        fmt(t.price_paid), st.label, fmtDateTime(t.sold_at)
+                                    ];
+                                })
+                            )}>📥 Excel</button>
+                        </div>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr>
+                                    <th style={thS}>#</th>
+                                    <th style={thS}>Khách hàng</th>
+                                    <th style={thS}>SĐT</th>
+                                    <th style={thS}>Mã thẻ</th>
+                                    <th style={thS}>Gói</th>
+                                    <th style={thS}>Loại lớp</th>
+                                    <th style={thS}>Buổi</th>
+                                    <th style={thS}>Hiệu lực</th>
+                                    <th style={thS}>Giá</th>
+                                    <th style={thS}>Trạng thái</th>
+                                    <th style={thS}>Ngày ĐK</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {lessonTickets.length === 0 ? (
+                                    <tr><td colSpan={11} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Chưa có gói khóa học nào trong khoảng thời gian này.</td></tr>
+                                ) : lessonTickets.map((t, i) => {
+                                    const st = getLessonStatus(t);
+                                    return (
+                                        <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                            <td style={tdS}>{i + 1}</td>
+                                            <td style={tdS}><strong>{t.customer_name || 'N/A'}</strong></td>
+                                            <td style={tdS}>{t.customer_phone || '—'}</td>
+                                            <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code}</code> : '—'}</td>
+                                            <td style={tdS}>{t.type_name}</td>
+                                            <td style={tdS}><span style={{ fontSize: '12px' }}>{classLabel(t.lesson_class_type)}</span></td>
+                                            <td style={tdS}>
+                                                <span style={{ fontWeight: 600 }}>{t.remaining_sessions ?? '—'}</span>
+                                                <span style={{ color: '#94a3b8' }}> / {t.total_sessions ?? '—'}</span>
+                                            </td>
+                                            <td style={tdS}>
+                                                {t.valid_from ? `${fmtDate(t.valid_from)} → ${fmtDate(t.valid_until)}` : <span style={{ color: '#f59e0b', fontWeight: 500 }}>Chưa kích hoạt</span>}
+                                            </td>
+                                            <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
+                                            <td style={tdS}>
+                                                <span style={{ background: st.bg, color: st.color, padding: '2px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
+                                                    {st.label}
+                                                </span>
+                                            </td>
+                                            <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
+                                        </tr>
+                                    );
+                                })}
+                                {lessonTickets.length > 0 && (
+                                    <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
+                                        <td colSpan={8} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({lessonTickets.length} gói)</td>
+                                        <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(lessonTickets.reduce((s, t) => s + t.price_paid, 0))}</td>
+                                        <td colSpan={2} style={tdS}></td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     const tabs: { key: ReportTab; label: string; icon: string; adminOnly?: boolean }[] = [
         { key: 'REVENUE', label: 'Doanh thu', icon: '💰', adminOnly: true },
         { key: 'SESSIONS', label: 'Lượt khách', icon: '🏊', adminOnly: true },
-        { key: 'DAILY_PASSES', label: 'Vé lẻ hôm nay', icon: '🎫', adminOnly: true },
+        { key: 'DAILY_PASSES', label: 'Vé lẻ hôm nay', icon: '�️', adminOnly: true },
+        { key: 'LESSON_PACKAGES', label: 'Gói Học Bơi', icon: '📚', adminOnly: true },
         { key: 'WARNINGS', label: 'Cảnh báo', icon: '⚠️', adminOnly: true },
         { key: 'MY_SALES', label: 'Vé đã bán', icon: '🛒' },
     ];
@@ -678,6 +793,7 @@ export default function DashboardPage() {
             {!loading && activeTab === 'REVENUE' && renderRevenueTab()}
             {!loading && activeTab === 'SESSIONS' && renderSessionsTab()}
             {!loading && activeTab === 'DAILY_PASSES' && renderDailyPassesTab()}
+            {!loading && activeTab === 'LESSON_PACKAGES' && renderLessonPackagesTab()}
             {!loading && activeTab === 'WARNINGS' && renderWarningsTab()}
             {!loading && activeTab === 'MY_SALES' && renderMySalesTab()}
         </div>

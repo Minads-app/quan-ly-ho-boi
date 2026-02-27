@@ -27,12 +27,25 @@ type WeekSchedule = Record<string, DaySchedule>;
 interface TicketType {
     id: string;
     name: string;
-    category: 'DAILY' | 'MULTI' | 'MONTHLY';
+    category: 'DAILY' | 'MULTI' | 'MONTHLY' | 'LESSON';
     price: number;
     description: string;
     validity_days: number | null;
     session_count: number | null;
     is_active: boolean;
+    duration_months: number | null;
+    duration_unit: 'days' | 'months' | null;
+    lesson_class_type: 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | null;
+    lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
+    age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
+}
+
+interface LessonScheduleRow {
+    id: string;
+    ticket_type_id: string;
+    day_of_week: number;
+    start_time: string;
+    end_time: string;
 }
 
 interface Promotion {
@@ -44,6 +57,7 @@ interface Promotion {
     valid_until: string | null;
     is_active: boolean;
     applicable_ticket_types: string[] | null;
+    applicable_lesson_types: string[] | null;
 }
 
 
@@ -71,7 +85,7 @@ export default function SettingsPage() {
     const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>(defaultSchedule);
 
     // active tab state
-    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions'>('system');
+    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons'>('system');
 
     // Ticket Types state
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
@@ -80,7 +94,7 @@ export default function SettingsPage() {
 
     // Form state for ticket type
     const [tName, setTName] = useState('');
-    const [tCategory, setTCategory] = useState<'DAILY' | 'MULTI' | 'MONTHLY'>('DAILY');
+    const [tCategory, setTCategory] = useState<'DAILY' | 'MULTI' | 'MONTHLY' | 'LESSON'>('DAILY');
     const [tPrice, setTPrice] = useState(0);
     const [tDesc, setTDesc] = useState('');
     const [tDays, setTDays] = useState<number | ''>('');
@@ -100,12 +114,34 @@ export default function SettingsPage() {
     const [pUntil, setPUntil] = useState('');
     const [pAllTickets, setPAllTickets] = useState(true);
     const [pSelectedTickets, setPSelectedTickets] = useState<string[]>([]);
+    const [pAllLessons, setPAllLessons] = useState(true);
+    const [pSelectedLessons, setPSelectedLessons] = useState<string[]>([]);
+
+    // --- LESSON PACKAGES state ---
+    const [lessonTypes, setLessonTypes] = useState<TicketType[]>([]);
+    const [showLessonModal, setShowLessonModal] = useState(false);
+    const [editingLesson, setEditingLesson] = useState<TicketType | null>(null);
+    const [lName, setLName] = useState('');
+    const [lSessions, setLSessions] = useState<number | ''>(10);
+    const [lDurationVal, setLDurationVal] = useState<number | ''>(1);
+    const [lDurationUnit, setLDurationUnit] = useState<'months' | 'days'>('months');
+    const [lPrice, setLPrice] = useState(0);
+    const [lClassType, setLClassType] = useState<'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO'>('GROUP');
+    const [lDesc, setLDesc] = useState('');
+    const [lSchedules, setLSchedules] = useState<{ day: number; start: string; end: string; enabled: boolean }[]>(
+        [0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false }))
+    );
+    const [lessonSchedulesMap, setLessonSchedulesMap] = useState<Record<string, LessonScheduleRow[]>>({});
+    const [lAgeTiers, setLAgeTiers] = useState<{ minAge: number, maxAge: number, price: number }[]>([]);
+
+    const dayNames: Record<number, string> = { 0: 'Chủ nhật', 1: 'Thứ 2', 2: 'Thứ 3', 3: 'Thứ 4', 4: 'Thứ 5', 5: 'Thứ 6', 6: 'Thứ 7' };
 
     useEffect(() => {
         fetchSettings();
         fetchTicketTypes();
         fetchPromotions();
         fetchWeekSchedule();
+        fetchLessonTypes();
     }, []);
 
     async function fetchSettings() {
@@ -282,6 +318,8 @@ export default function SettingsPage() {
         setPUntil('');
         setPAllTickets(true);
         setPSelectedTickets([]);
+        setPAllLessons(true);
+        setPSelectedLessons([]);
         setShowPromoModal(true);
     }
 
@@ -295,6 +333,8 @@ export default function SettingsPage() {
         setPUntil(p.valid_until ? new Date(p.valid_until).toISOString().slice(0, 16) : '');
         setPAllTickets(p.applicable_ticket_types === null);
         setPSelectedTickets(p.applicable_ticket_types || []);
+        setPAllLessons(p.applicable_lesson_types === null);
+        setPSelectedLessons(p.applicable_lesson_types || []);
         setShowPromoModal(true);
     }
 
@@ -313,7 +353,8 @@ export default function SettingsPage() {
             value: Number(pValue),
             valid_from: (!isUnlimitedPromo && pFrom) ? new Date(pFrom).toISOString() : null,
             valid_until: (!isUnlimitedPromo && pUntil) ? new Date(pUntil).toISOString() : null,
-            applicable_ticket_types: pAllTickets ? null : pSelectedTickets
+            applicable_ticket_types: pAllTickets ? null : pSelectedTickets,
+            applicable_lesson_types: pAllLessons ? null : pSelectedLessons
         };
 
         let err = null;
@@ -343,6 +384,133 @@ export default function SettingsPage() {
         } else {
             fetchPromotions();
         }
+    }
+
+    // --- LESSON PACKAGES MANAGEMENT ---
+    async function fetchLessonTypes() {
+        const { data } = await supabase
+            .from('ticket_types')
+            .select('*')
+            .eq('category', 'LESSON')
+            .order('created_at', { ascending: false });
+        if (data) setLessonTypes(data);
+
+        // Fetch schedules for all lesson types
+        const { data: schedData } = await supabase.from('lesson_schedules').select('*');
+        if (schedData) {
+            const map: Record<string, LessonScheduleRow[]> = {};
+            schedData.forEach((s: any) => {
+                if (!map[s.ticket_type_id]) map[s.ticket_type_id] = [];
+                map[s.ticket_type_id].push(s);
+            });
+            setLessonSchedulesMap(map);
+        }
+    }
+
+    function openNewLessonModal() {
+        setEditingLesson(null);
+        setLName('');
+        setLSessions(10);
+        setLDurationVal(1);
+        setLDurationUnit('months');
+        setLPrice(0);
+        setLClassType('GROUP');
+        setLDesc('');
+        setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false })));
+        setLAgeTiers([]);
+        setShowLessonModal(true);
+    }
+
+    function openEditLessonModal(t: TicketType) {
+        setEditingLesson(t);
+        setLName(t.name);
+        setLSessions(t.session_count || '');
+        setLDurationUnit(t.duration_unit || 'months');
+        setLDurationVal(t.duration_unit === 'days' ? (t.validity_days || '') : (t.duration_months || ''));
+        setLPrice(t.price);
+        setLClassType(t.lesson_class_type || 'GROUP');
+        setLDesc(t.description || '');
+        // Load schedules
+        const existing = lessonSchedulesMap[t.id] || [];
+        setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => {
+            const found = existing.find(s => s.day_of_week === d);
+            return { day: d, start: found?.start_time?.substring(0, 5) || '10:00', end: found?.end_time?.substring(0, 5) || '11:00', enabled: !!found };
+        }));
+        setLAgeTiers(t.age_price_tiers || []);
+        setShowLessonModal(true);
+    }
+
+    async function handleSaveLesson(e: React.FormEvent) {
+        e.preventDefault();
+        setSaving(true);
+        const isPrivate = lClassType !== 'GROUP'; // ONE_ON_ONE, ONE_ON_TWO
+        const scheduleType = lClassType === 'GROUP' ? 'FIXED' : 'FLEXIBLE';
+        const payload: any = {
+            name: lName,
+            category: 'LESSON' as any,
+            price: lPrice,
+            description: lDesc,
+            session_count: isPrivate ? null : (lSessions === '' ? null : Number(lSessions)),
+            duration_unit: isPrivate ? null : lDurationUnit,
+            validity_days: isPrivate ? null : (lDurationUnit === 'days' ? (lDurationVal === '' ? null : Number(lDurationVal)) : null),
+            duration_months: isPrivate ? null : (lDurationUnit === 'months' ? (lDurationVal === '' ? null : Number(lDurationVal)) : null),
+            lesson_class_type: lClassType,
+            lesson_schedule_type: scheduleType,
+            age_price_tiers: isPrivate && lAgeTiers.length > 0 ? lAgeTiers : null
+        };
+
+        let typeId = editingLesson?.id;
+        if (editingLesson) {
+            await supabase.from('ticket_types').update(payload).eq('id', editingLesson.id);
+        } else {
+            const { data } = await supabase.from('ticket_types').insert([payload]).select();
+            if (data && data[0]) typeId = data[0].id;
+        }
+
+        // Save schedules (only for GROUP)
+        if (typeId && scheduleType === 'FIXED') {
+            await supabase.from('lesson_schedules').delete().eq('ticket_type_id', typeId);
+            const rows = lSchedules.filter(s => s.enabled).map(s => ({
+                ticket_type_id: typeId!,
+                day_of_week: s.day,
+                start_time: s.start,
+                end_time: s.end,
+            }));
+            if (rows.length > 0) {
+                await supabase.from('lesson_schedules').insert(rows);
+            }
+        } else if (typeId && scheduleType === 'FLEXIBLE') {
+            await supabase.from('lesson_schedules').delete().eq('ticket_type_id', typeId);
+        }
+
+        setShowLessonModal(false);
+        setSaving(false);
+        fetchLessonTypes();
+        fetchTicketTypes();
+    }
+
+    async function handleDeleteLesson(id: string) {
+        if (!window.confirm('Xóa gói khóa học bơi này? Không thể xóa nếu đã có khách đăng ký.')) return;
+        const { error } = await supabase.from('ticket_types').delete().eq('id', id);
+        if (error) {
+            alert('Không thể xóa: ' + (error.code === '23503' ? 'Gói này đã phát sinh giao dịch. Vui lòng chuyển sang "Đã ẩn".' : error.message));
+        } else {
+            fetchLessonTypes();
+            fetchTicketTypes();
+        }
+    }
+
+    async function toggleLessonActive(id: string, currentStatus: boolean) {
+        await supabase.from('ticket_types').update({ is_active: !currentStatus }).eq('id', id);
+        fetchLessonTypes();
+        fetchTicketTypes();
+    }
+
+    function formatScheduleSummary(typeId: string, classType: string | null, schedType: string | null): string {
+        if (classType !== 'GROUP' || schedType !== 'FIXED') return 'Lịch tự do';
+        const scheds = lessonSchedulesMap[typeId] || [];
+        if (scheds.length === 0) return 'Chưa đặt lịch';
+        return scheds.map(s => `${dayNames[s.day_of_week]} ${s.start_time?.substring(0, 5)}-${s.end_time?.substring(0, 5)}`).join(', ');
     }
 
     if (loading) return <div className="page-loading">Đang tải...</div>;
@@ -387,6 +555,13 @@ export default function SettingsPage() {
                     onClick={() => setActiveTab('tickets')}
                 >
                     🎟️ Quản lý Loại Vé
+                </button>
+                <button
+                    className={`btn ${activeTab === 'lessons' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('lessons')}
+                >
+                    📚 Gói Khóa Học Bơi
                 </button>
                 <button
                     className={`btn ${activeTab === 'promotions' ? 'btn-primary' : 'btn-ghost'}`}
@@ -750,6 +925,11 @@ export default function SettingsPage() {
                                                 <div style={{ fontSize: '13px' }}>
                                                     {p.applicable_ticket_types === null ? 'Tất cả loại vé' : `${p.applicable_ticket_types.length} loại vé`}
                                                 </div>
+                                                {p.applicable_lesson_types && p.applicable_lesson_types.length > 0 && (
+                                                    <div style={{ fontSize: '11px', color: '#6366f1', marginTop: '2px' }}>
+                                                        📚 {p.applicable_lesson_types.length} gói khóa học
+                                                    </div>
+                                                )}
                                             </td>
                                             <td>
                                                 <button
@@ -940,6 +1120,50 @@ export default function SettingsPage() {
                                 )}
                             </div>
 
+                            {/* LESSON PACKAGES SELECTION */}
+                            <div className="form-group" style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px' }}>📚 Áp dụng cho gói khóa học</label>
+                                <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', margin: 0 }}>
+                                        <input
+                                            type="radio"
+                                            checked={pAllLessons}
+                                            onChange={() => setPAllLessons(true)}
+                                        />
+                                        Không áp dụng / Tất cả
+                                    </label>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', margin: 0 }}>
+                                        <input
+                                            type="radio"
+                                            checked={!pAllLessons}
+                                            onChange={() => setPAllLessons(false)}
+                                        />
+                                        Chỉ các gói được chọn
+                                    </label>
+                                </div>
+                                {!pAllLessons && (
+                                    <div style={{ background: 'var(--bg-hover, #f8fafc)', padding: '12px', borderRadius: '8px', maxHeight: '150px', overflowY: 'auto', border: '1px solid var(--border-color, #e2e8f0)' }}>
+                                        {lessonTypes.map(t => (
+                                            <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'normal', marginBottom: '8px', fontSize: '14px' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={pSelectedLessons.includes(t.id)}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) {
+                                                            setPSelectedLessons(prev => [...prev, t.id]);
+                                                        } else {
+                                                            setPSelectedLessons(prev => prev.filter(id => id !== t.id));
+                                                        }
+                                                    }}
+                                                />
+                                                {t.name} <span style={{ color: 'var(--text-secondary, #64748b)' }}>({t.lesson_class_type === 'GROUP' ? 'Lớp nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '1 kèm 1' : '1 kèm 2'})</span>
+                                            </label>
+                                        ))}
+                                        {lessonTypes.length === 0 && <div style={{ fontSize: '13px', color: 'gray' }}>Chưa có gói khóa học nào.</div>}
+                                    </div>
+                                )}
+                            </div>
+
                             {!isUnlimitedPromo && (
                                 <div className="form-row" style={{ animation: 'fadeIn 0.3s ease' }}>
                                     <div className="form-group">
@@ -956,6 +1180,251 @@ export default function SettingsPage() {
                             <div className="modal-actions" style={{ marginTop: '24px' }}>
                                 <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPromoModal(false)} disabled={saving}>Hủy</button>
                                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu cài đặt'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ============ LESSON PACKAGES TAB ============ */}
+            {activeTab === 'lessons' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    <div className="dashboard-content-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>📚 Gói Khóa Học Bơi</h2>
+                            <button className="btn btn-primary btn-sm" onClick={openNewLessonModal}>
+                                ➕ Tạo gói mới
+                            </button>
+                        </div>
+
+                        <div className="table-responsive">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tên gói</th>
+                                        <th>Loại lớp</th>
+                                        <th>Số buổi</th>
+                                        <th>Thời gian</th>
+                                        <th>Lịch học</th>
+                                        <th>Giá</th>
+                                        <th>Trạng thái</th>
+                                        <th>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {lessonTypes.map(t => (
+                                        <tr key={t.id} style={{ opacity: t.is_active ? 1 : 0.5 }}>
+                                            <td>
+                                                <strong>{t.name}</strong>
+                                                {t.description && <div style={{ fontSize: '11px', color: '#64748b' }}>{t.description}</div>}
+                                            </td>
+                                            <td>
+                                                <span className="badge badge-outline" style={{ fontSize: '11px' }}>
+                                                    {t.lesson_class_type === 'GROUP' ? '👥 Lớp nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '🧑‍🏫 1 kèm 1' : '🧑‍🏫 1 kèm 2'}
+                                                </span>
+                                            </td>
+                                            <td style={{ fontWeight: 600 }}>{t.session_count || '—'} buổi</td>
+                                            <td>{t.duration_unit === 'months' ? `${t.duration_months} tháng` : t.duration_unit === 'days' ? `${t.validity_days} ngày` : '—'}</td>
+                                            <td style={{ fontSize: '12px', maxWidth: '200px' }}>
+                                                {formatScheduleSummary(t.id, t.lesson_class_type, t.lesson_schedule_type)}
+                                            </td>
+                                            <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
+                                                {(t.lesson_class_type === 'ONE_ON_ONE' || t.lesson_class_type === 'ONE_ON_TWO') && t.age_price_tiers?.length ? (
+                                                    <span style={{ fontSize: '13px' }}>Tính theo độ tuổi</span>
+                                                ) : (
+                                                    <>{t.price.toLocaleString('vi-VN')}đ{(t.lesson_class_type === 'ONE_ON_ONE' || t.lesson_class_type === 'ONE_ON_TWO') ? ' / buổi' : ''}</>
+                                                )}
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className={`badge ${t.is_active ? 'badge-success' : 'badge-error'}`}
+                                                    onClick={() => toggleLessonActive(t.id, t.is_active)}
+                                                    style={{ cursor: 'pointer', border: 'none' }}
+                                                >
+                                                    {t.is_active ? 'Đang bán' : 'Đã ẩn'}
+                                                </button>
+                                            </td>
+                                            <td>
+                                                <button className="btn btn-ghost btn-sm" onClick={() => openEditLessonModal(t)}>✏️ Sửa</button>
+                                                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--alert-red)', marginLeft: '8px' }} onClick={() => handleDeleteLesson(t.id)}>🗑️ Xóa</button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {lessonTypes.length === 0 && (
+                                        <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Chưa có gói khóa học bơi nào.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ============ LESSON MODAL ============ */}
+            {showLessonModal && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '600px' }}>
+                        <h2>{editingLesson ? 'Sửa Gói Khóa Học' : 'Tạo Gói Khóa Học Mới'}</h2>
+                        <form onSubmit={handleSaveLesson}>
+                            <div className="form-group">
+                                <label>Tên gói học <span style={{ color: 'red' }}>*</span></label>
+                                <input type="text" required value={lName} onChange={e => setLName(e.target.value)} placeholder="VD: Khóa cơ bản trẻ em" />
+                            </div>
+
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Loại lớp <span style={{ color: 'red' }}>*</span></label>
+                                    <select value={lClassType} onChange={e => {
+                                        setLClassType(e.target.value as any);
+                                        if (e.target.value === 'GROUP') setLAgeTiers([]);
+                                    }}>
+                                        <option value="GROUP">👥 Lớp bơi nhóm</option>
+                                        <option value="ONE_ON_ONE">🧑‍🏫 1 kèm 1</option>
+                                        <option value="ONE_ON_TWO">🧑‍🏫 1 kèm 2</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    {lClassType === 'GROUP' ? (
+                                        <>
+                                            <label>Giá trọn gói (VND) <span style={{ color: 'red' }}>*</span></label>
+                                            <input type="number" min="0" required value={lPrice} onChange={e => setLPrice(Number(e.target.value))} />
+                                        </>
+                                    ) : (
+                                        <>
+                                            <label>Đơn giá / buổi mặc định (VND)</label>
+                                            <input type="number" min="0" value={lPrice} onChange={e => setLPrice(Number(e.target.value))} />
+                                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Giá này áp dụng nếu khách không thuộc độ tuổi cấu hình bên dưới.</div>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Age Pricing Tiers specific for ONE_ON_ONE and ONE_ON_TWO */}
+                            {lClassType !== 'GROUP' && (
+                                <div style={{ marginBottom: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                        <label style={{ margin: 0 }}>Cấu hình giá theo nhóm tuổi</label>
+                                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLAgeTiers([...lAgeTiers, { minAge: 0, maxAge: 99, price: lPrice }])}>
+                                            + Thêm mức giá
+                                        </button>
+                                    </div>
+                                    {lAgeTiers.length === 0 && <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>Chưa cấu hình. Sẽ áp dụng Đơn giá mặc định bên trên cho tất cả học viên.</div>}
+                                    {lAgeTiers.map((tier, idx) => (
+                                        <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <span style={{ fontSize: '13px', color: '#64748b', width: '20px' }}>Từ</span>
+                                                <input type="number" min="0" required value={tier.minAge} style={{ padding: '6px', fontSize: '13px', width: '60px' }}
+                                                    onChange={e => {
+                                                        const newTiers = [...lAgeTiers];
+                                                        newTiers[idx].minAge = Number(e.target.value);
+                                                        setLAgeTiers(newTiers);
+                                                    }}
+                                                />
+                                            </div>
+                                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <span style={{ fontSize: '13px', color: '#64748b', width: '20px' }}>đến</span>
+                                                <input type="number" min="0" required value={tier.maxAge} style={{ padding: '6px', fontSize: '13px', width: '60px' }}
+                                                    onChange={e => {
+                                                        const newTiers = [...lAgeTiers];
+                                                        newTiers[idx].maxAge = Number(e.target.value);
+                                                        setLAgeTiers(newTiers);
+                                                    }}
+                                                />
+                                                <span style={{ fontSize: '13px', color: '#64748b' }}>tuổi:</span>
+                                            </div>
+                                            <div style={{ flex: '0 0 140px' }}>
+                                                <input type="number" min="0" required value={tier.price} placeholder="Đơn giá / buổi" style={{ padding: '6px', fontSize: '13px' }}
+                                                    onChange={e => {
+                                                        const newTiers = [...lAgeTiers];
+                                                        newTiers[idx].price = Number(e.target.value);
+                                                        setLAgeTiers(newTiers);
+                                                    }}
+                                                />
+                                            </div>
+                                            <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'red', padding: '0 8px' }}
+                                                onClick={() => {
+                                                    const newTiers = lAgeTiers.filter((_, i) => i !== idx);
+                                                    setLAgeTiers(newTiers);
+                                                }}>
+                                                ×
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {lClassType === 'GROUP' && (
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
+                                        <input type="number" min="1" required value={lSessions} onChange={e => setLSessions(e.target.value ? Number(e.target.value) : '')} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Thời gian học <span style={{ color: 'red' }}>*</span></label>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <input type="number" min="1" step={lDurationUnit === 'months' ? '0.5' : '1'} required
+                                                value={lDurationVal}
+                                                onChange={e => setLDurationVal(e.target.value ? Number(e.target.value) : '')}
+                                                style={{ flex: 1 }}
+                                            />
+                                            <select value={lDurationUnit} onChange={e => setLDurationUnit(e.target.value as any)} style={{ width: '100px' }}>
+                                                <option value="months">Tháng</option>
+                                                <option value="days">Ngày</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="form-group">
+                                <label>Ghi chú (Tùy chọn)</label>
+                                <input type="text" value={lDesc} onChange={e => setLDesc(e.target.value)} placeholder="Ghi chú hiển thị cho nhân viên" />
+                            </div>
+
+                            {/* SCHEDULE SECTION */}
+                            <div style={{ marginTop: '16px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                                <h3 style={{ fontSize: '14px', marginBottom: '12px', color: '#334155' }}>
+                                    📅 Lịch học
+                                    {lClassType === 'GROUP' ? ' (Cố định)' : ' (Tự do)'}
+                                </h3>
+
+                                {lClassType === 'GROUP' ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {lSchedules.map((s, i) => (
+                                            <div key={s.day} style={{ display: 'flex', alignItems: 'center', gap: '10px', opacity: s.enabled ? 1 : 0.4 }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100px', cursor: 'pointer', margin: 0, fontWeight: 'normal', fontSize: '13px' }}>
+                                                    <input type="checkbox" checked={s.enabled}
+                                                        onChange={e => {
+                                                            const newS = [...lSchedules];
+                                                            newS[i] = { ...newS[i], enabled: e.target.checked };
+                                                            setLSchedules(newS);
+                                                        }}
+                                                        style={{ accentColor: '#10b981' }}
+                                                    />
+                                                    {dayNames[s.day]}
+                                                </label>
+                                                <input type="time" value={s.start} disabled={!s.enabled}
+                                                    onChange={e => { const newS = [...lSchedules]; newS[i] = { ...newS[i], start: e.target.value }; setLSchedules(newS); }}
+                                                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}
+                                                />
+                                                <span style={{ color: '#94a3b8' }}>→</span>
+                                                <input type="time" value={s.end} disabled={!s.enabled}
+                                                    onChange={e => { const newS = [...lSchedules]; newS[i] = { ...newS[i], end: e.target.value }; setLSchedules(newS); }}
+                                                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', fontSize: '13px', background: '#fff', borderRadius: '8px' }}>
+                                        📋 <strong>Lịch tự do</strong> — Khách hẹn trực tiếp với huấn luyện viên.
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="modal-actions" style={{ marginTop: '24px' }}>
+                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowLessonModal(false)} disabled={saving}>Hủy</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu'}</button>
                             </div>
                         </form>
                     </div>
