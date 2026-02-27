@@ -709,22 +709,26 @@ export default function POSPage() {
 
         // --- Cảnh báo kích hoạt gói mới ---
         if (!data.success && data.needs_confirmation) {
-            speakMessage('Gói hiện tại đã hết buổi');
             const info = data.new_package_info;
             const catLabel = info.category === 'LESSON' ? 'Gói học bơi' : 'Gói bơi';
+
+            // Dùng message từ backend để hiển thị đúng ngữ cảnh
+            const headerMsg = data.message || 'Xác nhận kích hoạt gói';
+            speakMessage('Xác nhận kích hoạt gói');
+
             const confirmed = window.confirm(
-                `⚠️ GÓI HIỆN TẠI ĐÃ HẾT BUỔI!\n\n` +
-                `Tìm thấy gói mới chưa kích hoạt:\n` +
+                `📋 ${headerMsg}\n\n` +
+                `Thông tin gói:\n` +
                 `• Khách: ${info.customer_name || 'N/A'}\n` +
                 `• Loại: ${catLabel} — ${info.type_name}\n` +
                 `• Số buổi: ${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}\n\n` +
-                `Bấm OK để KÍCH HOẠT GÓI MỚI và trừ 1 buổi.\n` +
+                `Bấm OK để KÍCH HOẠT và trừ 1 buổi.\n` +
                 `Bấm Hủy để KHÔNG kích hoạt.`
             );
 
             if (confirmed) {
-                // Gọi lại với confirm = true
-                await doCheckin(passId, true);
+                // Gọi lại với confirm = true, truyền selected_ticket_id nếu có
+                await doCheckin(passId, true, data.selected_ticket_id || undefined);
             }
             return;
         }
