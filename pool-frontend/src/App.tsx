@@ -56,11 +56,16 @@ function AppRoutes() {
     try {
       if (profile.role === 'ADMIN') return true;
       const perms = profile.permissions as any;
-      if (!perms || typeof perms !== 'object') return false;
-      if (!perms[module] || typeof perms[module] !== 'object') return false;
+      // Nếu chưa có permissions trong DB → cho xem POS mặc định
+      if (!perms || typeof perms !== 'object') {
+        return module === 'pos'; // Mặc định: chỉ cho xem POS
+      }
+      if (!perms[module] || typeof perms[module] !== 'object') {
+        return module === 'pos'; // Module chưa thiết lập → POS mặc định true
+      }
       return !!perms[module].view;
     } catch {
-      return false;
+      return module === 'pos';
     }
   };
 
