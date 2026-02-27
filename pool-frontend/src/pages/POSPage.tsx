@@ -305,16 +305,33 @@ export default function POSPage() {
             finalSessions = Number(privateSessions);
 
             // Calculate age-based price if tiers exist
-            let unitPrice = ticketType.price;
-            if (ticketType.age_price_tiers && ticketType.age_price_tiers.length > 0 && privateBirthYear) {
+            let unitPrice1 = ticketType.price;
+            let unitPrice2 = 0;
+
+            if (ticketType.age_price_tiers && ticketType.age_price_tiers.length > 0) {
                 const currentYear = new Date().getFullYear();
-                const age = currentYear - Number(privateBirthYear);
-                const matchingTier = ticketType.age_price_tiers.find(tier => age >= tier.minAge && age <= tier.maxAge);
-                if (matchingTier) {
-                    unitPrice = matchingTier.price;
+
+                // Student 1
+                if (privateBirthYear) {
+                    const age1 = currentYear - Number(privateBirthYear);
+                    const tier1 = ticketType.age_price_tiers.find(tier => age1 >= tier.minAge && age1 <= tier.maxAge);
+                    if (tier1) unitPrice1 = tier1.price;
                 }
+
+                // Student 2 (only for ONE_ON_TWO)
+                if ((ticketType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                    unitPrice2 = ticketType.price; // default to base price
+                    const age2 = currentYear - Number(privateBirthYear2);
+                    const tier2 = ticketType.age_price_tiers.find(tier => age2 >= tier.minAge && age2 <= tier.maxAge);
+                    if (tier2) unitPrice2 = tier2.price;
+                }
+            } else if ((ticketType as any).lesson_class_type === 'ONE_ON_TWO') {
+                // If there are no age tiers but it's 1:2, the price should be 2x the base price
+                unitPrice2 = ticketType.price;
             }
-            finalPrice = Math.round(unitPrice * finalSessions);
+
+            const totalUnitPrice = unitPrice1 + unitPrice2;
+            finalPrice = Math.round(totalUnitPrice * finalSessions);
         }
 
         if (promoId) {
@@ -1206,17 +1223,36 @@ export default function POSPage() {
                                         style={{ fontSize: '16px', fontWeight: 'bold' }}
                                     />
                                     {(() => {
-                                        let unitPrice = selectedAdvancedType.price;
-                                        if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0 && privateBirthYear) {
-                                            const age = new Date().getFullYear() - Number(privateBirthYear);
-                                            const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && age <= t.maxAge);
-                                            if (tier) unitPrice = tier.price;
+                                        let unitPrice1 = selectedAdvancedType.price;
+                                        let unitPrice2 = 0;
+
+                                        if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                                            const currentYear = new Date().getFullYear();
+
+                                            // Student 1
+                                            if (privateBirthYear) {
+                                                const age1 = currentYear - Number(privateBirthYear);
+                                                const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
+                                                if (tier1) unitPrice1 = tier1.price;
+                                            }
+
+                                            // Student 2
+                                            if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                                                unitPrice2 = selectedAdvancedType.price;
+                                                const age2 = currentYear - Number(privateBirthYear2);
+                                                const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
+                                                if (tier2) unitPrice2 = tier2.price;
+                                            }
+                                        } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
+                                            unitPrice2 = selectedAdvancedType.price;
                                         }
-                                        const totalPrice = Math.round(Number(privateSessions || 0) * unitPrice);
+
+                                        const totalUnitPrice = unitPrice1 + unitPrice2;
+                                        const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
 
                                         return (
                                             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(unitPrice).toLocaleString('vi-VN')}đ/buổi)
+                                                Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi)
                                                 {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
                                             </div>
                                         );
