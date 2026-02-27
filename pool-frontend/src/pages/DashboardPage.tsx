@@ -270,7 +270,7 @@ export default function DashboardPage() {
     }
 
     // --- Computed data ---
-    const dailyTickets = tickets.filter(t => t.category === 'DAILY' && t.type_price > 0);
+    const dailyTickets = tickets.filter(t => t.category === 'DAILY');
     const lessonTickets = tickets.filter(t => t.type_price === 0);
     const totalRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
     const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
@@ -875,7 +875,7 @@ export default function DashboardPage() {
     const tabs: { key: ReportTab; label: string; icon: string; adminOnly?: boolean }[] = [
         { key: 'REVENUE', label: 'Doanh thu', icon: '💰' },
         { key: 'SESSIONS', label: 'Lượt khách (Scan)', icon: '🏊', adminOnly: true },
-        { key: 'DAILY_PASSES', label: 'Vé lẻ hôm nay', icon: '�️', adminOnly: true },
+        { key: 'DAILY_PASSES', label: 'Vé hôm nay', icon: '🎫', adminOnly: true },
         { key: 'LESSON_PACKAGES', label: 'Gói Học Bơi', icon: '📚', adminOnly: true },
         { key: 'WARNINGS', label: 'Cảnh báo', icon: '⚠️', adminOnly: true },
         { key: 'MY_SALES', label: 'Vé Dài Hạn Đã Bán', icon: '🛒' },
