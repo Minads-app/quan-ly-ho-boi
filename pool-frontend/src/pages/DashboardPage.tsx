@@ -138,13 +138,13 @@ export default function DashboardPage() {
             console.error('Error:', error);
             setTickets([]);
         } else {
-            const today = new Date().toLocaleDateString('en-CA');
+            const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+            const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
             const mapped = (data || []).map((t: any) => {
                 let computedStatus = t.status;
-                const soldDate = t.sold_at.substring(0, 10);
 
-                // If it's a daily ticket, unused, and from a past date, force status to EXPIRED
-                if (t.ticket_types?.category === 'DAILY' && computedStatus === 'UNUSED' && soldDate < today) {
+                // Vé DAILY chưa quét mà valid_until đã qua ngày hôm nay → hết hạn
+                if (t.ticket_types?.category === 'DAILY' && computedStatus === 'UNUSED' && t.valid_until && t.valid_until < todayStr) {
                     computedStatus = 'EXPIRED';
                 }
 
