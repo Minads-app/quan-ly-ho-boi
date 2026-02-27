@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import type { PermissionsMatrix } from './pages/StaffPage'; // Or wherever PermissionsMatrix is exported
 import LoginPage from './pages/LoginPage';
 import POSPage from './pages/POSPage';
 import GateCheckPage from './pages/GateCheckPage';
 import SettingsPage from './pages/SettingsPage';
 import DashboardPage from './pages/DashboardPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 import StaffPage from './pages/StaffPage';
 import CustomerPage from './pages/CustomerPage';
 import './index.css';
@@ -49,6 +51,12 @@ function AppRoutes() {
     return <LoginPage />;
   }
 
+  // Helper check for admin bypass or specific module view access
+  const canView = (module: keyof PermissionsMatrix) => {
+    if (profile.role === 'ADMIN') return true;
+    return !!(profile.permissions && profile.permissions[module] && profile.permissions[module].view);
+  };
+
   return (
     <div className="app-layout">
       {/* Mobile Header */}
@@ -80,25 +88,33 @@ function AppRoutes() {
         </div>
 
         <nav className="sidebar-nav">
-          {/* Menu Bán Vé: Dành cho Admin và Cashier (và Staff mới) */}
-          {['ADMIN', 'CASHIER', 'STAFF'].includes(profile.role) && (
+          {/* Sale & Customers */}
+          <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+            <span className="nav-icon">🎫</span>
+            <span>Bán Vé</span>
+          </NavLink>
+
+          {canView('customers') && (
+            <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">👥</span>
+              <span>Khách Hàng</span>
+            </NavLink>
+          )}
+
+          {canView('reports') && (
             <>
-              <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">🎫</span>
-                <span>Bán Vé</span>
-              </NavLink>
-              <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">👥</span>
-                <span>Khách Hàng</span>
-              </NavLink>
               <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">📈</span>
+                <span className="nav-icon">📊</span>
                 <span>Báo Cáo</span>
+              </NavLink>
+              <NavLink to="/analytics" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+                <span className="nav-icon">📈</span>
+                <span>Biểu Đồ</span>
               </NavLink>
             </>
           )}
 
-          {/* Menu Soát Vé: Dành cho Admin và Gate Keeper */}
+          {/* Gate Scan Menu */}
           {['ADMIN', 'GATE_KEEPER'].includes(profile.role) && (
             <NavLink to="/gate" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
               <span className="nav-icon">🔍</span>
@@ -106,18 +122,19 @@ function AppRoutes() {
             </NavLink>
           )}
 
-          {/* Menu Quản lý: Chỉ dành cho Admin */}
-          {profile.role === 'ADMIN' && (
-            <>
-              <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">👥</span>
-                <span>Tài Khoản</span>
-              </NavLink>
-              <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">⚙️</span>
-                <span>Cài Đặt</span>
-              </NavLink>
-            </>
+          {/* Management Menu */}
+          {canView('staff') && (
+            <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">👥</span>
+              <span>Nhân Sự</span>
+            </NavLink>
+          )}
+
+          {canView('settings') && (
+            <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">⚙️</span>
+              <span>Cài Đặt</span>
+            </NavLink>
           )}
         </nav>
 
@@ -148,34 +165,38 @@ function AppRoutes() {
       {/* Main content */}
       <main className="main-content">
         <Routes>
-          {/* Route Bán Vé */}
-          <Route path="/pos" element={
-            ['ADMIN', 'CASHIER', 'STAFF'].includes(profile.role) ? <POSPage /> : <Navigate to="/gate" />
-          } />
+          {/* Default POS Route for anyone logged in (Gate keepers get redirected internally or UI is restricted) */}
+          <Route path="/pos" element={<POSPage />} />
+
           <Route path="/customers" element={
-            ['ADMIN', 'CASHIER', 'STAFF'].includes(profile.role) ? <CustomerPage /> : <Navigate to="/gate" />
+            canView('customers') ? <CustomerPage /> : <Navigate to="/pos" />
           } />
 
-          {/* Route Soát Vé */}
+          {/* Gate Scan */}
           <Route path="/gate" element={
             ['ADMIN', 'GATE_KEEPER'].includes(profile.role) ? <GateCheckPage /> : <Navigate to="/pos" />
           } />
 
-          {/* Routes dành riêng cho Admin */}
+          {/* Reports & Analytics */}
           <Route path="/dashboard" element={
-            ['ADMIN', 'CASHIER', 'STAFF'].includes(profile.role) ? <DashboardPage /> : <Navigate to="/pos" />
+            canView('reports') ? <DashboardPage /> : <Navigate to="/pos" />
           } />
+          <Route path="/analytics" element={
+            canView('reports') ? <AnalyticsPage /> : <Navigate to="/pos" />
+          } />
+
+          {/* Staff & Settings */}
           <Route path="/staff" element={
-            profile.role === 'ADMIN' ? <StaffPage /> : <Navigate to="/pos" />
+            canView('staff') ? <StaffPage /> : <Navigate to="/pos" />
           } />
           <Route path="/settings" element={
-            profile.role === 'ADMIN' ? <SettingsPage /> : <Navigate to="/pos" />
+            canView('settings') ? <SettingsPage /> : <Navigate to="/pos" />
           } />
 
           {/* Mặc định Redirect */}
           <Route path="*" element={
             <Navigate to={
-              profile.role === 'ADMIN' ? "/dashboard" :
+              canView('reports') ? "/analytics" :
                 profile.role === 'GATE_KEEPER' ? "/gate" : "/pos"
             } />
           } />

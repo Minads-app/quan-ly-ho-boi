@@ -3,12 +3,23 @@ export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
 export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED';
 export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO';
 
+export interface PermissionsMatrix {
+    customers: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+    packages: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+    reports: { view: boolean; export: boolean };
+    staff: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+    settings: { view: boolean; edit: boolean };
+}
+
 export interface Profile {
     id: string;
     full_name: string;
     role: UserRole;
     avatar_url: string | null;
     created_at: string;
+    is_active?: boolean;
+    can_use_camera?: boolean;
+    permissions?: PermissionsMatrix;
 }
 
 export interface TicketType {

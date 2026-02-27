@@ -18,6 +18,14 @@ const tempSupabase = createClient(
     }
 );
 
+export interface PermissionsMatrix {
+    customers: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+    packages: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+    reports: { view: boolean; export: boolean };
+    staff: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+    settings: { view: boolean; edit: boolean };
+}
+
 interface Profile {
     id: string;
     full_name: string;
@@ -25,7 +33,16 @@ interface Profile {
     created_at: string;
     is_active?: boolean;
     can_use_camera?: boolean;
+    permissions?: PermissionsMatrix;
 }
+
+const defaultPermissions: PermissionsMatrix = {
+    customers: { view: false, create: false, edit: false, delete: false },
+    packages: { view: false, create: false, edit: false, delete: false },
+    reports: { view: false, export: false },
+    staff: { view: false, create: false, edit: false, delete: false },
+    settings: { view: false, edit: false }
+};
 
 export default function StaffPage() {
     const { profile } = useAuth();
@@ -41,6 +58,12 @@ export default function StaffPage() {
     const [newRole, setNewRole] = useState('STAFF');
     const [isCreating, setIsCreating] = useState(false);
     const [createError, setCreateError] = useState('');
+
+    // Modal state for Permissions Matrix
+    const [showPermModal, setShowPermModal] = useState(false);
+    const [selectedStaff, setSelectedStaff] = useState<Profile | null>(null);
+    const [tempPermissions, setTempPermissions] = useState<PermissionsMatrix>(defaultPermissions);
+    const [isSavingPerms, setIsSavingPerms] = useState(false);
 
     useEffect(() => {
         fetchStaff();
@@ -186,6 +209,41 @@ export default function StaffPage() {
         }
     }
 
+    function openPermissionsModal(staff: Profile) {
+        setSelectedStaff(staff);
+        setTempPermissions(staff.permissions || JSON.parse(JSON.stringify(defaultPermissions)));
+        setShowPermModal(true);
+    }
+
+    async function handleSavePermissions() {
+        if (!selectedStaff) return;
+        setIsSavingPerms(true);
+
+        const { error } = await supabase
+            .from('profiles')
+            .update({ permissions: tempPermissions })
+            .eq('id', selectedStaff.id);
+
+        if (error) {
+            alert('Lỗi lưu quyền: ' + error.message);
+        } else {
+            setStaffList(prev => prev.map(p => p.id === selectedStaff.id ? { ...p, permissions: tempPermissions } : p));
+            setShowPermModal(false);
+            alert('Cập nhật phân quyền thành công!');
+        }
+        setIsSavingPerms(false);
+    }
+
+    function handlePermChange(module: keyof PermissionsMatrix, action: string, value: boolean) {
+        setTempPermissions(prev => ({
+            ...prev,
+            [module]: {
+                ...prev[module],
+                [action]: value
+            }
+        }));
+    }
+
     if (profile?.role !== 'ADMIN') {
         return (
             <div className="page-container">
@@ -293,6 +351,15 @@ export default function StaffPage() {
                                                 >
                                                     {staff.can_use_camera ? 'Cấm Camera' : 'Cấp Camera'}
                                                 </button>
+                                                <button
+                                                    className="btn btn-warning"
+                                                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem', margin: 0 }}
+                                                    onClick={() => openPermissionsModal(staff)}
+                                                    disabled={staff.role === 'ADMIN'}
+                                                    title={staff.role === 'ADMIN' ? "Quản trị viên luôn có toàn quyền" : "Phân quyền chi tiết (Xem, Thêm, Sửa, Xóa)"}
+                                                >
+                                                    ⚙️ Phân quyền
+                                                </button>
                                             </div>
                                         </div>
                                     </td>
@@ -378,6 +445,83 @@ export default function StaffPage() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Permission Matrix Modal */}
+            {showPermModal && selectedStaff && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '600px' }}>
+                        <h2>Phân quyền chi tiết</h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                            Tinh chỉnh quyền hạn cho nhân viên: <strong>{selectedStaff.full_name}</strong>
+                        </p>
+
+                        <div style={{ overflowX: 'auto', marginBottom: '20px' }}>
+                            <table className="data-table" style={{ width: '100%', fontSize: '14px' }}>
+                                <thead>
+                                    <tr>
+                                        <th style={{ textAlign: 'left' }}>Chức năng</th>
+                                        <th style={{ textAlign: 'center' }}>Xem</th>
+                                        <th style={{ textAlign: 'center' }}>Thêm</th>
+                                        <th style={{ textAlign: 'center' }}>Sửa</th>
+                                        <th style={{ textAlign: 'center' }}>Xóa / In</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {/* Khách hàng */}
+                                    <tr>
+                                        <td><strong>Khách hàng</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.view} onChange={e => handlePermChange('customers', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.create} onChange={e => handlePermChange('customers', 'create', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.edit} onChange={e => handlePermChange('customers', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.delete} onChange={e => handlePermChange('customers', 'delete', e.target.checked)} /></td>
+                                    </tr>
+                                    {/* Danh mục Gói DV */}
+                                    <tr>
+                                        <td><strong>Dịch vụ / Gói Bơi</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.view} onChange={e => handlePermChange('packages', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.create} onChange={e => handlePermChange('packages', 'create', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.edit} onChange={e => handlePermChange('packages', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.delete} onChange={e => handlePermChange('packages', 'delete', e.target.checked)} /></td>
+                                    </tr>
+                                    {/* Báo cáo (Không có thêm sửa xóa, chỉ có View và Export/Print) */}
+                                    <tr>
+                                        <td><strong>Báo cáo & Biểu đồ</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.reports.view} onChange={e => handlePermChange('reports', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center' }}><label><input type="checkbox" checked={tempPermissions.reports.export} onChange={e => handlePermChange('reports', 'export', e.target.checked)} /> In</label></td>
+                                    </tr>
+                                    {/* Cài đặt */}
+                                    <tr>
+                                        <td><strong>Tài Khoản Nhân Sự</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.view} onChange={e => handlePermChange('staff', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.create} onChange={e => handlePermChange('staff', 'create', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.edit} onChange={e => handlePermChange('staff', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.delete} onChange={e => handlePermChange('staff', 'delete', e.target.checked)} /></td>
+                                    </tr>
+                                    {/* Hệ thống */}
+                                    <tr>
+                                        <td><strong>Cài đặt Hệ thống</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings.view} onChange={e => handlePermChange('settings', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings.edit} onChange={e => handlePermChange('settings', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="modal-actions" style={{ marginTop: '24px' }}>
+                            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPermModal(false)} disabled={isSavingPerms}>
+                                Hủy
+                            </button>
+                            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSavePermissions} disabled={isSavingPerms}>
+                                {isSavingPerms ? 'Đang lưu...' : 'Lưu Quyền'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
