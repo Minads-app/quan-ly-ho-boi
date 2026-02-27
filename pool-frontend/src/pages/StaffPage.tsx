@@ -205,7 +205,17 @@ export default function StaffPage() {
 
     function openPermissionsModal(staff: Profile) {
         setSelectedStaff(staff);
-        setTempPermissions(staff.permissions || JSON.parse(JSON.stringify(defaultPermissions)));
+        // Deep merge: đảm bảo mỗi module đều có đầy đủ key, kể cả khi DB lưu thiếu
+        const saved = staff.permissions as any;
+        const merged: PermissionsMatrix = JSON.parse(JSON.stringify(defaultPermissions));
+        if (saved && typeof saved === 'object') {
+            for (const mod of Object.keys(merged) as (keyof PermissionsMatrix)[]) {
+                if (saved[mod] && typeof saved[mod] === 'object') {
+                    merged[mod] = { ...merged[mod], ...saved[mod] };
+                }
+            }
+        }
+        setTempPermissions(merged);
         setShowPermModal(true);
     }
 
