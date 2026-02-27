@@ -98,7 +98,18 @@ export default function GateCheckPage() {
             setResult({
                 success: false,
                 error: 'INVALID_FORMAT',
-                message: 'Mã QR/Mã thẻ quá ngắn. Vui lòng quét lại.'
+                message: 'Mã QR quá ngắn. Vui lòng quét lại.'
+            });
+            return;
+        }
+
+        // Chỉ cho phép mã QR (UUID), không cho phép mã thẻ khách hàng
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(id)) {
+            setResult({
+                success: false,
+                error: 'CARD_CODE_NOT_ALLOWED',
+                message: 'Soát vé chỉ hỗ trợ quét mã QR trên vé. Không hỗ trợ nhập mã thẻ khách hàng.'
             });
             return;
         }
@@ -178,7 +189,7 @@ export default function GateCheckPage() {
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <div>
                     <h1>🔍 Soát Vé</h1>
-                    <p>Quét hoặc nhập mã QR trên vé của khách</p>
+                    <p>Quét mã QR trên vé của khách (không hỗ trợ mã thẻ)</p>
                 </div>
                 {(profile as any)?.can_use_camera === true && (
                     <button
@@ -210,7 +221,7 @@ export default function GateCheckPage() {
                         value={ticketId}
                         onChange={e => setTicketId(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="Quét mã QR hoặc nhập mã vé..."
+                        placeholder="Quét mã QR trên vé..."
                         className="scanner-input"
                         autoFocus
                     />
