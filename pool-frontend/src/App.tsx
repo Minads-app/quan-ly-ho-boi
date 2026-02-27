@@ -95,11 +95,21 @@ function AppRoutes() {
         </div>
 
         <nav className="sidebar-nav">
-          {/* Sale & Customers */}
-          <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-            <span className="nav-icon">🎫</span>
-            <span>Bán Vé</span>
-          </NavLink>
+          {/* Bán Vé */}
+          {canView('pos') && (
+            <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">🎫</span>
+              <span>Bán Vé</span>
+            </NavLink>
+          )}
+
+          {/* Soát Vé */}
+          {canView('gate') && (
+            <NavLink to="/gate" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">🔍</span>
+              <span>Soát Vé</span>
+            </NavLink>
+          )}
 
           {canView('customers') && (
             <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
@@ -119,14 +129,6 @@ function AppRoutes() {
                 <span>Biểu Đồ</span>
               </NavLink>
             </>
-          )}
-
-          {/* Gate Scan Menu */}
-          {['ADMIN', 'GATE_KEEPER'].includes(profile.role) && (
-            <NavLink to="/gate" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">🔍</span>
-              <span>Soát Vé</span>
-            </NavLink>
           )}
 
           {/* Management Menu */}
@@ -173,7 +175,9 @@ function AppRoutes() {
       <main className="main-content">
         <Routes>
           {/* Default POS Route for anyone logged in (Gate keepers get redirected internally or UI is restricted) */}
-          <Route path="/pos" element={<POSPage />} />
+          <Route path="/pos" element={
+            canView('pos') ? <POSPage /> : <Navigate to="/gate" />
+          } />
 
           <Route path="/customers" element={
             canView('customers') ? <CustomerPage /> : <Navigate to="/pos" />
@@ -181,7 +185,7 @@ function AppRoutes() {
 
           {/* Gate Scan */}
           <Route path="/gate" element={
-            ['ADMIN', 'GATE_KEEPER'].includes(profile.role) ? <GateCheckPage /> : <Navigate to="/pos" />
+            canView('gate') ? <GateCheckPage /> : <Navigate to="/pos" />
           } />
 
           {/* Reports & Analytics */}
@@ -204,7 +208,8 @@ function AppRoutes() {
           <Route path="*" element={
             <Navigate to={
               canView('reports') ? "/analytics" :
-                profile.role === 'GATE_KEEPER' ? "/gate" : "/pos"
+                canView('gate') ? "/gate" :
+                  canView('pos') ? "/pos" : "/pos"
             } />
           } />
         </Routes>

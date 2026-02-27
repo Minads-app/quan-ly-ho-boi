@@ -4,6 +4,8 @@ export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED';
 export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO';
 
 export interface PermissionsMatrix {
+    pos: { view: boolean };
+    gate: { view: boolean };
     customers: { view: boolean; create: boolean; edit: boolean; delete: boolean };
     packages: { view: boolean; create: boolean; edit: boolean; delete: boolean };
     reports: { view: boolean; export: boolean };

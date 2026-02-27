@@ -31,6 +31,8 @@ interface Profile {
 }
 
 const defaultPermissions: PermissionsMatrix = {
+    pos: { view: true },
+    gate: { view: false },
     customers: { view: false, create: false, edit: false, delete: false },
     packages: { view: false, create: false, edit: false, delete: false },
     reports: { view: false, export: false },
@@ -474,44 +476,60 @@ export default function StaffPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    {/* Bán Vé */}
+                                    <tr style={{ background: 'rgba(59,130,246,0.05)' }}>
+                                        <td><strong>🎫 Bán Vé (POS)</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.pos?.view ?? true} onChange={e => handlePermChange('pos', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                    </tr>
+                                    {/* Soát Vé */}
+                                    <tr style={{ background: 'rgba(16,185,129,0.05)' }}>
+                                        <td><strong>🚪 Soát Vé (Cổng)</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.gate?.view ?? false} onChange={e => handlePermChange('gate', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                        <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                    </tr>
                                     {/* Khách hàng */}
                                     <tr>
-                                        <td><strong>Khách hàng</strong></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.view} onChange={e => handlePermChange('customers', 'view', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.create} onChange={e => handlePermChange('customers', 'create', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.edit} onChange={e => handlePermChange('customers', 'edit', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers.delete} onChange={e => handlePermChange('customers', 'delete', e.target.checked)} /></td>
+                                        <td><strong>👥 Khách hàng</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers?.view ?? false} onChange={e => handlePermChange('customers', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers?.create ?? false} onChange={e => handlePermChange('customers', 'create', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers?.edit ?? false} onChange={e => handlePermChange('customers', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.customers?.delete ?? false} onChange={e => handlePermChange('customers', 'delete', e.target.checked)} /></td>
                                     </tr>
-                                    {/* Danh mục Gói DV */}
+                                    {/* Gói DV */}
                                     <tr>
-                                        <td><strong>Dịch vụ / Gói Bơi</strong></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.view} onChange={e => handlePermChange('packages', 'view', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.create} onChange={e => handlePermChange('packages', 'create', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.edit} onChange={e => handlePermChange('packages', 'edit', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages.delete} onChange={e => handlePermChange('packages', 'delete', e.target.checked)} /></td>
+                                        <td><strong>📦 Dịch vụ / Gói Bơi</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages?.view ?? false} onChange={e => handlePermChange('packages', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages?.create ?? false} onChange={e => handlePermChange('packages', 'create', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages?.edit ?? false} onChange={e => handlePermChange('packages', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.packages?.delete ?? false} onChange={e => handlePermChange('packages', 'delete', e.target.checked)} /></td>
                                     </tr>
-                                    {/* Báo cáo (Không có thêm sửa xóa, chỉ có View và Export/Print) */}
+                                    {/* Báo cáo */}
                                     <tr>
-                                        <td><strong>Báo cáo & Biểu đồ</strong></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.reports.view} onChange={e => handlePermChange('reports', 'view', e.target.checked)} /></td>
+                                        <td><strong>📊 Báo cáo & Biểu đồ</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.reports?.view ?? false} onChange={e => handlePermChange('reports', 'view', e.target.checked)} /></td>
                                         <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
                                         <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
-                                        <td style={{ textAlign: 'center' }}><label><input type="checkbox" checked={tempPermissions.reports.export} onChange={e => handlePermChange('reports', 'export', e.target.checked)} /> In</label></td>
+                                        <td style={{ textAlign: 'center' }}><label><input type="checkbox" checked={tempPermissions.reports?.export ?? false} onChange={e => handlePermChange('reports', 'export', e.target.checked)} /> In</label></td>
+                                    </tr>
+                                    {/* Tài khoản */}
+                                    <tr>
+                                        <td><strong>🔑 Tài Khoản Nhân Sự</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff?.view ?? false} onChange={e => handlePermChange('staff', 'view', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff?.create ?? false} onChange={e => handlePermChange('staff', 'create', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff?.edit ?? false} onChange={e => handlePermChange('staff', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff?.delete ?? false} onChange={e => handlePermChange('staff', 'delete', e.target.checked)} /></td>
                                     </tr>
                                     {/* Cài đặt */}
                                     <tr>
-                                        <td><strong>Tài Khoản Nhân Sự</strong></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.view} onChange={e => handlePermChange('staff', 'view', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.create} onChange={e => handlePermChange('staff', 'create', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.edit} onChange={e => handlePermChange('staff', 'edit', e.target.checked)} /></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.staff.delete} onChange={e => handlePermChange('staff', 'delete', e.target.checked)} /></td>
-                                    </tr>
-                                    {/* Hệ thống */}
-                                    <tr>
-                                        <td><strong>Cài đặt Hệ thống</strong></td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings.view} onChange={e => handlePermChange('settings', 'view', e.target.checked)} /></td>
+                                        <td><strong>⚙️ Cài đặt Hệ thống</strong></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings?.view ?? false} onChange={e => handlePermChange('settings', 'view', e.target.checked)} /></td>
                                         <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
-                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings.edit} onChange={e => handlePermChange('settings', 'edit', e.target.checked)} /></td>
+                                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings?.edit ?? false} onChange={e => handlePermChange('settings', 'edit', e.target.checked)} /></td>
                                         <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
                                     </tr>
                                 </tbody>
