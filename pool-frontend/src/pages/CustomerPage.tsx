@@ -74,7 +74,7 @@ export default function CustomerPage() {
                 profiles:sold_by (full_name),
                 promotions:promotion_id (name, type, value)
             `)
-            .in('ticket_types.category', ['MONTHLY', 'MULTI'])
+            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .order('sold_at', { ascending: false });
 
         if (error) { console.error(error); setLoading(false); return; }
@@ -312,7 +312,7 @@ export default function CustomerPage() {
                                                         return (
                                                             <div key={p.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '200px' }}>
-                                                                    <span style={{ background: p.category === 'MONTHLY' ? '#dbeafe' : '#fef3c7', color: p.category === 'MONTHLY' ? '#1d4ed8' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{p.type_name}</span>
+                                                                    <span style={{ background: p.category === 'MONTHLY' ? '#dbeafe' : p.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: p.category === 'MONTHLY' ? '#1d4ed8' : p.category === 'LESSON' ? '#166534' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{p.type_name}</span>
                                                                     <span style={{ background: pst.bg, color: pst.color, padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{pst.text}</span>
                                                                     {p.remaining_sessions !== null && (
                                                                         <span style={{ fontWeight: 700, fontSize: '13px', color: p.remaining_sessions <= 3 ? '#ef4444' : '' }}>
@@ -427,7 +427,7 @@ export default function CustomerPage() {
                                             <td style={tdS}>{t.customer_phone || '—'}</td>
                                             {isAdmin && <td style={tdS}><code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code || '—'}</code></td>}
                                             <td style={tdS}>
-                                                <span style={{ background: t.category === 'MONTHLY' ? '#dbeafe' : '#fef3c7', color: t.category === 'MONTHLY' ? '#1d4ed8' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{t.type_name}</span>
+                                                <span style={{ background: t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#166534' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{t.type_name}</span>
                                             </td>
                                             <td style={tdS}>
                                                 <span style={{ background: pst.bg, color: pst.color, padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{pst.text}</span>
