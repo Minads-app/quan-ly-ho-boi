@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createClient } from '@supabase/supabase-js';
+import type { PermissionsMatrix } from '../types';
 
 // Create a separate Supabase client that doesn't persist the session.
 // This allows the Admin to create new users without being logged out.
@@ -18,7 +19,6 @@ const tempSupabase = createClient(
     }
 );
 
-import type { PermissionsMatrix } from '../types';
 
 interface Profile {
     id: string;
