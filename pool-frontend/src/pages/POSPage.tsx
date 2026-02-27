@@ -1167,158 +1167,7 @@ export default function POSPage() {
                         </div>
 
                         {/* PRIVATE LESSON (1:1 / 1:2) — Staff enters sessions & duration */}
-                        {selectedAdvancedType.category === 'LESSON' && ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') && (
-                            <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
-                                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
-                                    🧑‍🏫 Thông tin đăng ký lớp {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}
-                                </div>
-                                <div className="form-group" style={{ marginBottom: '12px' }}>
-                                    <label>Năm sinh học viên {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? '1 ' : ''}<span style={{ color: 'red' }}>*</span></label>
-                                    <input type="number" min="1900" max={new Date().getFullYear()} required
-                                        value={privateBirthYear}
-                                        onChange={e => setPrivateBirthYear(e.target.value ? Number(e.target.value) : '')}
-                                        placeholder="Nhập năm sinh (VD: 2010)"
-                                        style={{ fontSize: '15px' }}
-                                    />
-                                    {privateBirthYear && (
-                                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                            Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear)} tuổi</strong>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && (
-                                    <>
-                                        <div className="form-group" style={{ marginBottom: '12px' }}>
-                                            <label>Họ và Tên học viên 2 <span style={{ color: 'red' }}>*</span></label>
-                                            <input type="text" required
-                                                value={customerName2}
-                                                onChange={e => setCustomerName2(e.target.value)}
-                                                placeholder="Nhập tên học viên 2"
-                                                style={{ fontSize: '15px' }}
-                                            />
-                                        </div>
-                                        <div className="form-group" style={{ marginBottom: '12px' }}>
-                                            <label>Năm sinh học viên 2 <span style={{ color: 'red' }}>*</span></label>
-                                            <input type="number" min="1900" max={new Date().getFullYear()} required
-                                                value={privateBirthYear2}
-                                                onChange={e => setPrivateBirthYear2(e.target.value ? Number(e.target.value) : '')}
-                                                placeholder="Nhập năm sinh (VD: 2010)"
-                                                style={{ fontSize: '15px' }}
-                                            />
-                                            {privateBirthYear2 && (
-                                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                    Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear2)} tuổi</strong>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-
-                                <div className="form-group" style={{ marginBottom: '12px' }}>
-                                    <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
-                                    <input type="number" min="1" required
-                                        value={privateSessions}
-                                        onChange={e => setPrivateSessions(e.target.value ? Number(e.target.value) : '')}
-                                        style={{ fontSize: '16px', fontWeight: 'bold' }}
-                                    />
-                                    {(() => {
-                                        let unitPrice1 = selectedAdvancedType.price;
-                                        let unitPrice2 = 0;
-
-                                        if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
-                                            const currentYear = new Date().getFullYear();
-
-                                            // Student 1
-                                            if (privateBirthYear) {
-                                                const age1 = currentYear - Number(privateBirthYear);
-                                                const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
-                                                if (tier1) unitPrice1 = tier1.price;
-                                            }
-
-                                            // Student 2
-                                            if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                                                unitPrice2 = selectedAdvancedType.price;
-                                                const age2 = currentYear - Number(privateBirthYear2);
-                                                const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
-                                                if (tier2) unitPrice2 = tier2.price;
-                                            }
-                                        } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
-                                            unitPrice2 = selectedAdvancedType.price;
-                                        }
-
-                                        const totalUnitPrice = unitPrice1 + unitPrice2;
-                                        const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
-
-                                        return (
-                                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi)
-                                                {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
-                                            </div>
-                                        );
-                                    })()}
-                                </div>
-                                <div className="form-group">
-                                    <label>Thời hạn học</label>
-                                    <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
-                                            <input type="radio" checked={privateUnlimited} onChange={() => setPrivateUnlimited(true)} />
-                                            Không thời hạn
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
-                                            <input type="radio" checked={!privateUnlimited} onChange={() => setPrivateUnlimited(false)} />
-                                            Có thời hạn
-                                        </label>
-                                    </div>
-                                    {!privateUnlimited && (
-                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                            <input type="number" min="1" step="1"
-                                                value={privateDurationVal}
-                                                onChange={e => setPrivateDurationVal(e.target.value ? Number(e.target.value) : '')}
-                                                placeholder="Nhập số..."
-                                                style={{ flex: 1 }}
-                                            />
-                                            <select value={privateDurationUnit} onChange={e => setPrivateDurationUnit(e.target.value as any)} style={{ width: '100px' }}>
-                                                <option value="months">Tháng</option>
-                                                <option value="days">Ngày</option>
-                                            </select>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
                         <form onSubmit={handleAdvancedSubmit}>
-                            <div className="form-group">
-                                <label>Áp dụng Khuyến mãi (Tùy chọn)</label>
-                                <select
-                                    value={selectedPromoId}
-                                    onChange={e => setSelectedPromoId(e.target.value)}
-                                    style={{ borderColor: selectedPromoId ? 'var(--accent-blue)' : '' }}
-                                >
-                                    <option value="">-- Không áp dụng KM --</option>
-                                    {promotions
-                                        .filter(p => {
-                                            if (!p.is_active) return false;
-                                            // Check date range
-                                            if (p.valid_from && new Date() < new Date(p.valid_from)) return false;
-                                            if (p.valid_until && new Date() > new Date(p.valid_until)) return false;
-                                            if (selectedAdvancedType.category === 'LESSON') {
-                                                // For lessons: only show promos that EXPLICITLY list this lesson type
-                                                return p.applicable_lesson_types !== null && p.applicable_lesson_types.includes(selectedAdvancedType.id);
-                                            }
-                                            return p.applicable_ticket_types === null || p.applicable_ticket_types.includes(selectedAdvancedType.id);
-                                        })
-                                        .map(p => {
-                                            let label = p.name;
-                                            if (p.type === 'AMOUNT') label += ` (-${p.value.toLocaleString()}đ)`;
-                                            if (p.type === 'PERCENT') label += ` (-${p.value}%)`;
-                                            if (p.type === 'BONUS_SESSION') label += ` (+${p.value} lượt)`;
-                                            return <option key={p.id} value={p.id}>{label}</option>
-                                        })}
-                                </select>
-                            </div>
-
                             {selectedAdvancedType.category !== 'DAILY' && (
                                 <>
                                     {/* Toggle Khách mới / Khách cũ */}
@@ -1423,6 +1272,160 @@ export default function POSPage() {
                                     </div>
                                 </>
                             )}
+
+                            {selectedAdvancedType.category === 'LESSON' && ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') && (
+                                <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
+                                        🧑‍🏫 Thông tin đăng ký lớp {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label>Năm sinh học viên {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? '1 ' : ''}<span style={{ color: 'red' }}>*</span></label>
+                                        <input type="number" min="1900" max={new Date().getFullYear()} required
+                                            value={privateBirthYear}
+                                            onChange={e => setPrivateBirthYear(e.target.value ? Number(e.target.value) : '')}
+                                            placeholder="Nhập năm sinh (VD: 2010)"
+                                            style={{ fontSize: '15px' }}
+                                        />
+                                        {privateBirthYear && (
+                                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear)} tuổi</strong>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && (
+                                        <>
+                                            <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                <label>Họ và Tên học viên 2 <span style={{ color: 'red' }}>*</span></label>
+                                                <input type="text" required
+                                                    value={customerName2}
+                                                    onChange={e => setCustomerName2(e.target.value)}
+                                                    placeholder="Nhập tên học viên 2"
+                                                    style={{ fontSize: '15px' }}
+                                                />
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                <label>Năm sinh học viên 2 <span style={{ color: 'red' }}>*</span></label>
+                                                <input type="number" min="1900" max={new Date().getFullYear()} required
+                                                    value={privateBirthYear2}
+                                                    onChange={e => setPrivateBirthYear2(e.target.value ? Number(e.target.value) : '')}
+                                                    placeholder="Nhập năm sinh (VD: 2010)"
+                                                    style={{ fontSize: '15px' }}
+                                                />
+                                                {privateBirthYear2 && (
+                                                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                        Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear2)} tuổi</strong>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+
+                                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
+                                        <input type="number" min="1" required
+                                            value={privateSessions}
+                                            onChange={e => setPrivateSessions(e.target.value ? Number(e.target.value) : '')}
+                                            style={{ fontSize: '16px', fontWeight: 'bold' }}
+                                        />
+                                        {(() => {
+                                            let unitPrice1 = selectedAdvancedType.price;
+                                            let unitPrice2 = 0;
+
+                                            if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                                                const currentYear = new Date().getFullYear();
+
+                                                // Student 1
+                                                if (privateBirthYear) {
+                                                    const age1 = currentYear - Number(privateBirthYear);
+                                                    const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
+                                                    if (tier1) unitPrice1 = tier1.price;
+                                                }
+
+                                                // Student 2
+                                                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                                                    unitPrice2 = selectedAdvancedType.price;
+                                                    const age2 = currentYear - Number(privateBirthYear2);
+                                                    const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
+                                                    if (tier2) unitPrice2 = tier2.price;
+                                                }
+                                            } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
+                                                unitPrice2 = selectedAdvancedType.price;
+                                            }
+
+                                            const totalUnitPrice = unitPrice1 + unitPrice2;
+                                            const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
+
+                                            return (
+                                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                    Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi)
+                                                    {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Thời hạn học</label>
+                                        <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
+                                                <input type="radio" checked={privateUnlimited} onChange={() => setPrivateUnlimited(true)} />
+                                                Không thời hạn
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
+                                                <input type="radio" checked={!privateUnlimited} onChange={() => setPrivateUnlimited(false)} />
+                                                Có thời hạn
+                                            </label>
+                                        </div>
+                                        {!privateUnlimited && (
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <input type="number" min="1" step="1"
+                                                    value={privateDurationVal}
+                                                    onChange={e => setPrivateDurationVal(e.target.value ? Number(e.target.value) : '')}
+                                                    placeholder="Nhập số..."
+                                                    style={{ flex: 1 }}
+                                                />
+                                                <select value={privateDurationUnit} onChange={e => setPrivateDurationUnit(e.target.value as any)} style={{ width: '100px' }}>
+                                                    <option value="months">Tháng</option>
+                                                    <option value="days">Ngày</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+
+                            <div className="form-group">
+                                <label>Áp dụng Khuyến mãi (Tùy chọn)</label>
+                                <select
+                                    value={selectedPromoId}
+                                    onChange={e => setSelectedPromoId(e.target.value)}
+                                    style={{ borderColor: selectedPromoId ? 'var(--accent-blue)' : '' }}
+                                >
+                                    <option value="">-- Không áp dụng KM --</option>
+                                    {promotions
+                                        .filter(p => {
+                                            if (!p.is_active) return false;
+                                            // Check date range
+                                            if (p.valid_from && new Date() < new Date(p.valid_from)) return false;
+                                            if (p.valid_until && new Date() > new Date(p.valid_until)) return false;
+                                            if (selectedAdvancedType.category === 'LESSON') {
+                                                // For lessons: only show promos that EXPLICITLY list this lesson type
+                                                return p.applicable_lesson_types !== null && p.applicable_lesson_types.includes(selectedAdvancedType.id);
+                                            }
+                                            return p.applicable_ticket_types === null || p.applicable_ticket_types.includes(selectedAdvancedType.id);
+                                        })
+                                        .map(p => {
+                                            let label = p.name;
+                                            if (p.type === 'AMOUNT') label += ` (-${p.value.toLocaleString()}đ)`;
+                                            if (p.type === 'PERCENT') label += ` (-${p.value}%)`;
+                                            if (p.type === 'BONUS_SESSION') label += ` (+${p.value} lượt)`;
+                                            return <option key={p.id} value={p.id}>{label}</option>
+                                        })}
+                                </select>
+                            </div>
+
+
 
                             <div className="modal-actions">
                                 <button type="button" className="btn btn-ghost" disabled={selling} onClick={() => setSelectedAdvancedType(null)}>
