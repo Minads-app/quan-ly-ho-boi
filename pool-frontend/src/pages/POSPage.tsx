@@ -247,6 +247,8 @@ export default function POSPage() {
         // Calculate valid_until based on validity_days constraint from settings
         let validUntil = null;
         let validFrom = null;
+        let customDurationMonths = null;
+        let customValidityDays = null;
 
         if (ticketType.category === 'DAILY') {
             // Daily tickets: set valid_from and valid_until immediately
@@ -271,26 +273,11 @@ export default function POSPage() {
             // For private lessons with specific duration entered by staff
             const isPrivateLesson = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
             if (isPrivateLesson && !privateUnlimited && privateDurationVal) {
-                // Store duration info on the ticket_type temporarily — but actually we need
-                // to pass it directly since the ticket type doesn't have this info for private lessons.
-                // The deferred activation in checkin function will use the ticket_type's duration_unit/duration_months/validity_days.
-                // For private lessons, we need to set valid_from and valid_until at sell time if they have a custom duration.
-                // Actually, since deferred activation calculates valid_until from ticket_type fields,
-                // and for private lessons those are null, we just set the dates here directly.
-                const today = new Date();
-                const tzOffset = today.getTimezoneOffset() * 60000;
-                const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
-                validFrom = localISOTime.split('T')[0];
+                // Store duration info to be used at first checkin
                 if (privateDurationUnit === 'months') {
-                    const expDate = new Date(today);
-                    expDate.setDate(today.getDate() + Math.round(Number(privateDurationVal) * 30));
-                    const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
-                    validUntil = localISOExp.split('T')[0];
+                    customDurationMonths = Number(privateDurationVal);
                 } else {
-                    const expDate = new Date(today);
-                    expDate.setDate(today.getDate() + Number(privateDurationVal));
-                    const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
-                    validUntil = localISOExp.split('T')[0];
+                    customValidityDays = Number(privateDurationVal);
                 }
             }
         }
@@ -364,7 +351,9 @@ export default function POSPage() {
             payment_method: paymentMethod,
             customer_birth_year: (isPrivateLesson && privateBirthYear) ? Number(privateBirthYear) : null,
             customer_name_2: (isPrivateLesson && name2) ? name2 : null,
-            customer_birth_year_2: (isPrivateLesson && birthYear2) ? Number(birthYear2) : null
+            customer_birth_year_2: (isPrivateLesson && birthYear2) ? Number(birthYear2) : null,
+            custom_duration_months: customDurationMonths,
+            custom_validity_days: customValidityDays
         }));
 
         const { data, error } = await supabase
