@@ -53,9 +53,15 @@ function AppRoutes() {
 
   // Helper check for admin bypass or specific module view access
   const canView = (module: string) => {
-    if (profile.role === 'ADMIN') return true;
-    const perms = profile.permissions as any;
-    return !!(perms && perms[module] && perms[module].view);
+    try {
+      if (profile.role === 'ADMIN') return true;
+      const perms = profile.permissions as any;
+      if (!perms || typeof perms !== 'object') return false;
+      if (!perms[module] || typeof perms[module] !== 'object') return false;
+      return !!perms[module].view;
+    } catch {
+      return false;
+    }
   };
 
   return (
