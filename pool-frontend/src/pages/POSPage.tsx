@@ -314,7 +314,7 @@ export default function POSPage() {
                     unitPrice = matchingTier.price;
                 }
             }
-            finalPrice = unitPrice * finalSessions;
+            finalPrice = Math.round(unitPrice * finalSessions);
         }
 
         if (promoId) {
@@ -1212,11 +1212,11 @@ export default function POSPage() {
                                             const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && age <= t.maxAge);
                                             if (tier) unitPrice = tier.price;
                                         }
-                                        const totalPrice = Number(privateSessions || 0) * unitPrice;
+                                        const totalPrice = Math.round(Number(privateSessions || 0) * unitPrice);
 
                                         return (
                                             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {unitPrice.toLocaleString('vi-VN')}đ/buổi)
+                                                Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(unitPrice).toLocaleString('vi-VN')}đ/buổi)
                                                 {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
                                             </div>
                                         );
