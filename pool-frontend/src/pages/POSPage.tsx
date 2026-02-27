@@ -110,17 +110,19 @@ export default function POSPage() {
         }
     }, []);
 
-    // Helper TTS function
+    // Helper TTS function — tìm giọng Tiếng Việt tự động
     function speakMessage(text: string) {
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel(); // limit overlapping
-            const msg = new SpeechSynthesisUtterance(text);
-            msg.lang = 'vi-VN';
-            // Slight adjustments for better Vietnamese sound
-            msg.rate = 1.0;
-            msg.pitch = 1.0;
-            window.speechSynthesis.speak(msg);
-        }
+        if (!('speechSynthesis' in window)) return;
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'vi-VN';
+        msg.rate = 1.0;
+        msg.pitch = 1.0;
+        // Tìm giọng tiếng Việt trong danh sách
+        const voices = window.speechSynthesis.getVoices();
+        const viVoice = voices.find(v => v.lang === 'vi-VN' || v.lang.startsWith('vi'));
+        if (viVoice) msg.voice = viVoice;
+        window.speechSynthesis.speak(msg);
     }
 
     async function fetchBusinessInfo() {

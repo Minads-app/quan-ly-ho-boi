@@ -44,18 +44,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     async function fetchProfile(userId: string) {
-        const { data } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
+        try {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
 
-        if (data && data.is_active === false) {
-            await supabase.auth.signOut();
-            setProfile(null);
-            setUser(null);
-        } else {
-            setProfile(data);
+            if (error) {
+                // Fetch thất bại (timeout, mạng) → giữ nguyên profile cũ, không logout
+                console.warn('Profile fetch failed, keeping existing session:', error.message);
+                setLoading(false);
+                return;
+            }
+
+            if (data && data.is_active === false) {
+                await supabase.auth.signOut();
+                setProfile(null);
+                setUser(null);
+            } else if (data) {
+                setProfile(data);
+            }
+            // Nếu data = null nhưng không lỗi → giữ nguyên profile cũ
+        } catch (err) {
+            console.warn('Profile fetch exception:', err);
         }
         setLoading(false);
     }

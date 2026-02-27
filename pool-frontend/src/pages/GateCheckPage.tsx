@@ -124,14 +124,15 @@ export default function GateCheckPage() {
         });
 
         const speak = (text: string) => {
-            if ('speechSynthesis' in window) {
-                // Cancel any ongoing speech
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'vi-VN';
-                utterance.rate = 1.1; // Slightly faster for gate checking
-                window.speechSynthesis.speak(utterance);
-            }
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'vi-VN';
+            utterance.rate = 1.1;
+            const voices = window.speechSynthesis.getVoices();
+            const viVoice = voices.find(v => v.lang === 'vi-VN' || v.lang.startsWith('vi'));
+            if (viVoice) utterance.voice = viVoice;
+            window.speechSynthesis.speak(utterance);
         };
 
         if (error) {
