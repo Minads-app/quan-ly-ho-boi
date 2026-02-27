@@ -61,6 +61,13 @@ export default function CustomerPage() {
     const [editingCardPkgId, setEditingCardPkgId] = useState<string | null>(null);
     const [newCardCode, setNewCardCode] = useState('');
 
+    // Package editing (Admin)
+    const [isEditingPkg, setIsEditingPkg] = useState(false);
+    const [editSessions, setEditSessions] = useState<number | ''>('');
+    const [editTotalSessions, setEditTotalSessions] = useState<number | ''>('');
+    const [editValidFrom, setEditValidFrom] = useState('');
+    const [editValidUntil, setEditValidUntil] = useState('');
+
     useEffect(() => { fetchAllPackages(); }, []);
 
     async function fetchAllPackages() {
@@ -192,6 +199,51 @@ export default function CustomerPage() {
         setNewCardCode('');
         fetchAllPackages();
         alert('✅ Đã cập nhật mã thẻ thành công!');
+    }
+
+    // --- Package Editing & Deleting (Admin) ---
+    async function handleUpdatePackage() {
+        if (!selectedPkg) return;
+        if (!confirm('Bạn có chắc chắn muốn lưu các thay đổi này?')) return;
+
+        const updateData: any = {
+            remaining_sessions: editSessions === '' ? null : Number(editSessions),
+            total_sessions: editTotalSessions === '' ? null : Number(editTotalSessions),
+            valid_from: editValidFrom || null,
+            valid_until: editValidUntil || null,
+            updated_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase.from('tickets').update(updateData).eq('id', selectedPkg.id);
+
+        if (error) {
+            alert('Lỗi cập nhật gói: ' + error.message);
+        } else {
+            alert('✅ Cập nhật thành công!');
+            setIsEditingPkg(false);
+            setSelectedPkg(null);
+            fetchAllPackages();
+        }
+    }
+
+    async function handleDeletePackage() {
+        if (!selectedPkg) return;
+        if (!confirm('⚠️ CẢNH BÁO: Hành động này sẽ XÓA VĨNH VIỄN gói thẻ này cùng toàn bộ lịch sử quẹt thẻ liên quan. Bạn có chắc chắn muốn tiếp tục?')) return;
+        if (!confirm('Hỏi lại lần cuối: Bạn thực sự muốn XÓA VĨNH VIỄN gói thẻ này? Dữ liệu không thể khôi phục!')) return;
+
+        // 1. Delete scan logs to avoid foreign key constraint errors
+        await supabase.from('scan_logs').delete().eq('ticket_id', selectedPkg.id);
+
+        // 2. Delete the ticket
+        const { error } = await supabase.from('tickets').delete().eq('id', selectedPkg.id);
+
+        if (error) {
+            alert('Lỗi xóa gói: ' + error.message);
+        } else {
+            alert('✅ Đã xóa gói thành công!');
+            setSelectedPkg(null);
+            fetchAllPackages();
+        }
     }
 
     // --- Helpers ---
@@ -450,12 +502,12 @@ export default function CustomerPage() {
             {/* Detail Modal */}
             {selectedPkg && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-                    onClick={() => setSelectedPkg(null)}>
+                    onClick={() => { setSelectedPkg(null); setIsEditingPkg(false); }}>
                     <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '28px', maxWidth: '440px', width: '90%', boxShadow: 'var(--shadow-lg)', maxHeight: '85vh', overflowY: 'auto' }}
                         onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                            <h2 style={{ fontSize: '18px' }}>📋 Chi tiết Gói Bơi</h2>
-                            <button onClick={() => setSelectedPkg(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
+                            <h2 style={{ fontSize: '18px' }}>{isEditingPkg ? '✏️ Chỉnh sửa Gói' : '📋 Chi tiết Gói Bơi'}</h2>
+                            <button onClick={() => { setSelectedPkg(null); setIsEditingPkg(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {[
@@ -465,15 +517,17 @@ export default function CustomerPage() {
                                 ...(isAdmin ? [{ label: 'Mã thẻ', value: selectedPkg.card_code || '—' }] : []),
                                 { label: 'Loại thẻ', value: selectedPkg.type_name },
                                 { label: 'Trạng thái', value: getStatusBadge(selectedPkg.status).text },
-                                { label: 'Lượt bơi', value: selectedPkg.remaining_sessions !== null ? `${selectedPkg.remaining_sessions} / ${selectedPkg.total_sessions ?? selectedPkg.remaining_sessions} lượt` : 'Không giới hạn' },
-                                { label: 'Hiệu lực', value: `${fmtDate(selectedPkg.valid_from)} → ${fmtDate(selectedPkg.valid_until)}` },
+                                isEditingPkg ? { label: 'Lượt còn lại', value: <input type="number" min="0" value={editSessions} onChange={e => setEditSessions(e.target.value === '' ? '' : Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', textAlign: 'right' }} /> } : { label: 'Lượt còn lại', value: selectedPkg.remaining_sessions !== null ? selectedPkg.remaining_sessions : '∞' },
+                                isEditingPkg ? { label: 'Tổng số lượt', value: <input type="number" min="0" value={editTotalSessions} onChange={e => setEditTotalSessions(e.target.value === '' ? '' : Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', textAlign: 'right' }} /> } : { label: 'Tổng số lượt', value: selectedPkg.total_sessions !== null ? selectedPkg.total_sessions : '∞' },
+                                isEditingPkg ? { label: 'Ngày bắt đầu', value: <input type="date" value={editValidFrom} onChange={e => setEditValidFrom(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }} /> } : { label: 'Ngày bắt đầu', value: fmtDate(selectedPkg.valid_from) },
+                                isEditingPkg ? { label: 'Ngày hết hạn', value: <input type="date" value={editValidUntil} onChange={e => setEditValidUntil(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }} /> } : { label: 'Ngày hết hạn', value: fmtDate(selectedPkg.valid_until) },
                                 { label: 'Giá bán', value: fmt(selectedPkg.price_paid) },
                                 { label: 'Ngày mua', value: fmtDate(selectedPkg.sold_at) },
                                 { label: 'Người bán', value: selectedPkg.sold_by_name || '—' },
                             ].map(row => (
-                                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-color)', fontSize: '14px' }}>
+                                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border-color)', fontSize: '14px' }}>
                                     <span style={{ color: 'var(--text-secondary)' }}>{row.label}</span>
-                                    <strong>{row.value}</strong>
+                                    {typeof row.value === 'string' || typeof row.value === 'number' ? <strong>{row.value}</strong> : row.value}
                                 </div>
                             ))}
                         </div>
@@ -516,7 +570,33 @@ export default function CustomerPage() {
                             </div>
                         </div>
 
-                        <button className="btn btn-primary" style={{ width: '100%', marginTop: '20px' }} onClick={() => setSelectedPkg(null)}>Đóng</button>
+                        {/* Admin Action Buttons */}
+                        {isAdmin && !isEditingPkg && (
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
+                                <button className="btn btn-ghost" style={{ flex: 1, color: '#0369a1', background: '#e0f2fe' }}
+                                    onClick={() => {
+                                        setEditSessions(selectedPkg.remaining_sessions !== null ? selectedPkg.remaining_sessions : '');
+                                        setEditTotalSessions(selectedPkg.total_sessions !== null ? selectedPkg.total_sessions : '');
+                                        setEditValidFrom(selectedPkg.valid_from || '');
+                                        setEditValidUntil(selectedPkg.valid_until || '');
+                                        setIsEditingPkg(true);
+                                    }}>
+                                    ✏️ Sửa gói
+                                </button>
+                                <button className="btn btn-primary" style={{ flex: 1, background: '#ef4444' }} onClick={handleDeletePackage}>
+                                    🗑️ Xóa gói
+                                </button>
+                            </div>
+                        )}
+
+                        {isEditingPkg ? (
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
+                                <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleUpdatePackage}>Lưu thay đổi</button>
+                                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setIsEditingPkg(false)}>Hủy</button>
+                            </div>
+                        ) : (
+                            <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={() => setSelectedPkg(null)}>Đóng</button>
+                        )}
                     </div>
                 </div>
             )}
