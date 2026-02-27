@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import type { PermissionsMatrix } from './pages/StaffPage'; // Or wherever PermissionsMatrix is exported
+import type { PermissionsMatrix } from './types';
 import LoginPage from './pages/LoginPage';
 import POSPage from './pages/POSPage';
 import GateCheckPage from './pages/GateCheckPage';

@@ -18,13 +18,7 @@ const tempSupabase = createClient(
     }
 );
 
-export interface PermissionsMatrix {
-    customers: { view: boolean; create: boolean; edit: boolean; delete: boolean };
-    packages: { view: boolean; create: boolean; edit: boolean; delete: boolean };
-    reports: { view: boolean; export: boolean };
-    staff: { view: boolean; create: boolean; edit: boolean; delete: boolean };
-    settings: { view: boolean; edit: boolean };
-}
+import type { PermissionsMatrix } from '../types';
 
 interface Profile {
     id: string;
