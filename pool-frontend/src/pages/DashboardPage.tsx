@@ -46,7 +46,7 @@ export default function DashboardPage() {
     const { profile } = useAuth();
     const isAdmin = profile?.role === 'ADMIN';
 
-    const [activeTab, setActiveTab] = useState<ReportTab>(isAdmin ? 'REVENUE' : 'MY_SALES');
+    const [activeTab, setActiveTab] = useState<ReportTab>('REVENUE');
     const [dateRange, setDateRange] = useState<DateRange>('TODAY');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
@@ -127,8 +127,8 @@ export default function DashboardPage() {
             .lte('sold_at', to + 'T23:59:59+07:00')
             .order('sold_at', { ascending: false });
 
-        // For MY_SALES tab, filter by current user
-        if (activeTab === 'MY_SALES' && profile) {
+        // For non-admin staff, only show their own sales (unless they are viewing warnings)
+        if (!isAdmin && profile && activeTab !== 'WARNINGS') {
             query = query.eq('sold_by', profile.id);
         }
 
@@ -873,7 +873,7 @@ export default function DashboardPage() {
     }
 
     const tabs: { key: ReportTab; label: string; icon: string; adminOnly?: boolean }[] = [
-        { key: 'REVENUE', label: 'Doanh thu', icon: '💰', adminOnly: true },
+        { key: 'REVENUE', label: 'Doanh thu', icon: '💰' },
         { key: 'SESSIONS', label: 'Lượt khách (Scan)', icon: '🏊', adminOnly: true },
         { key: 'DAILY_PASSES', label: 'Vé lẻ hôm nay', icon: '�️', adminOnly: true },
         { key: 'LESSON_PACKAGES', label: 'Gói Học Bơi', icon: '📚', adminOnly: true },
