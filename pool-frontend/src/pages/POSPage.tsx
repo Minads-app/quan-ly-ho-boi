@@ -687,11 +687,9 @@ export default function POSPage() {
         const payload: any = {
             p_pass_id: passId,
             p_staff_id: profile?.id,
-            p_confirm_new_package: confirmNewPackage
+            p_confirm_new_package: confirmNewPackage,
+            p_selected_ticket_id: selectedTicketId || null // Must send null to match 4-argument RPC signature
         };
-        if (selectedTicketId) {
-            payload.p_selected_ticket_id = selectedTicketId;
-        }
 
         const { data, error } = await supabase.rpc('checkin_pass_and_issue_ticket', payload);
 
