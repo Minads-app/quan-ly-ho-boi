@@ -104,51 +104,31 @@ export default function POSPage() {
         fetchPromotions();
         fetchBusinessInfo();
 
-        // Initialize speech synthesis Voices early
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.getVoices();
+        async function fetchBusinessInfo() {
+            const { data } = await supabase.from('system_settings').select('key, value');
+            if (data) {
+                const info: any = {};
+                data.forEach(r => {
+                    let val = r.value;
+                    try {
+                        val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, '');
+                    } catch (e) {
+                        val = typeof val === 'string' ? val : String(val);
+                    }
+                    info[r.key] = val;
+                });
+                setBizInfo({
+                    business_name: info.business_name || 'Hệ Thống Vé Bơi',
+                    business_address: info.business_address || '',
+                    business_phone: info.business_phone || '',
+                    business_logo: info.business_logo || '',
+                    bank_name: info.bank_name || '',
+                    bank_account_number: info.bank_account_number || '',
+                    bank_account_name: info.bank_account_name || ''
+                });
+            }
         }
     }, []);
-
-    // Helper TTS function — tìm giọng Tiếng Việt tự động
-    function speakMessage(text: string) {
-        if (!('speechSynthesis' in window)) return;
-        window.speechSynthesis.cancel();
-        const msg = new SpeechSynthesisUtterance(text);
-        msg.lang = 'vi-VN';
-        msg.rate = 1.0;
-        msg.pitch = 1.0;
-        // Tìm giọng tiếng Việt trong danh sách
-        const voices = window.speechSynthesis.getVoices();
-        const viVoice = voices.find(v => v.lang === 'vi-VN' || v.lang.startsWith('vi'));
-        if (viVoice) msg.voice = viVoice;
-        window.speechSynthesis.speak(msg);
-    }
-
-    async function fetchBusinessInfo() {
-        const { data } = await supabase.from('system_settings').select('key, value');
-        if (data) {
-            const info: any = {};
-            data.forEach(r => {
-                let val = r.value;
-                try {
-                    val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, '');
-                } catch (e) {
-                    val = typeof val === 'string' ? val : String(val);
-                }
-                info[r.key] = val;
-            });
-            setBizInfo({
-                business_name: info.business_name || 'Hệ Thống Vé Bơi',
-                business_address: info.business_address || '',
-                business_phone: info.business_phone || '',
-                business_logo: info.business_logo || '',
-                bank_name: info.bank_name || '',
-                bank_account_number: info.bank_account_number || '',
-                bank_account_name: info.bank_account_name || ''
-            });
-        }
-    }
 
     async function fetchTicketTypes() {
         const { data } = await supabase
@@ -329,7 +309,7 @@ export default function POSPage() {
                 if (promo.type === 'AMOUNT') {
                     finalPrice = Math.max(0, finalPrice - promo.value);
                 } else if (promo.type === 'PERCENT') {
-                    finalPrice = Math.floor(finalPrice * (1 - promo.value / 100));
+                    finalPrice = Math.round(finalPrice * (1 - promo.value / 100));
                 } else if (promo.type === 'BONUS_SESSION' && finalSessions !== null) {
                     finalSessions += promo.value;
                 }
@@ -697,7 +677,7 @@ export default function POSPage() {
 
         if (error) {
             setCheckinError(error.message);
-            speakMessage('Lỗi hệ thống');
+
             return;
         }
 
@@ -716,7 +696,7 @@ export default function POSPage() {
 
             // Dùng message từ backend để hiển thị đúng ngữ cảnh
             const headerMsg = data.message || 'Xác nhận kích hoạt gói';
-            speakMessage('Xác nhận kích hoạt gói');
+
 
             const confirmed = window.confirm(
                 `📋 ${headerMsg}\n\n` +
@@ -737,11 +717,7 @@ export default function POSPage() {
 
         if (!data.success) {
             setCheckinError(data.message);
-            if (data.message.includes('đóng cửa')) speakMessage('Hồ bơi đang đóng cửa');
-            else if (data.message.includes('Chưa đến giờ') || data.message.includes('quá giờ')) speakMessage('Chưa đến giờ mở cửa');
-            else if (data.message.includes('Hết hạn')) speakMessage('Thẻ đã hết hạn');
-            else if (data.message.includes('Hết lượt')) speakMessage('Thẻ đã hết lượt bơi');
-            else speakMessage('Vé không hợp lệ');
+
             return;
         }
 
@@ -750,7 +726,7 @@ export default function POSPage() {
         const remainLabel = passCategory === 'LESSON' ? 'buổi học' : 'buổi bơi';
         const newPkgNote = data.is_new_package ? '\n🆕 Đã kích hoạt GÓI MỚI!' : '';
         alert(`✅ ${data.message}\n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} ${remainLabel}.` : 'Không giới hạn lượt.') + newPkgNote);
-        speakMessage('Xin mời vào');
+
 
         // Cập nhật giao diện in vé con
         let newTix = [];
@@ -1118,7 +1094,7 @@ export default function POSPage() {
                                         const p = promotions.find(x => x.id === selectedPromoId);
                                         let curr = selectedAdvancedType.price;
                                         if (p?.type === 'AMOUNT') curr = Math.max(0, curr - p.value);
-                                        if (p?.type === 'PERCENT') curr = Math.floor(curr * (1 - p.value / 100));
+                                        if (p?.type === 'PERCENT') curr = Math.round(curr * (1 - p.value / 100));
                                         return (
                                             <>
                                                 <span style={{ textDecoration: 'line-through', color: '#999', marginRight: '8px', fontSize: '13px' }}>
@@ -1444,12 +1420,36 @@ export default function POSPage() {
                         </div>
 
                         {(() => {
-                            let actualPrice = pendingTicketData.ticketType.price;
+                            // Tính giá thực tế cho private lesson (unitPrice × sessions)
+                            const tt = pendingTicketData.ticketType;
+                            const isPrivateLesson = tt.category === 'LESSON' && ((tt as any).lesson_class_type === 'ONE_ON_ONE' || (tt as any).lesson_class_type === 'ONE_ON_TWO');
+                            let actualPrice = tt.price;
+                            if (isPrivateLesson && privateSessions) {
+                                let unitPrice1 = tt.price;
+                                let unitPrice2 = 0;
+                                if (tt.age_price_tiers && tt.age_price_tiers.length > 0) {
+                                    const currentYear = new Date().getFullYear();
+                                    if (privateBirthYear) {
+                                        const age1 = currentYear - Number(privateBirthYear);
+                                        const tier1 = tt.age_price_tiers.find(tier => age1 >= tier.minAge && age1 <= tier.maxAge);
+                                        if (tier1) unitPrice1 = tier1.price;
+                                    }
+                                    if ((tt as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                                        unitPrice2 = tt.price;
+                                        const age2 = currentYear - Number(privateBirthYear2);
+                                        const tier2 = tt.age_price_tiers.find(tier => age2 >= tier.minAge && age2 <= tier.maxAge);
+                                        if (tier2) unitPrice2 = tier2.price;
+                                    }
+                                } else if ((tt as any).lesson_class_type === 'ONE_ON_TWO') {
+                                    unitPrice2 = tt.price;
+                                }
+                                actualPrice = Math.round((unitPrice1 + unitPrice2) * Number(privateSessions));
+                            }
                             if (pendingTicketData.promoId) {
                                 const promo = promotions.find(p => p.id === pendingTicketData.promoId);
                                 if (promo) {
                                     if (promo.type === 'AMOUNT') actualPrice = Math.max(0, actualPrice - promo.value);
-                                    if (promo.type === 'PERCENT') actualPrice = Math.floor(actualPrice * (1 - promo.value / 100));
+                                    if (promo.type === 'PERCENT') actualPrice = Math.round(actualPrice * (1 - promo.value / 100));
                                 }
                             }
                             const isFreeTicket = actualPrice === 0;
