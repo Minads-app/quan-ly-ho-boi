@@ -273,33 +273,26 @@ export default function POSPage() {
         if (isPrivateLesson && privateSessions) {
             finalSessions = Number(privateSessions);
 
-            // Calculate age-based price if tiers exist
+            const isOneOnTwo = (ticketType as any).lesson_class_type === 'ONE_ON_TWO';
             let unitPrice1 = ticketType.price;
             let unitPrice2 = 0;
-
             if (ticketType.age_price_tiers && ticketType.age_price_tiers.length > 0) {
                 const currentYear = new Date().getFullYear();
-
-                // Student 1
                 if (privateBirthYear) {
                     const age1 = currentYear - Number(privateBirthYear);
-                    const tier1 = ticketType.age_price_tiers.find(tier => age1 >= tier.minAge && age1 <= tier.maxAge);
-                    if (tier1) unitPrice1 = tier1.price;
+                    const tier1 = ticketType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
+                    if (tier1) unitPrice1 = Math.round(tier1.price); // Apply Math.round here
                 }
-
-                // Student 2 (only for ONE_ON_TWO)
-                if ((ticketType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                    unitPrice2 = ticketType.price; // default to base price
+                if (isOneOnTwo && privateBirthYear2) {
+                    unitPrice2 = ticketType.price;
                     const age2 = currentYear - Number(privateBirthYear2);
-                    const tier2 = ticketType.age_price_tiers.find(tier => age2 >= tier.minAge && age2 <= tier.maxAge);
-                    if (tier2) unitPrice2 = tier2.price;
+                    const tier2 = ticketType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
+                    if (tier2) unitPrice2 = Math.round(tier2.price); // Apply Math.round here
                 }
-            } else if ((ticketType as any).lesson_class_type === 'ONE_ON_TWO') {
-                // If there are no age tiers but it's 1:2, the price should be 2x the base price
+            } else if (isOneOnTwo) {
                 unitPrice2 = ticketType.price;
             }
-
-            const totalUnitPrice = unitPrice1 + unitPrice2;
+            const totalUnitPrice = Math.round(unitPrice1 + unitPrice2);
             finalPrice = Math.round(totalUnitPrice * finalSessions);
         }
 
@@ -1322,12 +1315,12 @@ export default function POSPage() {
                                                 unitPrice2 = selectedAdvancedType.price;
                                             }
 
-                                            const totalUnitPrice = unitPrice1 + unitPrice2;
+                                            const totalUnitPrice = Math.round(unitPrice1 + unitPrice2);
                                             const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
 
                                             return (
                                                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                    Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi)
+                                                    Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {totalUnitPrice.toLocaleString('vi-VN')}đ/buổi)
                                                     {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
                                                 </div>
                                             );
