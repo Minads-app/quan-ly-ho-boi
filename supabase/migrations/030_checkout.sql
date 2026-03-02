@@ -77,7 +77,7 @@ BEGIN
                     (v_item->'ticket_metadata'->>'total_sessions')::INTEGER,
                     (NULLIF(v_item->'ticket_metadata'->>'promotion_id', ''))::UUID,
                     NULLIF(v_item->'ticket_metadata'->>'card_code', ''),
-                    p_payment_method,
+                    p_payment_method::public.payment_method,
                     (v_item->'ticket_metadata'->>'customer_birth_year')::INTEGER,
                     NULLIF(v_item->'ticket_metadata'->>'customer_name_2', ''),
                     (v_item->'ticket_metadata'->>'customer_birth_year_2')::INTEGER,

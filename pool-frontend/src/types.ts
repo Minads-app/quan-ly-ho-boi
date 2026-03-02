@@ -93,6 +93,9 @@ export interface RetailProduct {
     price: number;
     stock_quantity: number;
     is_active: boolean;
+    sku: string | null;
+    unit: string;
+    parent_id: string | null;
     created_at: string;
     updated_at: string;
 }

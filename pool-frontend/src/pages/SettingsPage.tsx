@@ -61,14 +61,6 @@ interface Promotion {
     applicable_lesson_types: string[] | null;
 }
 
-interface RetailProduct {
-    id: string;
-    name: string;
-    price: number;
-    stock_quantity: number;
-    is_active: boolean;
-    created_at: string;
-}
 
 export default function SettingsPage() {
     const { profile } = useAuth();
@@ -94,7 +86,7 @@ export default function SettingsPage() {
     const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>(defaultSchedule);
 
     // active tab state
-    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons' | 'retail'>('system');
+    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons'>('system');
 
     // Ticket Types state
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
@@ -143,12 +135,7 @@ export default function SettingsPage() {
     const [lessonSchedulesMap, setLessonSchedulesMap] = useState<Record<string, LessonScheduleRow[]>>({});
     const [lAgeTiers, setLAgeTiers] = useState<{ minAge: number, maxAge: number, price: number }[]>([]);
 
-    // --- RETAIL PRODUCTS state ---
-    const [retailProducts, setRetailProducts] = useState<RetailProduct[]>([]);
-    const [showProductModal, setShowProductModal] = useState(false);
-    const [editingProduct, setEditingProduct] = useState<RetailProduct | null>(null);
-    const [prodName, setProdName] = useState('');
-    const [prodPrice, setProdPrice] = useState(0);
+
 
     const dayNames: Record<number, string> = { 0: 'Chủ nhật', 1: 'Thứ 2', 2: 'Thứ 3', 3: 'Thứ 4', 4: 'Thứ 5', 5: 'Thứ 6', 6: 'Thứ 7' };
 
@@ -158,7 +145,7 @@ export default function SettingsPage() {
         fetchPromotions();
         fetchWeekSchedule();
         fetchLessonTypes();
-        fetchRetailProducts();
+
     }, []);
 
     async function fetchSettings() {
@@ -200,13 +187,7 @@ export default function SettingsPage() {
         if (data) setPromotions(data);
     }
 
-    async function fetchRetailProducts() {
-        const { data } = await supabase
-            .from('products')
-            .select('*')
-            .order('created_at', { ascending: false });
-        if (data) setRetailProducts(data);
-    }
+
 
     async function saveAllSettings() {
         setSaving(true);
@@ -265,49 +246,7 @@ export default function SettingsPage() {
         fri: 'Thứ 6', sat: 'Thứ 7', sun: 'CN',
     };
 
-    // --- RETAIL PRODUCTS MANAGEMENT ---
-    function openNewProductModal() {
-        setEditingProduct(null);
-        setProdName('');
-        setProdPrice(0);
-        setShowProductModal(true);
-    }
 
-    function openEditProductModal(p: RetailProduct) {
-        setEditingProduct(p);
-        setProdName(p.name);
-        setProdPrice(p.price);
-        setShowProductModal(true);
-    }
-
-    async function toggleProductActive(id: string, currentStatus: boolean) {
-        await supabase.from('products').update({ is_active: !currentStatus }).eq('id', id);
-        fetchRetailProducts();
-    }
-
-    async function handleSaveProduct(e: React.FormEvent) {
-        e.preventDefault();
-        setSaving(true);
-        const payload = { name: prodName, price: prodPrice };
-        if (editingProduct) {
-            await supabase.from('products').update(payload).eq('id', editingProduct.id);
-        } else {
-            await supabase.from('products').insert([payload]);
-        }
-        setShowProductModal(false);
-        setSaving(false);
-        fetchRetailProducts();
-    }
-
-    async function handleDeleteProduct(id: string) {
-        if (!window.confirm('Bạn có chắc chắn muốn xóa sản phẩm này? Lưu ý: Không thể xóa nếu đã có phát sinh giao dịch/nhập kho.')) return;
-        const { error } = await supabase.from('products').delete().eq('id', id);
-        if (error) {
-            alert('Không thể xóa: Sản phẩm này đã có giao dịch mua bán hoặc lịch sử nhập/xuất kho. Vui lòng chuyển sang "Đã ẩn".');
-        } else {
-            fetchRetailProducts();
-        }
-    }
 
     // --- TICKET TYPE MANAGEMENT ---
 
@@ -637,13 +576,7 @@ export default function SettingsPage() {
                 >
                     🎁 Khuyến Mãi
                 </button>
-                <button
-                    className={`btn ${activeTab === 'retail' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('retail')}
-                >
-                    🛍️ Hàng Bán Lẻ
-                </button>
+
             </div>
 
             {activeTab === 'business' && (
@@ -1051,70 +984,7 @@ export default function SettingsPage() {
                 </div>
             )}
 
-            {activeTab === 'retail' && (
-                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
-                    <div className="dashboard-content-card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <h2 style={{ fontSize: '18px', margin: 0 }}>Danh sách Sản phẩm bán lẻ (Nước, Đồ bơi...)</h2>
-                            <button className="btn btn-primary btn-sm" onClick={openNewProductModal}>
-                                ➕ Thêm Sản phẩm
-                            </button>
-                        </div>
 
-                        <div className="table-responsive">
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Tên sản phẩm</th>
-                                        <th>Giá bán</th>
-                                        <th>Tồn kho</th>
-                                        <th>Trạng thái</th>
-                                        <th>Thao tác</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {retailProducts.map(p => (
-                                        <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.5 }}>
-                                            <td><strong>{p.name}</strong></td>
-                                            <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
-                                                {p.price.toLocaleString('vi-VN')}đ
-                                            </td>
-                                            <td>{p.stock_quantity.toLocaleString('vi-VN')}</td>
-                                            <td>
-                                                <button
-                                                    className={`badge ${p.is_active ? 'badge-success' : 'badge-error'}`}
-                                                    onClick={() => toggleProductActive(p.id, p.is_active)}
-                                                    style={{ cursor: 'pointer', border: 'none' }}
-                                                >
-                                                    {p.is_active ? 'Đang bán' : 'Đã ẩn'}
-                                                </button>
-                                            </td>
-                                            <td>
-                                                <button
-                                                    className="btn btn-ghost btn-sm"
-                                                    onClick={() => openEditProductModal(p)}
-                                                >
-                                                    ✏️ Sửa
-                                                </button>
-                                                <button
-                                                    className="btn btn-ghost btn-sm"
-                                                    style={{ color: 'var(--alert-red)', marginLeft: '8px' }}
-                                                    onClick={() => handleDeleteProduct(p.id)}
-                                                >
-                                                    🗑️ Xóa
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {retailProducts.length === 0 && (
-                                        <tr><td colSpan={5} style={{ textAlign: 'center' }}>Chưa có sản phẩm nào.</td></tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {showTicketModal && (
                 <div className="modal-overlay">
@@ -1580,27 +1450,7 @@ export default function SettingsPage() {
                 </div>
             )}
 
-            {showProductModal && (
-                <div className="modal-overlay">
-                    <div className="modal-card" style={{ maxWidth: '400px' }}>
-                        <h2>{editingProduct ? 'Sửa Sản phẩm' : 'Thêm Sản phẩm mới'}</h2>
-                        <form onSubmit={handleSaveProduct}>
-                            <div className="form-group">
-                                <label>Tên sản phẩm (VD: Nước khoáng Aquafina)</label>
-                                <input type="text" required value={prodName} onChange={e => setProdName(e.target.value)} />
-                            </div>
-                            <div className="form-group">
-                                <label>Giá bán (VND)</label>
-                                <input type="number" min="0" required value={prodPrice} onChange={e => setProdPrice(Number(e.target.value))} />
-                            </div>
-                            <div className="modal-actions" style={{ marginTop: '24px' }}>
-                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowProductModal(false)} disabled={saving}>Hủy</button>
-                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu sản phẩm'}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
+
         </div>
     );
 }

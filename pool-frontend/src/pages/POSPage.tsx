@@ -176,7 +176,12 @@ export default function POSPage() {
 
         async function fetchProducts() {
             const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
-            if (data) setProducts(data);
+            if (data) {
+                // Show only leaf products: standalone (no variants) + variant children
+                const parentIds = new Set(data.filter(p => p.parent_id).map(p => p.parent_id));
+                const leafProducts = data.filter(p => p.parent_id || !parentIds.has(p.id));
+                setProducts(leafProducts);
+            }
         }
 
         async function fetchBusinessInfo() {
@@ -805,8 +810,8 @@ export default function POSPage() {
             };
         }),
         ...products.map((p): PosItem => ({
-            id: p.id, name: p.name, description: '', icon: '🥤', price: p.price,
-            borderColor: '#f59e0b', badge: p.stock_quantity <= 0 ? '❌ Hết hàng' : `Kho: ${p.stock_quantity}`,
+            id: p.id, name: p.name, description: p.sku ? `${p.sku}` : '', icon: '🥤', price: p.price,
+            borderColor: '#f59e0b', badge: p.stock_quantity <= 0 ? '❌ Hết hàng' : `Kho: ${p.stock_quantity} ${p.unit || ''}`,
             badgeColor: p.stock_quantity <= 0 ? '#fee2e2' : '#fef3c7', disabled: p.stock_quantity <= 0,
             onClick: () => handleProductSaleClick(p), filterCat: 'PRODUCT'
         })),
