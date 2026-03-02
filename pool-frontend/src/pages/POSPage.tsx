@@ -83,6 +83,8 @@ export default function POSPage() {
     const [custSearchTerm, setCustSearchTerm] = useState('');
     const [custSearchResults, setCustSearchResults] = useState<{ name: string, phone: string, card_code: string, birth_year?: number | null }[]>([]);
     const [searchingCust, setSearchingCust] = useState(false);
+    const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
+    const customerSearchRef = useRef<HTMLInputElement>(null);
 
     // Promotions
     const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -119,6 +121,18 @@ export default function POSPage() {
     // POS Search & Filter
     const [searchTerm, setSearchTerm] = useState('');
     const [activeCategory, setActiveCategory] = useState<'ALL' | 'DAILY' | 'ADVANCED' | 'LESSON' | 'PRODUCT'>('ALL');
+
+    // F3 shortcut to focus customer search
+    useEffect(() => {
+        function handleKeyDown(e: KeyboardEvent) {
+            if (e.key === 'F3') {
+                e.preventDefault();
+                customerSearchRef.current?.focus();
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     async function handleCardBlur() {
         if (!cardCode.trim() || customerMode !== 'NEW') return;
@@ -984,12 +998,133 @@ export default function POSPage() {
 
                     {/* RIGHT COLUMN: CART */}
                     <div style={{ width: '360px', background: '#fff', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 120px)', position: 'sticky', top: '24px' }}>
-                        <div style={{ padding: '20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h2 style={{ fontSize: '18px', margin: 0 }}>🛒 Giỏ hàng</h2>
-                            <span style={{ background: 'var(--bg-hover)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 }}>{cart.length} món</span>
+                        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <h2 style={{ fontSize: '18px', margin: 0 }}>🛒 Giỏ hàng</h2>
+                                <span style={{ background: 'var(--bg-hover)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 }}>{cart.length} món</span>
+                            </div>
+
+                            {/* ALWAYS-VISIBLE CUSTOMER SEARCH BAR */}
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                <div style={{ flex: 1, position: 'relative' }}>
+                                    <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: '#94a3b8' }}>🔍</span>
+                                    <input
+                                        ref={customerSearchRef}
+                                        type="text"
+                                        placeholder="Tìm khách hàng"
+                                        value={custSearchTerm}
+                                        onChange={async (e) => {
+                                            const term = e.target.value;
+                                            setCustSearchTerm(term);
+                                            if (term.length < 2) { setCustSearchResults([]); return; }
+                                            setSearchingCust(true);
+                                            const { data } = await supabase
+                                                .from('tickets')
+                                                .select('customer_name, customer_phone, card_code, ticket_types!inner(category)')
+                                                .or(`card_code.ilike.%${term}%,customer_phone.ilike.%${term}%,customer_name.ilike.%${term}%`)
+                                                .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+                                                .limit(20);
+                                            const seen = new Set<string>();
+                                            const unique = (data || []).filter((d: any) => {
+                                                const key = d.customer_phone || d.card_code;
+                                                if (!key || seen.has(key)) return false;
+                                                seen.add(key);
+                                                return true;
+                                            }).map((d: any) => ({
+                                                name: d.customer_name || '',
+                                                phone: d.customer_phone || '',
+                                                card_code: d.card_code || ''
+                                            }));
+                                            setCustSearchResults(unique);
+                                            setSearchingCust(false);
+                                        }}
+                                        style={{
+                                            width: '100%', padding: '8px 10px 8px 32px', fontSize: '13px',
+                                            borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none',
+                                            background: '#f8fafc',
+                                        }}
+                                        onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
+                                        onBlur={e => e.currentTarget.style.borderColor = '#e2e8f0'}
+                                    />
+                                    <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: '#94a3b8', background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>F3</span>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setShowNewCustomerForm(!showNewCustomerForm);
+                                        setCustomerMode('NEW');
+                                        if (!showNewCustomerForm) { setCustomerName(''); setCustomerPhone(''); setCardCode(''); }
+                                    }}
+                                    style={{
+                                        width: '36px', height: '36px', borderRadius: '8px', border: '1px solid #e2e8f0',
+                                        background: showNewCustomerForm ? '#3b82f6' : '#f8fafc',
+                                        color: showNewCustomerForm ? '#fff' : '#475569',
+                                        cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        transition: 'all 0.15s', flexShrink: 0,
+                                    }}
+                                    title="Thêm khách hàng mới"
+                                >+</button>
+                            </div>
+
+                            {/* Search results dropdown */}
+                            {custSearchResults.length > 0 && (
+                                <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                                    {custSearchResults.map((c, i) => (
+                                        <div key={i} onClick={() => {
+                                            setCustomerMode('EXISTING');
+                                            setCustomerName(c.name);
+                                            setCustomerPhone(c.phone);
+                                            setCardCode(c.card_code);
+                                            setCustSearchResults([]);
+                                            setCustSearchTerm('');
+                                            setShowNewCustomerForm(false);
+                                        }} style={{
+                                            padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9',
+                                            fontSize: '13px', transition: 'background 0.15s'
+                                        }}
+                                            onMouseEnter={e => (e.currentTarget.style.background = '#f0f9ff')}
+                                            onMouseLeave={e => (e.currentTarget.style.background = '')}>
+                                            <strong>{c.name || 'N/A'}</strong>
+                                            <span style={{ marginLeft: '8px', color: '#64748b' }}>📞 {c.phone || '—'}</span>
+                                            <span style={{ marginLeft: '8px', color: '#94a3b8', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {searchingCust && <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>Đang tìm...</span>}
+
+                            {/* Selected customer info display */}
+                            {(cardCode || customerName || customerPhone) && !showNewCustomerForm && (
+                                <div style={{ marginTop: '8px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div style={{ fontSize: '12px' }}>
+                                        <div style={{ fontWeight: 600, color: '#166534' }}>👤 {customerName || 'Chưa có tên'}</div>
+                                        <div style={{ color: '#64748b', marginTop: '2px' }}>
+                                            {cardCode && <span>🏷️ {cardCode}</span>}
+                                            {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
+                                        </div>
+                                    </div>
+                                    <button onClick={() => {
+                                        setCustomerName(''); setCustomerPhone(''); setCardCode('');
+                                        setCustomerMode('NEW'); setCustSearchTerm('');
+                                    }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>&times;</button>
+                                </div>
+                            )}
+
+                            {/* New customer form (shown when + is clicked) */}
+                            {showNewCustomerForm && (
+                                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <input type="text" placeholder="🏷️ Mã Thẻ Nhựa *" value={cardCode} onChange={e => setCardCode(e.target.value)} onBlur={handleCardBlur}
+                                        style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
+                                    <input type="text" placeholder="👤 Họ và Tên *" value={customerName} onChange={e => setCustomerName(e.target.value)}
+                                        style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
+                                    <input type="tel" placeholder="📞 Số điện thoại *" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} onBlur={handlePhoneBlur}
+                                        style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
+                                    <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-end', fontSize: '12px' }}
+                                        onClick={() => setShowNewCustomerForm(false)}>Xong</button>
+                                </div>
+                            )}
                         </div>
 
-                        <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             {cart.length === 0 ? (
                                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', margin: '40px 0' }}>
                                     <div style={{ fontSize: '40px', marginBottom: '12px' }}>🛍️</div>
@@ -997,7 +1132,7 @@ export default function POSPage() {
                                 </div>
                             ) : (
                                 cart.map(c => (
-                                    <div key={c.cart_id} style={{ display: 'flex', gap: '12px', paddingBottom: '16px', borderBottom: '1px dashed #e2e8f0' }}>
+                                    <div key={c.cart_id} style={{ display: 'flex', gap: '12px', paddingBottom: '12px', borderBottom: '1px dashed #e2e8f0' }}>
                                         <div style={{ flex: 1 }}>
                                             <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>{c.item.name} {c.type === 'TICKET' && c.item.category === 'LESSON' ? (c.privateSessions ? `(${c.privateSessions} buổi)` : '') : ''}</span>
@@ -1030,6 +1165,11 @@ export default function POSPage() {
                             <button className="btn btn-primary" style={{ width: '100%', padding: '14px', fontSize: '15px' }} disabled={cart.length === 0 || selling}
                                 onClick={() => {
                                     const hasAdvanced = cart.some(c => c.type === 'TICKET' && c.item.category !== 'DAILY');
+                                    if (hasAdvanced && (!cardCode.trim() || !customerPhone.trim())) {
+                                        alert('Vui lòng nhập thông tin khách hàng (Mã thẻ, SĐT) trước khi thanh toán vé gói/thẻ tháng/khóa học.\n\nBấm F3 để tìm khách cũ hoặc bấm "+" để thêm khách mới.');
+                                        customerSearchRef.current?.focus();
+                                        return;
+                                    }
                                     if (hasAdvanced) {
                                         setCustomerMode('NEW');
                                     }
