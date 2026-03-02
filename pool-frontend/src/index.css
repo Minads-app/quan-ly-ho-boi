@@ -290,14 +290,15 @@ body {
 }
 
 .btn-secondary {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  background: #f0f7ff;
+  color: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+  font-weight: 600;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--accent-blue);
+  background: var(--accent-blue);
+  color: #fff;
 }
 
 .btn-ghost {

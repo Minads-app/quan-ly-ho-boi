@@ -202,7 +202,7 @@ export default function CashPage() {
 
                             <div className="modal-actions" style={{ marginTop: '24px' }}>
                                 <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowModal(false)} disabled={isSaving}>Hủy</button>
-                                <button type="submit" className="btn btn-primary" style={{ flex: 1, background: 'var(--alert-red)', borderColor: 'var(--alert-red)' }} disabled={isSaving}>{isSaving ? 'Đang lưu...' : 'Lưu Phiếu Chi'}</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1, background: '#ef4444', borderColor: '#ef4444', color: '#fff' }} disabled={isSaving}>{isSaving ? 'Đang lưu...' : 'Lưu Phiếu Chi'}</button>
                             </div>
                         </form>
                     </div>
