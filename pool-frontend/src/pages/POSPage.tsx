@@ -610,29 +610,6 @@ export default function POSPage() {
         win.document.close();
     }
 
-    <div class="row"><span class="lbl">Thời gian:</span><span class="val">${info.soldAt}</span></div>
-
-          ${
-        info.paymentMethod === 'TRANSFER' && bizInfo.bank_account_number && bizInfo.bank_name ? `
-            <div class="divider"></div>
-            <div style="text-align:center; margin-top: ${isA5 ? '16px' : '8px'};">
-              <p style="font-size:${isA5 ? '14px' : '10px'}; font-weight:700; margin-bottom: ${isA5 ? '8px' : '4px'};">Quét mã QR để thanh toán</p>
-              <img src="https://img.vietqr.io/image/${bizInfo.bank_name}-${bizInfo.bank_account_number}-compact2.png?amount=${info.pricePaid}&addInfo=VeBoi${info.ticketName.replace(/\s/g, '')}&accountName=${bizInfo.bank_account_name || ''}" style="width: 100%; max-width: ${isA5 ? '200px' : '120px'};" />
-              <p style="font-size:${isA5 ? '13px' : '10px'}; margin-top: ${isA5 ? '8px' : '4px'};">Ngân hàng: <b>${bizInfo.bank_name}</b></p>
-              <p style="font-size:${isA5 ? '13px' : '10px'};">STK: <b>${bizInfo.bank_account_number}</b></p>
-              ${bizInfo.bank_account_name ? `<p style="font-size:${isA5 ? '13px' : '10px'};">Chủ TK: <b>${bizInfo.bank_account_name}</b></p>` : ''}
-            </div>
-          ` : ''
-    }
-
-    <p class="footer">Cảm ơn quý khách!<br />Vui lòng giữ phiếu thu để đối chiếu khi cần.</p>
-        </div >
-        <script>setTimeout(function(){window.print();}, 1500);<\/script>
-        </body>
-      </html >
-        `);
-        win.document.close();
-    }
 
     function formatPrice(price: number) {
         return new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -678,11 +655,11 @@ export default function POSPage() {
 
 
             const confirmed = window.confirm(
-                `📋 ${ headerMsg } \n\n` +
+                `📋 ${headerMsg}\n\n` +
                 `Thông tin gói: \n` +
-                `• Khách: ${ info.customer_name || 'N/A' } \n` +
-                `• Loại: ${ catLabel } — ${ info.type_name } \n` +
-                `• Số buổi: ${ info.total_sessions || info.remaining_sessions || 'Không giới hạn' } \n\n` +
+                `• Khách: ${info.customer_name || 'N/A'}\n` +
+                `• Loại: ${catLabel} — ${info.type_name}\n` +
+                `• Số buổi: ${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}\n\n` +
                 `Bấm OK để KÍCH HOẠT và trừ 1 buổi.\n` +
                 `Bấm Hủy để KHÔNG kích hoạt.`
             );
@@ -704,7 +681,7 @@ export default function POSPage() {
         const passCategory = data.pass_status.category || '';
         const remainLabel = passCategory === 'LESSON' ? 'buổi học' : 'buổi bơi';
         const newPkgNote = data.is_new_package ? '\n🆕 Đã kích hoạt GÓI MỚI!' : '';
-        alert(`✅ ${ data.message } \n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${ data.pass_status.remaining_sessions } ${ remainLabel }.` : 'Không giới hạn lượt.') + newPkgNote);
+        alert(`✅ ${data.message}\n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} ${remainLabel}.` : 'Không giới hạn lượt.') + newPkgNote);
 
 
         // Cập nhật giao diện in vé con
@@ -803,10 +780,10 @@ export default function POSPage() {
                     boxShadow: '0 2px 12px rgba(0,0,0,0.08)', transition: 'all 0.2s ease',
                     transform: 'translateY(0)',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${ colors[0] } 30`; }}
+                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${colors[0]}30`; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'; }}>
                 {/* Top accent */}
-                <div style={{ height: '4px', background: `linear - gradient(90deg, ${ colors[0]}, ${ colors[1]})` }} />
+                <div style={{ height: '4px', background: `linear-gradient(90deg, ${colors[0]}, ${colors[1]})` }} />
                 <div style={{ padding: '18px 20px', paddingBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                         <span style={{ fontSize: '28px' }}>{icons}</span>
@@ -815,15 +792,15 @@ export default function POSPage() {
                             {t.description && <div style={{ fontSize: '12px', color: '#64748b' }}>{t.description}</div>}
                         </div>
                     </div>
-                    <div style={{ fontSize: '26px', fontWeight: 800, background: `linear - gradient(135deg, ${ colors[0]}, ${ colors[1]})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '26px', fontWeight: 800, background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
                         {t.price.toLocaleString('vi-VN')} đ
                     </div>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: isDaily ? '12px' : '0' }}>
                         <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
-                            {t.validity_days ? `⏱ ${ t.validity_days } ngày` : '⏱ Trong ngày'}
+                            {t.validity_days ? `⏱ ${t.validity_days} ngày` : '⏱ Trong ngày'}
                         </span>
                         <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
-                            {t.session_count ? `🏊 ${ t.session_count } lượt` : '🏊 Không giới hạn'}
+                            {t.session_count ? `🏊 ${t.session_count} lượt` : '🏊 Không giới hạn'}
                         </span>
                     </div>
 
@@ -860,10 +837,10 @@ export default function POSPage() {
         const classLabel = (t as any).lesson_class_type === 'GROUP' ? '👥 Nhóm' : (t as any).lesson_class_type === 'ONE_ON_ONE' ? '🧑‍🏫 1:1' : '🧑‍🏫 1:2';
         const scheds = lessonSchedulesMap[t.id] || [];
         const schedText = (t as any).lesson_schedule_type === 'FIXED' && scheds.length > 0
-            ? scheds.map((s: any) => `${ dayNamesShort[s.day_of_week] } ${ s.start_time?.substring(0, 5) } `).join(', ')
+            ? scheds.map((s: any) => `${dayNamesShort[s.day_of_week]} ${s.start_time?.substring(0, 5)} `).join(', ')
             : 'Lịch tự do';
         const durationText = (t as any).lesson_class_type === 'GROUP'
-            ? ((t as any).duration_unit === 'months' ? `${ (t as any).duration_months } tháng` : (t as any).duration_unit === 'days' ? `${ t.validity_days } ngày` : '')
+            ? ((t as any).duration_unit === 'months' ? `${(t as any).duration_months} tháng` : (t as any).duration_unit === 'days' ? `${t.validity_days} ngày` : '')
             : 'Tự chọn khi ĐK';
         const isPrivate = (t as any).lesson_class_type === 'ONE_ON_ONE' || (t as any).lesson_class_type === 'ONE_ON_TWO';
         return (
@@ -874,9 +851,9 @@ export default function POSPage() {
                     boxShadow: '0 2px 12px rgba(0,0,0,0.08)', transition: 'all 0.2s ease',
                     transform: 'translateY(0)',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${ colors[0] } 30`; }}
+                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${colors[0]}30`; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'; }}>
-                <div style={{ height: '4px', background: `linear - gradient(90deg, ${ colors[0]}, ${ colors[1]})` }} />
+                <div style={{ height: '4px', background: `linear-gradient(90deg, ${colors[0]}, ${colors[1]})` }} />
                 <div style={{ padding: '18px 20px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                         <span style={{ fontSize: '28px' }}>📚</span>
@@ -885,7 +862,7 @@ export default function POSPage() {
                             {t.description && <div style={{ fontSize: '12px', color: '#64748b' }}>{t.description}</div>}
                         </div>
                     </div>
-                    <div style={{ fontSize: '26px', fontWeight: 800, background: `linear - gradient(135deg, ${ colors[0]}, ${ colors[1]})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '26px', fontWeight: 800, background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
                         {t.price.toLocaleString('vi-VN')} đ{isPrivate ? ' / buổi' : ''}
                     </div>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -893,7 +870,7 @@ export default function POSPage() {
                             {classLabel}
                         </span>
                         <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
-                            🏊 {isPrivate ? 'Tự chọn số buổi' : `${ t.session_count } buổi`}
+                            🏊 {isPrivate ? 'Tự chọn số buổi' : `${t.session_count} buổi`}
                         </span>
                         {durationText && <span style={{ background: colors[2], color: colors[3], padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
                             ⏱ {durationText}
@@ -919,7 +896,7 @@ export default function POSPage() {
                 }}
                 onMouseEnter={e => { if (!outOfStock) { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px #f59e0b30`; } }}
                 onMouseLeave={e => { if (!outOfStock) { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'; } }}>
-                <div style={{ height: '4px', background: `linear - gradient(90deg, #fbbf24, #f59e0b)` }} />
+                <div style={{ height: '4px', background: `linear-gradient(90deg, #fbbf24, #f59e0b)` }} />
                 <div style={{ padding: '18px 20px', paddingBottom: '14px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                         <span style={{ fontSize: '28px' }}>🥤</span>
@@ -927,11 +904,11 @@ export default function POSPage() {
                             <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1d27' }}>{p.name}</div>
                         </div>
                     </div>
-                    <div style={{ fontSize: '24px', fontWeight: 800, background: `linear - gradient(135deg, #fbbf24, #d97706)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '24px', fontWeight: 800, background: `linear-gradient(135deg, #fbbf24, #d97706)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
                         {p.price.toLocaleString('vi-VN')} đ
                     </div>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: outOfStock ? '#ef4444' : '#64748b' }}>
-                        {outOfStock ? 'Hết hàng' : `Kho: ${ p.stock_quantity } `}
+                        {outOfStock ? 'Hết hàng' : `Kho: ${p.stock_quantity} `}
                     </div>
                 </div>
             </button>
@@ -954,7 +931,7 @@ export default function POSPage() {
                                 <h2>{ticket.pass_category === 'LESSON' ? '📚 VÉ HỌC BƠI' : ticket.pass_category ? '🏊 VÉ BƠI TRẢ TRƯỚC' : '🏊 VÉ BƠI'}</h2>
 
                                 <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
-                                <div><strong>Hiệu lực:</strong> {ticket.valid_from === ticket.valid_until ? 'Trong ngày' : `${ ticket.valid_from } → ${ ticket.valid_until } `}</div>
+                                <div><strong>Hiệu lực:</strong> {ticket.valid_from === ticket.valid_until ? 'Trong ngày' : `${ticket.valid_from} → ${ticket.valid_until} `}</div>
 
                                 {/* Số buổi còn lại (từ gói gốc) cho vé trả trước / học bơi */}
                                 {ticket.pass_category && ticket.pass_remaining_sessions !== undefined && ticket.pass_remaining_sessions !== null && (
@@ -991,11 +968,11 @@ export default function POSPage() {
                                 <p className="footer">
                                     Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
                                     Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
-                                    {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${ index + 1} /${soldTickets.length})`}</span >}
-                                </p >
-                            </div >
+                                    {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
+                                </p>
+                            </div>
                         ))}
-                    </div >
+                    </div>
 
     <div className="sold-ticket-actions">
         <button className="btn btn-primary" onClick={handlePrint}>
@@ -1005,8 +982,8 @@ export default function POSPage() {
             ← Bán vé tiếp
         </button>
     </div>
-                </div >
-            </div >
+                </div>
+            </div>
         );
     }
 
@@ -1534,7 +1511,7 @@ return (
                                     <button type="submit" className="btn btn-primary" style={{ flex: 2 }} disabled={selling}>
                                         {selling ? 'Đang xử lý...' : (isFreeTicket ? 'PHÁT HÀNH' : 'XÁC NHẬN THANH TOÁN')}
                                     </button>
-                                </div >
+                                </div>
                             </form>
                         );
                     })()}
@@ -1609,6 +1586,6 @@ return (
                 </div>
             </div>
         )}
-    </div >
+    </div>
 );
 }
