@@ -22,6 +22,8 @@ export interface CartItem {
     customerName?: string;
     customerPhone?: string;
     cardCode?: string;
+    guardianName?: string;
+    guardianPhone?: string;
 }
 
 interface SoldTicket extends Ticket {
@@ -79,7 +81,7 @@ export default function POSPage() {
     const [selectedAdvancedType, setSelectedAdvancedType] = useState<TicketType | null>(null);
 
     // New/Existing customer toggle
-    const [customerMode, setCustomerMode] = useState<'NEW' | 'EXISTING'>('NEW');
+
     const [custSearchTerm, setCustSearchTerm] = useState('');
     const [custSearchResults, setCustSearchResults] = useState<Customer[]>([]);
     const [searchingCust, setSearchingCust] = useState(false);
@@ -125,6 +127,9 @@ export default function POSPage() {
     const [privateBirthYear, setPrivateBirthYear] = useState<number | ''>('');
     const [customerName2, setCustomerName2] = useState('');
     const [privateBirthYear2, setPrivateBirthYear2] = useState<number | ''>('');
+    const [guardianName, setGuardianName] = useState('');
+    const [guardianPhone, setGuardianPhone] = useState('');
+    const [selectedCustomerBirthDate, setSelectedCustomerBirthDate] = useState<string | null>(null);
 
     // Multi-package selection state
     const [showPackageSelectModal, setShowPackageSelectModal] = useState(false);
@@ -158,7 +163,7 @@ export default function POSPage() {
                     setCustomerPhone(cust.phone);
                     setCardCode(cust.card_code);
                     setSelectedCustomerId(cust.id);
-                    setCustomerMode('EXISTING');
+                    setSelectedCustomerBirthDate(cust.birth_date || null);
                     setCustSearchResults([]);
                     setCustSearchTerm('');
                 }
@@ -167,54 +172,6 @@ export default function POSPage() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [hotkeyCustomers, showNewCustomerModal, selectedAdvancedType, showPaymentModal, showPackageSelectModal]);
-
-    async function handleCardBlur() {
-        if (!cardCode.trim() || customerMode !== 'NEW') return;
-        const { data } = await supabase
-            .from('tickets')
-            .select('customer_name, customer_phone, customer_birth_year, card_code, ticket_types!inner(category)')
-            .eq('card_code', cardCode.trim())
-            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
-            .limit(1);
-
-        if (data && data.length > 0) {
-            const confirmed = window.confirm('Mã thẻ đã tồn tại, bạn có muốn đăng ký cho khách cũ không?');
-            if (confirmed) {
-                setCustomerMode('EXISTING');
-                const cust = data[0];
-                setCustomerName(cust.customer_name || '');
-                setCustomerPhone(cust.customer_phone || '');
-                setCardCode(cust.card_code || '');
-                if (cust.customer_birth_year) setPrivateBirthYear(cust.customer_birth_year);
-            } else {
-                setCardCode(''); // Clear it
-            }
-        }
-    }
-
-    async function handlePhoneBlur() {
-        if (!customerPhone.trim() || customerMode !== 'NEW') return;
-        const { data } = await supabase
-            .from('tickets')
-            .select('customer_name, customer_phone, customer_birth_year, card_code, ticket_types!inner(category)')
-            .eq('customer_phone', customerPhone.trim())
-            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
-            .limit(1);
-
-        if (data && data.length > 0) {
-            const confirmed = window.confirm('Số điện thoại đã tồn tại, bạn có muốn đăng ký cho khách cũ không?');
-            if (confirmed) {
-                setCustomerMode('EXISTING');
-                const cust = data[0];
-                setCustomerName(cust.customer_name || '');
-                setCustomerPhone(cust.customer_phone || '');
-                setCardCode(cust.card_code || '');
-                if (cust.customer_birth_year) setPrivateBirthYear(cust.customer_birth_year);
-            } else {
-                setCustomerPhone(''); // Clear it
-            }
-        }
-    }
 
     useEffect(() => {
         fetchTicketTypes();
@@ -343,9 +300,17 @@ export default function POSPage() {
         setPrivateDurationVal('');
         setPrivateDurationUnit('months');
         setPrivateUnlimited(true);
-        setPrivateBirthYear('');
         setCustomerName2('');
         setPrivateBirthYear2('');
+        setGuardianName('');
+        setGuardianPhone('');
+        // Auto-fill birth year from selected customer for 1:1 / 1:2 lessons
+        const isPrivate = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
+        if (isPrivate && selectedCustomerBirthDate) {
+            setPrivateBirthYear(new Date(selectedCustomerBirthDate).getFullYear());
+        } else {
+            setPrivateBirthYear('');
+        }
     }
 
     // --- Save new customer to customers table ---
@@ -382,7 +347,7 @@ export default function POSPage() {
         setCustomerPhone(data.phone);
         setCardCode(data.card_code);
         setSelectedCustomerId(data.id);
-        setCustomerMode('EXISTING');
+        setSelectedCustomerBirthDate(data.birth_date || null);
         setShowNewCustomerModal(false);
         setSavingCustomer(false);
         if (data.hotkey) fetchHotkeyCustomers();
@@ -476,7 +441,9 @@ export default function POSPage() {
                     customer_name_2: c.customerName2 || null,
                     customer_birth_year_2: c.privateBirthYear2 || null,
                     custom_duration_months: customDurationMonths,
-                    custom_validity_days: customValidityDays
+                    custom_validity_days: customValidityDays,
+                    guardian_name: c.guardianName || null,
+                    guardian_phone: c.guardianPhone || null
                 }
             };
         });
@@ -532,6 +499,7 @@ export default function POSPage() {
         setCustomerName('');
         setCustomerPhone('');
         setCardCode('');
+        setSelectedCustomerBirthDate(null);
         setSelectedPaymentMethod('CASH');
         setShowPaymentModal(false);
     }
@@ -557,6 +525,21 @@ export default function POSPage() {
                 }
                 if (!privateBirthYear2) {
                     alert('Vui lòng nhập năm sinh học viên 2!');
+                    return;
+                }
+            }
+
+            // Guardian info required for under-18 students
+            const currentYearGuardian = new Date().getFullYear();
+            const age1Guardian = currentYearGuardian - Number(privateBirthYear);
+            const needsGuardian1 = age1Guardian < 18;
+            let needsGuardian2 = false;
+            if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                needsGuardian2 = (currentYearGuardian - Number(privateBirthYear2)) < 18;
+            }
+            if (needsGuardian1 || needsGuardian2) {
+                if (!guardianName.trim() || !guardianPhone.trim()) {
+                    alert('Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ (Họ tên, SĐT)!');
                     return;
                 }
             }
@@ -622,7 +605,9 @@ export default function POSPage() {
             privateUnlimited: privateUnlimited,
             customerName: customerName || undefined,
             customerPhone: customerPhone || undefined,
-            cardCode: cardCode.trim() || undefined
+            cardCode: cardCode.trim() || undefined,
+            guardianName: guardianName.trim() || undefined,
+            guardianPhone: guardianPhone.trim() || undefined
         } as any]);
 
         setSelectedAdvancedType(null);
@@ -1144,11 +1129,11 @@ export default function POSPage() {
                                 <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
                                     {custSearchResults.map((c, i) => (
                                         <div key={c.id || i} onClick={() => {
-                                            setCustomerMode('EXISTING');
                                             setCustomerName(c.full_name);
                                             setCustomerPhone(c.phone);
                                             setCardCode(c.card_code);
                                             setSelectedCustomerId(c.id);
+                                            setSelectedCustomerBirthDate(c.birth_date || null);
                                             setCustSearchResults([]);
                                             setCustSearchTerm('');
                                         }} style={{
@@ -1180,7 +1165,7 @@ export default function POSPage() {
                                     </div>
                                     <button onClick={() => {
                                         setCustomerName(''); setCustomerPhone(''); setCardCode('');
-                                        setSelectedCustomerId(null); setCustomerMode('NEW'); setCustSearchTerm('');
+                                        setSelectedCustomerId(null); setSelectedCustomerBirthDate(null); setCustSearchTerm('');
                                     }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>&times;</button>
                                 </div>
                             )}
@@ -1231,9 +1216,6 @@ export default function POSPage() {
                                         alert('Vui lòng nhập thông tin khách hàng (Mã thẻ, SĐT) trước khi thanh toán vé gói/thẻ tháng/khóa học.\n\nBấm F3 để tìm khách cũ hoặc bấm "+" để thêm khách mới.');
                                         customerSearchRef.current?.focus();
                                         return;
-                                    }
-                                    if (hasAdvanced) {
-                                        setCustomerMode('NEW');
                                     }
                                     setShowPaymentModal(true);
                                 }}>
@@ -1384,6 +1366,49 @@ export default function POSPage() {
                                             </div>
                                         </>
                                     )}
+
+                                    {/* Thông tin người giám hộ — bắt buộc nếu học viên dưới 18 */}
+                                    {(() => {
+                                        const curYear = new Date().getFullYear();
+                                        const a1 = privateBirthYear ? curYear - Number(privateBirthYear) : null;
+                                        const a2 = privateBirthYear2 ? curYear - Number(privateBirthYear2) : null;
+                                        const needsG = (a1 !== null && a1 < 18) || (a2 !== null && a2 < 18);
+                                        const isOOT = (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO';
+                                        const s1Adult = a1 !== null && a1 >= 18;
+                                        if (!needsG) return null;
+                                        return (
+                                            <div style={{ background: '#fef3c7', padding: '16px', borderRadius: '8px', marginTop: '12px', marginBottom: '12px', border: '1px solid #fcd34d' }}>
+                                                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#92400e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                                                    <span>👨‍👩‍👧 Thông tin người giám hộ <span style={{ color: 'red' }}>*</span></span>
+                                                    {isOOT && s1Adult && (
+                                                        <button type="button" onClick={() => { setGuardianName(customerName); setGuardianPhone(customerPhone); }}
+                                                            style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '6px', border: '1px solid #3b82f6', background: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                                            📋 Người giám hộ là học viên 1
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '10px' }}>
+                                                    ⚠️ Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ
+                                                </div>
+                                                <div className="form-group" style={{ marginBottom: '10px' }}>
+                                                    <label>Họ tên giám hộ <span style={{ color: 'red' }}>*</span></label>
+                                                    <input type="text" value={guardianName}
+                                                        onChange={e => setGuardianName(e.target.value)}
+                                                        placeholder="Nhập họ tên người giám hộ"
+                                                        style={{ fontSize: '15px' }}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>SĐT giám hộ <span style={{ color: 'red' }}>*</span></label>
+                                                    <input type="tel" value={guardianPhone}
+                                                        onChange={e => setGuardianPhone(e.target.value)}
+                                                        placeholder="Nhập số điện thoại giám hộ"
+                                                        style={{ fontSize: '15px' }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
 
                                     <div className="form-group" style={{ marginBottom: '12px' }}>
                                         <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
