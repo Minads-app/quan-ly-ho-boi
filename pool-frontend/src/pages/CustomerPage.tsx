@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import type { Customer } from '../types';
 
 type SubTab = 'CUSTOMERS' | 'PACKAGES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
@@ -30,8 +31,13 @@ interface PackageRow {
 }
 
 interface CustomerSummary {
+    id: string;
     phone: string;
     name: string;
+    card_code: string;
+    email: string | null;
+    birth_date: string | null;
+    gender: string | null;
     registeredAt: string;
     overallStatus: string;
     activePackages: number;
@@ -45,6 +51,7 @@ export default function CustomerPage() {
 
     const [subTab, setSubTab] = useState<SubTab>('CUSTOMERS');
     const [allPackages, setAllPackages] = useState<PackageRow[]>([]);
+    const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -54,7 +61,7 @@ export default function CustomerPage() {
     const [customTo, setCustomTo] = useState('');
 
     // Expanded customer / detail modal
-    const [expandedPhone, setExpandedPhone] = useState<string | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
     const [selectedPkg, setSelectedPkg] = useState<PackageRow | null>(null);
 
     // Card code editing
@@ -68,7 +75,19 @@ export default function CustomerPage() {
     const [editValidFrom, setEditValidFrom] = useState('');
     const [editValidUntil, setEditValidUntil] = useState('');
 
-    useEffect(() => { fetchAllPackages(); }, []);
+    useEffect(() => { fetchAllData(); }, []);
+
+    async function fetchAllData() {
+        // Fetch customers from customers table
+        const { data: custData } = await supabase
+            .from('customers')
+            .select('*')
+            .order('full_name');
+        setAllCustomers((custData || []) as Customer[]);
+
+        // Fetch packages from tickets
+        await fetchAllPackages();
+    }
 
     async function fetchAllPackages() {
         const { data, error } = await supabase
@@ -128,35 +147,40 @@ export default function CustomerPage() {
         return 'UNUSED';
     }
 
-    // --- Build customer summaries ---
+    // --- Build customer summaries from customers table ---
     function buildCustomerList(): CustomerSummary[] {
-        const map = new Map<string, { name: string; packages: PackageRow[] }>();
+        // Build a map of card_code -> packages
+        const pkgByCard = new Map<string, PackageRow[]>();
         allPackages.forEach(p => {
-            const key = p.customer_phone || p.id;
-            if (!map.has(key)) map.set(key, { name: p.customer_name || '—', packages: [] });
-            map.get(key)!.packages.push(p);
+            const key = p.card_code || p.customer_phone || '';
+            if (!key) return;
+            if (!pkgByCard.has(key)) pkgByCard.set(key, []);
+            pkgByCard.get(key)!.push(p);
         });
 
-        const result: CustomerSummary[] = [];
-        map.forEach((val, phone) => {
-            const sorted = [...val.packages].sort((a, b) => a.sold_at.localeCompare(b.sold_at));
-            const registeredAt = sorted[0]?.sold_at || '';
-            const activeOrExpiring = val.packages.filter(p => p.status === 'IN_USE' || p.status === 'UNUSED' || p.status === 'EXPIRING');
+        return allCustomers.map(c => {
+            const packages = pkgByCard.get(c.card_code) || [];
+            const activeOrExpiring = packages.filter(p => p.status === 'IN_USE' || p.status === 'UNUSED' || p.status === 'EXPIRING');
             let overallStatus = 'EXPIRED';
-            if (activeOrExpiring.some(p => p.status === 'IN_USE' || p.status === 'UNUSED')) overallStatus = 'ACTIVE';
+            if (packages.length === 0) overallStatus = 'NONE';
+            else if (activeOrExpiring.some(p => p.status === 'IN_USE' || p.status === 'UNUSED')) overallStatus = 'ACTIVE';
             else if (activeOrExpiring.some(p => p.status === 'EXPIRING')) overallStatus = 'EXPIRING';
 
-            result.push({
-                phone: phone.length > 20 ? '—' : phone,
-                name: val.name,
-                registeredAt,
+            return {
+                id: c.id,
+                phone: c.phone,
+                name: c.full_name,
+                card_code: c.card_code,
+                email: c.email,
+                birth_date: c.birth_date,
+                gender: c.gender,
+                registeredAt: c.created_at,
                 overallStatus,
                 activePackages: activeOrExpiring.length,
-                totalPackages: val.packages.length,
-                packages: val.packages,
-            });
+                totalPackages: packages.length,
+                packages,
+            };
         });
-        return result;
     }
 
     // --- Date filter ---
@@ -263,7 +287,10 @@ export default function CustomerPage() {
 
     const customers = buildCustomerList();
     const filteredCustomers = customers.filter(c =>
-        !searchTerm || c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone.includes(searchTerm)
+        !searchTerm ||
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.phone.includes(searchTerm) ||
+        c.card_code.toLowerCase().includes(searchTerm.toLowerCase())
     );
     const filteredPackages = filterPackagesByDate(allPackages).filter(p =>
         !searchTerm ||
@@ -285,7 +312,7 @@ export default function CustomerPage() {
                     {([['CUSTOMERS', '👤 Khách hàng'], ['PACKAGES', '📦 Gói thẻ']] as [SubTab, string][]).map(([key, label]) => (
                         <button key={key} className={`btn ${subTab === key ? 'btn-primary' : 'btn-ghost'}`}
                             style={{ padding: '8px 16px', fontSize: '13px', margin: 0 }}
-                            onClick={() => { setSubTab(key); setSearchTerm(''); setExpandedPhone(null); }}>
+                            onClick={() => { setSubTab(key); setSearchTerm(''); setExpandedId(null); }}>
                             {label}
                         </button>
                     ))}
@@ -322,11 +349,11 @@ export default function CustomerPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {filteredCustomers.map((c, i) => {
                                 const st = getStatusBadge(c.overallStatus);
-                                const isExpanded = expandedPhone === c.phone;
+                                const isExpanded = expandedId === c.id;
                                 return (
-                                    <div key={c.phone + i} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
+                                    <div key={c.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
                                         {/* Customer Row — clickable */}
-                                        <div onClick={() => setExpandedPhone(isExpanded ? null : c.phone)}
+                                        <div onClick={() => setExpandedId(isExpanded ? null : c.id)}
                                             style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
                                             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
                                             onMouseLeave={e => (e.currentTarget.style.background = '')}>
@@ -336,7 +363,11 @@ export default function CustomerPage() {
                                                 </div>
                                                 <div>
                                                     <div style={{ fontWeight: 600, fontSize: '15px' }}>{c.name}</div>
-                                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>📞 {c.phone} · Đăng ký: {fmtDate(c.registeredAt)}</div>
+                                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                                        🏷️ {c.card_code} · 📞 {c.phone}
+                                                        {c.email && <span> · ✉️ {c.email}</span>}
+                                                        {allCustomers.find(x => x.id === c.id)?.hotkey && <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {allCustomers.find(x => x.id === c.id)!.hotkey}</span>}
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

@@ -99,3 +99,18 @@ export interface RetailProduct {
     created_at: string;
     updated_at: string;
 }
+
+export interface Customer {
+    id: string;
+    card_code: string;
+    full_name: string;
+    phone: string;
+    email: string | null;
+    birth_date: string | null;
+    gender: string | null;
+    note: string | null;
+    address: string | null;
+    hotkey: string | null;
+    created_at: string;
+    updated_at: string;
+}

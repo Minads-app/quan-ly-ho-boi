@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { TicketType, Ticket, RetailProduct } from '../types';
+import type { TicketType, Ticket, RetailProduct, Customer } from '../types';
 
 export interface CartItem {
     cart_id: string;
@@ -81,10 +81,23 @@ export default function POSPage() {
     // New/Existing customer toggle
     const [customerMode, setCustomerMode] = useState<'NEW' | 'EXISTING'>('NEW');
     const [custSearchTerm, setCustSearchTerm] = useState('');
-    const [custSearchResults, setCustSearchResults] = useState<{ name: string, phone: string, card_code: string, birth_year?: number | null }[]>([]);
+    const [custSearchResults, setCustSearchResults] = useState<Customer[]>([]);
     const [searchingCust, setSearchingCust] = useState(false);
-    const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
+    const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
     const customerSearchRef = useRef<HTMLInputElement>(null);
+    // New Customer Modal form fields
+    const [newCustCardCode, setNewCustCardCode] = useState('');
+    const [newCustName, setNewCustName] = useState('');
+    const [newCustPhone, setNewCustPhone] = useState('');
+    const [newCustEmail, setNewCustEmail] = useState('');
+    const [newCustBirthDate, setNewCustBirthDate] = useState('');
+    const [newCustGender, setNewCustGender] = useState('');
+    const [newCustNote, setNewCustNote] = useState('');
+    const [newCustAddress, setNewCustAddress] = useState('');
+    const [savingCustomer, setSavingCustomer] = useState(false);
+    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+    const [hotkeyCustomers, setHotkeyCustomers] = useState<Customer[]>([]);
+    const [newCustHotkey, setNewCustHotkey] = useState('');
 
     // Promotions
     const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -122,17 +135,38 @@ export default function POSPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeCategory, setActiveCategory] = useState<'ALL' | 'DAILY' | 'ADVANCED' | 'LESSON' | 'PRODUCT'>('ALL');
 
-    // F3 shortcut to focus customer search
+    // Keyboard shortcuts: F2=CHECKIN tab, F3=customer search, F4=SELL tab, F6-F10=customer hotkey
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
-            if (e.key === 'F3') {
+            // Skip shortcuts when modals are open
+            if (showNewCustomerModal || selectedAdvancedType || showPaymentModal || showPackageSelectModal) return;
+
+            if (e.key === 'F2') {
+                e.preventDefault();
+                setActiveTab('CHECKIN');
+            } else if (e.key === 'F3') {
                 e.preventDefault();
                 customerSearchRef.current?.focus();
+            } else if (e.key === 'F4') {
+                e.preventDefault();
+                setActiveTab('SELL');
+            } else if (['F6', 'F7', 'F8', 'F9', 'F10'].includes(e.key)) {
+                e.preventDefault();
+                const cust = hotkeyCustomers.find(c => c.hotkey === e.key);
+                if (cust) {
+                    setCustomerName(cust.full_name);
+                    setCustomerPhone(cust.phone);
+                    setCardCode(cust.card_code);
+                    setSelectedCustomerId(cust.id);
+                    setCustomerMode('EXISTING');
+                    setCustSearchResults([]);
+                    setCustSearchTerm('');
+                }
             }
         }
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    }, [hotkeyCustomers, showNewCustomerModal, selectedAdvancedType, showPaymentModal, showPackageSelectModal]);
 
     async function handleCardBlur() {
         if (!cardCode.trim() || customerMode !== 'NEW') return;
@@ -187,6 +221,7 @@ export default function POSPage() {
         fetchPromotions();
         fetchProducts();
         fetchBusinessInfo();
+        fetchHotkeyCustomers();
 
         async function fetchProducts() {
             const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
@@ -257,6 +292,14 @@ export default function POSPage() {
         if (data) setPromotions(data);
     }
 
+    async function fetchHotkeyCustomers() {
+        const { data } = await supabase
+            .from('customers')
+            .select('*')
+            .not('hotkey', 'is', null);
+        if (data) setHotkeyCustomers(data as Customer[]);
+    }
+
     async function getPoolCloseTime(): Promise<string> {
         const { data } = await supabase
             .from('system_settings')
@@ -291,11 +334,8 @@ export default function POSPage() {
         if (selling) return;
 
         setSelectedAdvancedType(ticketType);
-        setCustomerName('');
-        setCustomerPhone('');
-        setCardCode('');
+        // DO NOT reset customerName/Phone/cardCode — they are managed by cart search bar
         setSelectedPromoId('');
-        setCustomerMode('NEW');
         setCustSearchTerm('');
         setCustSearchResults([]);
         // Reset private lesson fields
@@ -306,6 +346,50 @@ export default function POSPage() {
         setPrivateBirthYear('');
         setCustomerName2('');
         setPrivateBirthYear2('');
+    }
+
+    // --- Save new customer to customers table ---
+    async function handleSaveNewCustomer() {
+        if (!newCustCardCode.trim() || !newCustName.trim() || !newCustPhone.trim()) {
+            alert('Vui lòng nhập đầy đủ: Mã thẻ, Họ tên, Số điện thoại!');
+            return;
+        }
+        setSavingCustomer(true);
+        const { data, error } = await supabase.from('customers').insert({
+            card_code: newCustCardCode.trim(),
+            full_name: newCustName.trim(),
+            phone: newCustPhone.trim(),
+            email: newCustEmail.trim() || null,
+            birth_date: newCustBirthDate || null,
+            gender: newCustGender || null,
+            note: newCustNote.trim() || null,
+            address: newCustAddress.trim() || null,
+            hotkey: newCustHotkey || null,
+        }).select().single();
+
+        if (error) {
+            if (error.message.includes('duplicate') || error.message.includes('unique')) {
+                alert('Mã thẻ "' + newCustCardCode + '" đã tồn tại!');
+            } else {
+                alert('Lỗi lưu khách hàng: ' + error.message);
+            }
+            setSavingCustomer(false);
+            return;
+        }
+
+        // Auto-fill cart customer info
+        setCustomerName(data.full_name);
+        setCustomerPhone(data.phone);
+        setCardCode(data.card_code);
+        setSelectedCustomerId(data.id);
+        setCustomerMode('EXISTING');
+        setShowNewCustomerModal(false);
+        setSavingCustomer(false);
+        if (data.hotkey) fetchHotkeyCustomers();
+        // Reset modal form
+        setNewCustCardCode(''); setNewCustName(''); setNewCustPhone('');
+        setNewCustEmail(''); setNewCustBirthDate(''); setNewCustGender('');
+        setNewCustNote(''); setNewCustAddress(''); setNewCustHotkey('');
     }
 
     function addToCart(type: 'TICKET' | 'PRODUCT', item: any, quantity: number = 1) {
@@ -929,8 +1013,8 @@ export default function POSPage() {
                     <p>{activeTab === 'SELL' ? 'Chọn sản phẩm / dịch vụ để bán' : 'Quét mã Thẻ của khách để in vé lượt'}</p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '12px' }}>
-                    <button className={`btn ${activeTab === 'SELL' ? 'btn-primary' : 'btn-ghost'}`} style={{ border: 'none', margin: 0, padding: '8px 16px' }} onClick={() => setActiveTab('SELL')}>Bán Vé Mới</button>
-                    <button className={`btn ${activeTab === 'CHECKIN' ? 'btn-primary' : 'btn-ghost'}`} style={{ border: 'none', margin: 0, padding: '8px 16px' }} onClick={() => setActiveTab('CHECKIN')}>Quẹt Thẻ Gói</button>
+                    <button className={`btn ${activeTab === 'SELL' ? 'btn-primary' : 'btn-ghost'}`} style={{ border: 'none', margin: 0, padding: '8px 16px' }} onClick={() => setActiveTab('SELL')}>Bán Hàng <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '4px' }}>(F4)</span></button>
+                    <button className={`btn ${activeTab === 'CHECKIN' ? 'btn-primary' : 'btn-ghost'}`} style={{ border: 'none', margin: 0, padding: '8px 16px' }} onClick={() => setActiveTab('CHECKIN')}>Quẹt Thẻ Gói <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '4px' }}>(F2)</span></button>
                 </div>
             </div>
 
@@ -1011,7 +1095,7 @@ export default function POSPage() {
                                     <input
                                         ref={customerSearchRef}
                                         type="text"
-                                        placeholder="Tìm khách hàng"
+                                        placeholder="Tìm tên, SĐT, mã thẻ..."
                                         value={custSearchTerm}
                                         onChange={async (e) => {
                                             const term = e.target.value;
@@ -1019,23 +1103,12 @@ export default function POSPage() {
                                             if (term.length < 2) { setCustSearchResults([]); return; }
                                             setSearchingCust(true);
                                             const { data } = await supabase
-                                                .from('tickets')
-                                                .select('customer_name, customer_phone, card_code, ticket_types!inner(category)')
-                                                .or(`card_code.ilike.%${term}%,customer_phone.ilike.%${term}%,customer_name.ilike.%${term}%`)
-                                                .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
-                                                .limit(20);
-                                            const seen = new Set<string>();
-                                            const unique = (data || []).filter((d: any) => {
-                                                const key = d.customer_phone || d.card_code;
-                                                if (!key || seen.has(key)) return false;
-                                                seen.add(key);
-                                                return true;
-                                            }).map((d: any) => ({
-                                                name: d.customer_name || '',
-                                                phone: d.customer_phone || '',
-                                                card_code: d.card_code || ''
-                                            }));
-                                            setCustSearchResults(unique);
+                                                .from('customers')
+                                                .select('*')
+                                                .or(`card_code.ilike.%${term}%,phone.ilike.%${term}%,full_name.ilike.%${term}%`)
+                                                .order('full_name')
+                                                .limit(15);
+                                            setCustSearchResults((data || []) as Customer[]);
                                             setSearchingCust(false);
                                         }}
                                         style={{
@@ -1050,14 +1123,15 @@ export default function POSPage() {
                                 </div>
                                 <button
                                     onClick={() => {
-                                        setShowNewCustomerForm(!showNewCustomerForm);
-                                        setCustomerMode('NEW');
-                                        if (!showNewCustomerForm) { setCustomerName(''); setCustomerPhone(''); setCardCode(''); }
+                                        setShowNewCustomerModal(true);
+                                        setNewCustCardCode(''); setNewCustName(''); setNewCustPhone('');
+                                        setNewCustEmail(''); setNewCustBirthDate(''); setNewCustGender('');
+                                        setNewCustNote(''); setNewCustAddress(''); setNewCustHotkey('');
                                     }}
                                     style={{
                                         width: '36px', height: '36px', borderRadius: '8px', border: '1px solid #e2e8f0',
-                                        background: showNewCustomerForm ? '#3b82f6' : '#f8fafc',
-                                        color: showNewCustomerForm ? '#fff' : '#475569',
+                                        background: '#f8fafc',
+                                        color: '#475569',
                                         cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         transition: 'all 0.15s', flexShrink: 0,
                                     }}
@@ -1069,23 +1143,24 @@ export default function POSPage() {
                             {custSearchResults.length > 0 && (
                                 <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
                                     {custSearchResults.map((c, i) => (
-                                        <div key={i} onClick={() => {
+                                        <div key={c.id || i} onClick={() => {
                                             setCustomerMode('EXISTING');
-                                            setCustomerName(c.name);
+                                            setCustomerName(c.full_name);
                                             setCustomerPhone(c.phone);
                                             setCardCode(c.card_code);
+                                            setSelectedCustomerId(c.id);
                                             setCustSearchResults([]);
                                             setCustSearchTerm('');
-                                            setShowNewCustomerForm(false);
                                         }} style={{
                                             padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9',
                                             fontSize: '13px', transition: 'background 0.15s'
                                         }}
                                             onMouseEnter={e => (e.currentTarget.style.background = '#f0f9ff')}
                                             onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                                            <strong>{c.name || 'N/A'}</strong>
+                                            <strong>{c.full_name || 'N/A'}</strong>
                                             <span style={{ marginLeft: '8px', color: '#64748b' }}>📞 {c.phone || '—'}</span>
                                             <span style={{ marginLeft: '8px', color: '#94a3b8', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
+                                            {c.hotkey && <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {c.hotkey}</span>}
                                         </div>
                                     ))}
                                 </div>
@@ -1093,33 +1168,20 @@ export default function POSPage() {
                             {searchingCust && <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>Đang tìm...</span>}
 
                             {/* Selected customer info display */}
-                            {(cardCode || customerName || customerPhone) && !showNewCustomerForm && (
+                            {(cardCode || customerName || customerPhone) && (
                                 <div style={{ marginTop: '8px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ fontSize: '12px' }}>
                                         <div style={{ fontWeight: 600, color: '#166534' }}>👤 {customerName || 'Chưa có tên'}</div>
                                         <div style={{ color: '#64748b', marginTop: '2px' }}>
                                             {cardCode && <span>🏷️ {cardCode}</span>}
                                             {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
+                                            {(() => { const hk = hotkeyCustomers.find(c => c.id === selectedCustomerId); return hk?.hotkey ? <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {hk.hotkey}</span> : null; })()}
                                         </div>
                                     </div>
                                     <button onClick={() => {
                                         setCustomerName(''); setCustomerPhone(''); setCardCode('');
-                                        setCustomerMode('NEW'); setCustSearchTerm('');
+                                        setSelectedCustomerId(null); setCustomerMode('NEW'); setCustSearchTerm('');
                                     }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>&times;</button>
-                                </div>
-                            )}
-
-                            {/* New customer form (shown when + is clicked) */}
-                            {showNewCustomerForm && (
-                                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                    <input type="text" placeholder="🏷️ Mã Thẻ Nhựa *" value={cardCode} onChange={e => setCardCode(e.target.value)} onBlur={handleCardBlur}
-                                        style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
-                                    <input type="text" placeholder="👤 Họ và Tên *" value={customerName} onChange={e => setCustomerName(e.target.value)}
-                                        style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
-                                    <input type="tel" placeholder="📞 Số điện thoại *" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} onBlur={handlePhoneBlur}
-                                        style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', border: '1px solid #e2e8f0' }} />
-                                    <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-end', fontSize: '12px' }}
-                                        onClick={() => setShowNewCustomerForm(false)}>Xong</button>
                                 </div>
                             )}
                         </div>
@@ -1490,23 +1552,12 @@ export default function POSPage() {
                                                             if (term.length < 2) { setCustSearchResults([]); return; }
                                                             setSearchingCust(true);
                                                             const { data } = await supabase
-                                                                .from('tickets')
-                                                                .select('customer_name, customer_phone, card_code, ticket_types!inner(category)')
-                                                                .or(`card_code.ilike.%${term}%,customer_phone.ilike.%${term}%,customer_name.ilike.%${term}%`)
-                                                                .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
-                                                                .limit(20);
-                                                            const seen = new Set<string>();
-                                                            const unique = (data || []).filter((d: any) => {
-                                                                const key = d.customer_phone || d.card_code;
-                                                                if (!key || seen.has(key)) return false;
-                                                                seen.add(key);
-                                                                return true;
-                                                            }).map((d: any) => ({
-                                                                name: d.customer_name || '',
-                                                                phone: d.customer_phone || '',
-                                                                card_code: d.card_code || ''
-                                                            }));
-                                                            setCustSearchResults(unique);
+                                                                .from('customers')
+                                                                .select('*')
+                                                                .or(`card_code.ilike.%${term}%,phone.ilike.%${term}%,full_name.ilike.%${term}%`)
+                                                                .order('full_name')
+                                                                .limit(15);
+                                                            setCustSearchResults((data || []) as Customer[]);
                                                             setSearchingCust(false);
                                                         }}
                                                         style={{ fontSize: '14px' }}
@@ -1515,10 +1566,11 @@ export default function POSPage() {
                                                     {custSearchResults.length > 0 && (
                                                         <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff' }}>
                                                             {custSearchResults.map((c, i) => (
-                                                                <div key={i} onClick={() => {
-                                                                    setCustomerName(c.name);
+                                                                <div key={c.id || i} onClick={() => {
+                                                                    setCustomerName(c.full_name);
                                                                     setCustomerPhone(c.phone);
                                                                     setCardCode(c.card_code);
+                                                                    setSelectedCustomerId(c.id);
                                                                     setCustSearchResults([]);
                                                                     setCustSearchTerm('');
                                                                 }} style={{
@@ -1527,7 +1579,7 @@ export default function POSPage() {
                                                                 }}
                                                                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
                                                                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                                                                    <strong>{c.name || 'N/A'}</strong>
+                                                                    <strong>{c.full_name || 'N/A'}</strong>
                                                                     <span style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>📞 {c.phone || '—'}</span>
                                                                     <span style={{ marginLeft: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
                                                                 </div>
@@ -1663,6 +1715,103 @@ export default function POSPage() {
                                     </button>
                                 );
                             })}
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* ========== NEW CUSTOMER MODAL POPUP ========== */}
+            {showNewCustomerModal && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape') setShowNewCustomerModal(false);
+                        if (e.key === 'F8') { e.preventDefault(); handleSaveNewCustomer(); }
+                    }}>
+                    <div style={{ background: '#fff', borderRadius: '16px', width: '480px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
+                        {/* Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #e2e8f0' }}>
+                            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Tạo khách hàng mới</h2>
+                            <button onClick={() => setShowNewCustomerModal(false)} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#64748b', padding: '4px' }}>&times;</button>
+                        </div>
+                        {/* Form */}
+                        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {/* Mã thẻ */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Mã thẻ <span style={{ color: '#ef4444' }}>*</span></label>
+                                <input type="text" value={newCustCardCode} onChange={e => setNewCustCardCode(e.target.value)} placeholder="Mã thẻ nhựa" autoFocus
+                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            </div>
+                            {/* Họ và tên */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Họ và tên <span style={{ color: '#ef4444' }}>*</span></label>
+                                <input type="text" value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Họ và tên"
+                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            </div>
+                            {/* SĐT + Email */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Số điện thoại <span style={{ color: '#ef4444' }}>*</span></label>
+                                    <input type="tel" value={newCustPhone} onChange={e => setNewCustPhone(e.target.value)} placeholder="Số điện thoại"
+                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Email</label>
+                                    <input type="email" value={newCustEmail} onChange={e => setNewCustEmail(e.target.value)} placeholder="Email"
+                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                            </div>
+                            {/* Ngày sinh + Giới tính */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Ngày sinh</label>
+                                    <input type="date" value={newCustBirthDate} onChange={e => setNewCustBirthDate(e.target.value)}
+                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Giới tính</label>
+                                    <select value={newCustGender} onChange={e => setNewCustGender(e.target.value)}
+                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', background: '#fff', boxSizing: 'border-box' }}>
+                                        <option value="">Chọn giới tính</option>
+                                        <option value="Nam">Nam</option>
+                                        <option value="Nữ">Nữ</option>
+                                        <option value="Khác">Khác</option>
+                                    </select>
+                                </div>
+                            </div>
+                            {/* Ghi chú */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Ghi chú</label>
+                                <input type="text" value={newCustNote} onChange={e => setNewCustNote(e.target.value)} placeholder="Ghi chú"
+                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            </div>
+                            {/* Địa chỉ */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Địa chỉ</label>
+                                <input type="text" value={newCustAddress} onChange={e => setNewCustAddress(e.target.value)} placeholder="Địa chỉ"
+                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            </div>
+                            {/* Phím tắt */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>⌨ Phím tắt <span style={{ color: '#94a3b8', fontWeight: 400 }}>(không bắt buộc)</span></label>
+                                <select value={newCustHotkey} onChange={e => setNewCustHotkey(e.target.value)}
+                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', background: '#fff', boxSizing: 'border-box' }}>
+                                    <option value="">-- Không gán phím tắt --</option>
+                                    {['F6', 'F7', 'F8', 'F9', 'F10'].filter(k => !hotkeyCustomers.some(c => c.hotkey === k)).map(k => (
+                                        <option key={k} value={k}>{k}</option>
+                                    ))}
+                                </select>
+                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>Gán phím tắt để nhấn nhanh điền thông tin KH khi bán hàng</div>
+                            </div>
+                        </div>
+                        {/* Footer */}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #e2e8f0' }}>
+                            <button onClick={() => setShowNewCustomerModal(false)}
+                                style={{ padding: '10px 20px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+                                Hủy <span style={{ background: '#e2e8f0', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>ESC</span>
+                            </button>
+                            <button onClick={handleSaveNewCustomer} disabled={savingCustomer}
+                                style={{ padding: '10px 20px', fontSize: '14px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, opacity: savingCustomer ? 0.7 : 1 }}>
+                                {savingCustomer ? 'Đang lưu...' : 'Lưu'} <span style={{ background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>F8</span>
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { RetailProduct } from '../types';
@@ -637,7 +637,7 @@ export default function InventoryPage() {
                                         {parentProducts.map(p => {
                                             const variants = getVariants(p.id);
                                             return (
-                                                <tbody key={p.id}>
+                                                <React.Fragment key={p.id}>
                                                     <tr style={{ opacity: p.is_active ? 1 : 0.5, background: variants.length > 0 ? '#f8fafc' : undefined }}>
                                                         <td><strong>{p.name}</strong></td>
                                                         <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
@@ -717,7 +717,7 @@ export default function InventoryPage() {
                                                             </td>
                                                         </tr>
                                                     ))}
-                                                </tbody>
+                                                </React.Fragment>
                                             );
                                         })}
                                         {parentProducts.length === 0 && (
