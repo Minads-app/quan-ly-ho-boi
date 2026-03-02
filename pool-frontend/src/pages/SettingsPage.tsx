@@ -14,6 +14,7 @@ interface Settings {
     bank_name?: string;
     bank_account_number?: string;
     bank_account_name?: string;
+    print_format?: 'K80' | 'A5';
 }
 
 interface DaySchedule {
@@ -696,6 +697,16 @@ export default function SettingsPage() {
                                     placeholder="NGUYEN VAN A"
                                     style={{ textTransform: 'uppercase' }}
                                 />
+                            </div>
+                            <div className="form-group">
+                                <label>Khổ in mặc định (Phiếu Thu & Mã QR)</label>
+                                <select className="form-control"
+                                    value={settings.print_format || 'K80'}
+                                    onChange={e => setSettings({ ...settings, print_format: e.target.value as 'K80' | 'A5' })}
+                                >
+                                    <option value="K80">Máy in Bill K80 (80mm)</option>
+                                    <option value="A5">Máy in A5 dọc</option>
+                                </select>
                             </div>
                         </div>
                     </section>

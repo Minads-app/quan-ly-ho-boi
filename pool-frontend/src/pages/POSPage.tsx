@@ -35,6 +35,7 @@ interface BusinessInfo {
     bank_name?: string;
     bank_account_number?: string;
     bank_account_name?: string;
+    print_format?: 'K80' | 'A5';
 }
 
 export default function POSPage() {
@@ -124,7 +125,8 @@ export default function POSPage() {
                     business_logo: info.business_logo || '',
                     bank_name: info.bank_name || '',
                     bank_account_number: info.bank_account_number || '',
-                    bank_account_name: info.bank_account_name || ''
+                    bank_account_name: info.bank_account_name || '',
+                    print_format: info.print_format || 'K80'
                 });
             }
         }
@@ -469,6 +471,9 @@ export default function POSPage() {
         const printContent = printRef.current.innerHTML;
         const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
         if (!win) return;
+
+        const isA5 = bizInfo.print_format === 'A5';
+
         win.document.write(`
       <!DOCTYPE html>
       <html>
@@ -477,30 +482,33 @@ export default function POSPage() {
         <title>In Vé</title>
         <style>
           @media print {
-            @page { margin: 0; }
+            @page { 
+                size: ${isA5 ? 'A5 portrait' : 'auto'}; 
+                margin: 0; 
+            }
             body { 
               width: 100% !important; 
               margin: 0 !important; 
-              padding: 4mm !important; 
+              padding: ${isA5 ? '10mm' : '4mm'} !important; 
             }
           }
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body {
             font-family: 'Times New Roman', Times, serif;
             width: 100%;
-            max-width: 320px;
+            max-width: ${isA5 ? '148mm' : '320px'};
             margin: 0 auto;
-            padding: 16px;
-            font-size: 15px; /* Tăng size chữ lên một chút cho dễ đọc */
+            padding: ${isA5 ? '20px' : '16px'};
+            font-size: ${isA5 ? '18px' : '15px'};
             color: #000;
             background: #fff;
           }
           .ticket-print {
             text-align: center;
-            page-break-after: always;
+            page-break-after: ${isA5 ? 'auto' : 'always'};
             border-bottom: 2px dashed #000;
-            padding-bottom: 24px;
-            margin-bottom: 24px;
+            padding-bottom: ${isA5 ? '32px' : '24px'};
+            margin-bottom: ${isA5 ? '32px' : '24px'};
             width: 100%;
           }
           .ticket-print:last-child {
@@ -509,22 +517,22 @@ export default function POSPage() {
             padding-bottom: 0;
             margin-bottom: 0;
           }
-          .ticket-print h2 { font-size: 22px; margin-bottom: 6px; text-transform: uppercase; }
-          .ticket-print .subtitle { color: #444; font-size: 12px; margin-bottom: 12px; font-weight: bold; }
-          .ticket-print .qr-wrapper { margin: 16px 0; text-align: center; }
-          .ticket-print .qr-wrapper svg { width: 180px; height: 180px; margin: 0 auto; display: block; }
+          .ticket-print h2 { font-size: ${isA5 ? '28px' : '22px'}; margin-bottom: 8px; text-transform: uppercase; }
+          .ticket-print .subtitle { color: #444; font-size: ${isA5 ? '14px' : '12px'}; margin-bottom: 16px; font-weight: bold; }
+          .ticket-print .qr-wrapper { margin: ${isA5 ? '24px' : '16px'} 0; text-align: center; }
+          .ticket-print .qr-wrapper svg { width: ${isA5 ? '240px' : '180px'}; height: ${isA5 ? '240px' : '180px'}; margin: 0 auto; display: block; }
           .ticket-print .info-row {
             display: flex;
             justify-content: space-between;
-            padding: 4px 0;
+            padding: ${isA5 ? '6px 0' : '4px 0'};
             border-bottom: 1px dotted #ccc;
-            font-size: 12px;
+            font-size: ${isA5 ? '15px' : '12px'};
           }
           .ticket-print .info-row .label { color: #666; }
           .ticket-print .info-row .value { font-weight: 700; }
           .ticket-print .footer {
-            margin-top: 10px;
-            font-size: 10px;
+            margin-top: ${isA5 ? '16px' : '10px'};
+            font-size: ${isA5 ? '13px' : '10px'};
             color: #999;
           }
         </style>
@@ -562,6 +570,7 @@ export default function POSPage() {
         if (!win) return;
 
         const hasDiscount = info.pricePaid < info.originalPrice;
+        const isA5 = bizInfo.print_format === 'A5';
 
         win.document.write(`
       <!DOCTYPE html>
@@ -570,24 +579,24 @@ export default function POSPage() {
         <meta charset="utf-8">
         <title>Phiếu Thu Tiền</title>
         <style>
-          @page { size: 80mm auto; margin: 0; }
+          @page { size: ${isA5 ? 'A5 portrait' : '80mm auto'}; margin: 0; }
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body {
             font-family: 'Times New Roman', Times, serif;
-            width: 72mm;
-            padding: 4mm;
+            width: ${isA5 ? '148mm' : '72mm'};
+            padding: ${isA5 ? '10mm' : '4mm'};
             margin: 0 auto;
-            font-size: 12px;
+            font-size: ${isA5 ? '16px' : '12px'};
           }
           .receipt { text-align: center; }
-          .receipt h2 { font-size: 16px; margin-bottom: 2px; }
-          .receipt .subtitle { font-size: 10px; color: #666; margin-bottom: 12px; }
-          .divider { border-top: 1px dashed #333; margin: 8px 0; }
-          .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
+          .receipt h2 { font-size: ${isA5 ? '20px' : '16px'}; margin-bottom: 4px; }
+          .receipt .subtitle { font-size: ${isA5 ? '13px' : '10px'}; color: #666; margin-bottom: ${isA5 ? '16px' : '12px'}; }
+          .divider { border-top: 1px dashed #333; margin: ${isA5 ? '12px' : '8px'} 0; }
+          .row { display: flex; justify-content: space-between; padding: ${isA5 ? '5px' : '3px'} 0; font-size: ${isA5 ? '15px' : '11px'}; }
           .row .lbl { color: #555; }
           .row .val { font-weight: 700; text-align: right; }
-          .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 15px; font-weight: 900; border-top: 2px solid #000; margin-top: 6px; }
-          .footer { margin-top: 12px; font-size: 9px; color: #999; text-align: center; }
+          .total-row { display: flex; justify-content: space-between; padding: ${isA5 ? '10px' : '6px'} 0; font-size: ${isA5 ? '20px' : '15px'}; font-weight: 900; border-top: 2px solid #000; margin-top: ${isA5 ? '10px' : '6px'}; }
+          .footer { margin-top: ${isA5 ? '16px' : '12px'}; font-size: ${isA5 ? '12px' : '9px'}; color: #999; text-align: center; }
         </style>
       </head>
       <body>
@@ -630,12 +639,12 @@ export default function POSPage() {
 
           ${info.paymentMethod === 'TRANSFER' && bizInfo.bank_account_number && bizInfo.bank_name ? `
             <div class="divider"></div>
-            <div style="text-align:center; margin-top: 8px;">
-              <p style="font-size:10px; font-weight:700; margin-bottom: 4px;">Quét mã QR để thanh toán</p>
-              <img src="https://img.vietqr.io/image/${bizInfo.bank_name}-${bizInfo.bank_account_number}-compact2.png?amount=${info.pricePaid}&addInfo=VeBoi${info.ticketName.replace(/\s/g, '')}&accountName=${bizInfo.bank_account_name || ''}" style="width: 100%; max-width: 120px;" />
-              <p style="font-size:10px; margin-top: 4px;">Ngân hàng: <b>${bizInfo.bank_name}</b></p>
-              <p style="font-size:10px;">STK: <b>${bizInfo.bank_account_number}</b></p>
-              ${bizInfo.bank_account_name ? `<p style="font-size:10px;">Chủ TK: <b>${bizInfo.bank_account_name}</b></p>` : ''}
+            <div style="text-align:center; margin-top: ${isA5 ? '16px' : '8px'};">
+              <p style="font-size:${isA5 ? '14px' : '10px'}; font-weight:700; margin-bottom: ${isA5 ? '8px' : '4px'};">Quét mã QR để thanh toán</p>
+              <img src="https://img.vietqr.io/image/${bizInfo.bank_name}-${bizInfo.bank_account_number}-compact2.png?amount=${info.pricePaid}&addInfo=VeBoi${info.ticketName.replace(/\s/g, '')}&accountName=${bizInfo.bank_account_name || ''}" style="width: 100%; max-width: ${isA5 ? '200px' : '120px'};" />
+              <p style="font-size:${isA5 ? '13px' : '10px'}; margin-top: ${isA5 ? '8px' : '4px'};">Ngân hàng: <b>${bizInfo.bank_name}</b></p>
+              <p style="font-size:${isA5 ? '13px' : '10px'};">STK: <b>${bizInfo.bank_account_number}</b></p>
+              ${bizInfo.bank_account_name ? `<p style="font-size:${isA5 ? '13px' : '10px'};">Chủ TK: <b>${bizInfo.bank_account_name}</b></p>` : ''}
             </div>
           ` : ''}
 
