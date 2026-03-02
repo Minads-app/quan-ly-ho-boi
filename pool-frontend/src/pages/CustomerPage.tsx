@@ -422,12 +422,12 @@ export default function CustomerPage() {
                                                                 <input type="text" value={newCardCode} onChange={e => setNewCardCode(e.target.value)}
                                                                     placeholder="Quét hoặc nhập mã thẻ mới" autoFocus
                                                                     style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '14px', fontWeight: 700, flex: 1 }} />
-                                                                <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '12px' }} onClick={() => handleUpdateCardCode(editingCardPkgId)}>Lưu</button>
-                                                                <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => { setEditingCardPkgId(null); setNewCardCode(''); }}>Hủy</button>
+                                                                <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); handleUpdateCardCode(editingCardPkgId); }}>Lưu</button>
+                                                                <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); setEditingCardPkgId(null); setNewCardCode(''); }}>Hủy</button>
                                                             </div>
                                                         ) : (
                                                             <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '6px 12px' }}
-                                                                onClick={() => { setEditingCardPkgId(c.packages[0]?.id || null); setNewCardCode(c.packages[0]?.card_code || ''); }}>
+                                                                onClick={(e) => { e.stopPropagation(); setEditingCardPkgId(c.packages[0]?.id || null); setNewCardCode(c.packages[0]?.card_code || ''); }}>
                                                                 ✏️ Đổi mã thẻ (mất thẻ)
                                                             </button>
                                                         )}

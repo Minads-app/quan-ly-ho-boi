@@ -20,7 +20,7 @@ interface SlipItem {
     quantity: number;
 }
 
-const UNIT_OPTIONS = ['cái', 'chai', 'ly', 'hộp', 'bộ', 'đôi', 'gói', 'lon', 'tuýp', 'cặp'];
+const DEFAULT_UNIT_OPTIONS = ['cái', 'chai', 'ly', 'hộp', 'bộ', 'đôi', 'gói', 'lon', 'tuýp', 'cặp'];
 
 export default function InventoryPage() {
     const { profile } = useAuth();
@@ -252,6 +252,10 @@ export default function InventoryPage() {
     const parentProducts = products.filter(p => !p.parent_id);
     const getVariants = (parentId: string) => products.filter(p => p.parent_id === parentId);
     const hasVariants = (parentId: string) => products.some(p => p.parent_id === parentId);
+
+    // Dynamic unit options from existing products
+    const existingUnits = Array.from(new Set(products.map(p => p.unit).filter(Boolean)));
+    const unitOptions = Array.from(new Set([...DEFAULT_UNIT_OPTIONS, ...existingUnits])).sort();
 
     // For slip / stock views: show leaf products (standalone + variants, but not parents that have variants)
     const leafProducts = products.filter(p => {
@@ -646,17 +650,11 @@ export default function InventoryPage() {
                                                         <td>{p.unit}</td>
                                                         <td>
                                                             {variants.length > 0
-                                                                ? <span style={{ color: '#64748b', fontSize: '12px' }}>Xem biến thể ↓</span>
+                                                                ? <span style={{ color: '#0ea5e9', fontSize: '13px', textDecoration: 'underline', cursor: 'pointer' }} onClick={() => openEditProductModal(p)}>Xem biến thể ↓</span>
                                                                 : p.stock_quantity.toLocaleString('vi-VN')
                                                             }
                                                         </td>
                                                         <td>
-                                                            <button className="btn btn-ghost btn-sm" style={{ fontSize: '12px' }} onClick={() => openAddVariant(p)}>
-                                                                ➕ Thêm biến thể
-                                                            </button>
-                                                            {variants.length > 0 && (
-                                                                <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '4px' }}>({variants.length})</span>
-                                                            )}
                                                         </td>
                                                         <td>
                                                             <button
@@ -680,43 +678,6 @@ export default function InventoryPage() {
                                                             </button>
                                                         </td>
                                                     </tr>
-                                                    {/* Variant rows */}
-                                                    {variants.map(v => (
-                                                        <tr key={v.id} style={{ opacity: v.is_active ? 1 : 0.5, background: '#fafbfc' }}>
-                                                            <td style={{ paddingLeft: '36px' }}>
-                                                                <span style={{ color: '#94a3b8', marginRight: '6px' }}>↳</span>
-                                                                {v.sku && <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, marginRight: '6px' }}>{v.sku}</span>}
-                                                                {v.name}
-                                                            </td>
-                                                            <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
-                                                                {v.price.toLocaleString('vi-VN')}đ
-                                                            </td>
-                                                            <td>{v.unit}</td>
-                                                            <td>{v.stock_quantity.toLocaleString('vi-VN')}</td>
-                                                            <td></td>
-                                                            <td>
-                                                                <button
-                                                                    className={`badge ${v.is_active ? 'badge-success' : 'badge-error'}`}
-                                                                    onClick={() => toggleProductActive(v.id, v.is_active)}
-                                                                    style={{ cursor: 'pointer', border: 'none' }}
-                                                                >
-                                                                    {v.is_active ? 'Đang bán' : 'Đã ẩn'}
-                                                                </button>
-                                                            </td>
-                                                            <td>
-                                                                <button className="btn btn-ghost btn-sm" onClick={() => openEditVariant(v, p)}>
-                                                                    ✏️ Sửa
-                                                                </button>
-                                                                <button
-                                                                    className="btn btn-ghost btn-sm"
-                                                                    style={{ color: 'var(--alert-red)', marginLeft: '4px' }}
-                                                                    onClick={() => handleDeleteVariant(v.id)}
-                                                                >
-                                                                    🗑️
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
                                                 </React.Fragment>
                                             );
                                         })}
@@ -729,79 +690,123 @@ export default function InventoryPage() {
                         </div>
                     )}
                 </div>
-            )}
+            )
+            }
 
             {/* ===================== PRODUCT MODAL ===================== */}
-            {showProductModal && (
-                <div className="modal-overlay">
-                    <div className="modal-card" style={{ maxWidth: '450px' }}>
-                        <h2>{editingProduct ? 'Sửa Sản phẩm' : 'Thêm Sản phẩm mới'}</h2>
-                        <form onSubmit={handleSaveProduct}>
-                            <div className="form-group">
-                                <label>Tên sản phẩm (VD: Nước khoáng Aquafina)</label>
-                                <input type="text" required value={prodName} onChange={e => setProdName(e.target.value)} />
-                            </div>
-                            <div className="form-row">
+            {
+                showProductModal && (
+                    <div className="modal-overlay">
+                        <div className="modal-card" style={{ maxWidth: '450px' }}>
+                            <h2>{editingProduct ? 'Sửa Sản phẩm' : 'Thêm Sản phẩm mới'}</h2>
+                            <form onSubmit={handleSaveProduct}>
                                 <div className="form-group">
-                                    <label>Giá bán (VND)</label>
-                                    <input type="number" min="0" required value={prodPrice} onChange={e => setProdPrice(Number(e.target.value))} />
+                                    <label>Tên sản phẩm (VD: Nước khoáng Aquafina)</label>
+                                    <input type="text" required value={prodName} onChange={e => setProdName(e.target.value)} />
                                 </div>
-                                <div className="form-group">
-                                    <label>Đơn vị tính</label>
-                                    <div style={{ position: 'relative' }}>
-                                        <input
-                                            list="unitOptions"
-                                            type="text"
-                                            required
-                                            value={prodUnit}
-                                            onChange={e => setProdUnit(e.target.value)}
-                                            placeholder="cái, chai, ly..."
-                                        />
-                                        <datalist id="unitOptions">
-                                            {UNIT_OPTIONS.map(u => (
-                                                <option key={u} value={u} />
-                                            ))}
-                                        </datalist>
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Giá bán (VND)</label>
+                                        <input type="number" min="0" required value={prodPrice} onChange={e => setProdPrice(Number(e.target.value))} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Đơn vị tính</label>
+                                        <div style={{ position: 'relative' }}>
+                                            <input
+                                                list="unitOptions"
+                                                type="text"
+                                                required
+                                                value={prodUnit}
+                                                onChange={e => setProdUnit(e.target.value)}
+                                                placeholder="cái, chai, ly..."
+                                            />
+                                            <datalist id="unitOptions">
+                                                {unitOptions.map(u => (
+                                                    <option key={u} value={u} />
+                                                ))}
+                                            </datalist>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div className="modal-actions" style={{ marginTop: '24px' }}>
-                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowProductModal(false)} disabled={saving}>Hủy</button>
-                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu sản phẩm'}</button>
-                            </div>
-                        </form>
+                                <div className="modal-actions" style={{ marginTop: '24px' }}>
+                                    <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowProductModal(false)} disabled={saving}>Hủy</button>
+                                    <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu sản phẩm'}</button>
+                                </div>
+                            </form>
+
+                            {/* Variants Management inside Product Modal */}
+                            {editingProduct && (
+                                <div style={{ marginTop: '32px', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                        <h3 style={{ fontSize: '15px', margin: 0 }}>Quản lý biến thể ({getVariants(editingProduct.id).length})</h3>
+                                        <button type="button" className="btn btn-outline btn-sm" onClick={() => openAddVariant(editingProduct)}>
+                                            ➕ Thêm biến thể
+                                        </button>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {getVariants(editingProduct.id).map(v => (
+                                            <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', opacity: v.is_active ? 1 : 0.6 }}>
+                                                <div>
+                                                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>
+                                                        {v.sku && <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', marginRight: '6px' }}>{v.sku}</span>}
+                                                        {v.name.replace(editingProduct.name + ' — ', '')}
+                                                    </div>
+                                                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                        Giá: {v.price.toLocaleString('vi-VN')}đ · Tồn kho: <strong>{v.stock_quantity.toLocaleString('vi-VN')}</strong> {v.unit}
+                                                    </div>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '4px' }}>
+                                                    <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => toggleProductActive(v.id, v.is_active)} title={v.is_active ? "Ngừng bán" : "Mở bán lại"}>
+                                                        {v.is_active ? '👁️' : '🙈'}
+                                                    </button>
+                                                    <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEditVariant(v, editingProduct)}>✏️</button>
+                                                    <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px', color: '#ef4444' }} onClick={() => handleDeleteVariant(v.id)}>🗑️</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {getVariants(editingProduct.id).length === 0 && (
+                                            <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                                                Sản phẩm này chưa có biến thể nào.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* ===================== VARIANT MODAL ===================== */}
-            {showVariantModal && variantParent && (
-                <div className="modal-overlay">
-                    <div className="modal-card" style={{ maxWidth: '420px' }}>
-                        <h2>{editingVariant ? 'Sửa biến thể' : 'Thêm biến thể'}</h2>
-                        <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '16px' }}>
-                            Sản phẩm gốc: <strong>{variantParent.name}</strong> · Đơn vị: {variantParent.unit}
-                        </p>
-                        <form onSubmit={handleSaveVariant}>
-                            <div className="form-group">
-                                <label>Mã biến thể / SKU (VD: "Size 3", "XL", "500ml"...)</label>
-                                <input type="text" required value={varSku} onChange={e => setVarSku(e.target.value)} placeholder="VD: Size 3" />
-                            </div>
-                            <div className="form-group">
-                                <label>Giá bán riêng (VND) — để giá gốc nếu giống</label>
-                                <input type="number" min="0" required value={varPrice} onChange={e => setVarPrice(Number(e.target.value))} />
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '16px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px' }}>
-                                💡 Tên biến thể sẽ tự động tạo: <strong>"{variantParent.name} — {varSku || '...'}"</strong>
-                            </div>
-                            <div className="modal-actions">
-                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowVariantModal(false)} disabled={saving}>Hủy</button>
-                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu biến thể'}</button>
-                            </div>
-                        </form>
+            {
+                showVariantModal && variantParent && (
+                    <div className="modal-overlay">
+                        <div className="modal-card" style={{ maxWidth: '420px' }}>
+                            <h2>{editingVariant ? 'Sửa biến thể' : 'Thêm biến thể'}</h2>
+                            <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '16px' }}>
+                                Sản phẩm gốc: <strong>{variantParent.name}</strong> · Đơn vị: {variantParent.unit}
+                            </p>
+                            <form onSubmit={handleSaveVariant}>
+                                <div className="form-group">
+                                    <label>Mã biến thể / SKU (VD: "Size 3", "XL", "500ml"...)</label>
+                                    <input type="text" required value={varSku} onChange={e => setVarSku(e.target.value)} placeholder="VD: Size 3" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Giá bán riêng (VND) — để giá gốc nếu giống</label>
+                                    <input type="number" min="0" required value={varPrice} onChange={e => setVarPrice(Number(e.target.value))} />
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '16px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px' }}>
+                                    💡 Tên biến thể sẽ tự động tạo: <strong>"{variantParent.name} — {varSku || '...'}"</strong>
+                                </div>
+                                <div className="modal-actions">
+                                    <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowVariantModal(false)} disabled={saving}>Hủy</button>
+                                    <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu biến thể'}</button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

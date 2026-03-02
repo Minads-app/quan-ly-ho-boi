@@ -131,6 +131,9 @@ export default function POSPage() {
     const [guardianPhone, setGuardianPhone] = useState('');
     const [selectedCustomerBirthDate, setSelectedCustomerBirthDate] = useState<string | null>(null);
 
+    // Product Variants selection in POS
+    const [selectingVariantFor, setSelectingVariantFor] = useState<RetailProduct | null>(null);
+
     // Multi-package selection state
     const [showPackageSelectModal, setShowPackageSelectModal] = useState(false);
     const [availablePackages, setAvailablePackages] = useState<any[]>([]);
@@ -892,12 +895,28 @@ export default function POSPage() {
                 badgeColor: '#d1fae5', disabled: false, onClick: () => sellTicket(t), filterCat: 'LESSON'
             };
         }),
-        ...products.map((p): PosItem => ({
-            id: p.id, name: p.name, description: p.sku ? `${p.sku}` : '', icon: '🥤', price: p.price,
-            borderColor: '#f59e0b', badge: p.stock_quantity <= 0 ? '❌ Hết hàng' : `Kho: ${p.stock_quantity} ${p.unit || ''}`,
-            badgeColor: p.stock_quantity <= 0 ? '#fee2e2' : '#fef3c7', disabled: p.stock_quantity <= 0,
-            onClick: () => handleProductSaleClick(p), filterCat: 'PRODUCT'
-        })),
+        ...products.filter(p => p.parent_id === null).map((p): PosItem => {
+            const variants = products.filter(v => v.parent_id === p.id && v.is_active);
+            const hasVariants = variants.length > 0;
+            const totalStock = hasVariants
+                ? variants.reduce((sum, v) => sum + v.stock_quantity, 0)
+                : p.stock_quantity;
+
+            return {
+                id: p.id, name: p.name, description: p.sku ? `${p.sku}` : '', icon: '🥤', price: p.price,
+                borderColor: '#f59e0b',
+                badge: hasVariants ? `${variants.length} Lựa chọn` : totalStock <= 0 ? '❌ Hết hàng' : `Kho: ${totalStock} ${p.unit || ''}`,
+                badgeColor: hasVariants ? '#fef3c7' : totalStock <= 0 ? '#fee2e2' : '#fef3c7',
+                disabled: !hasVariants && totalStock <= 0,
+                onClick: () => {
+                    if (hasVariants) {
+                        setSelectingVariantFor(p);
+                    } else {
+                        handleProductSaleClick(p);
+                    }
+                }, filterCat: 'PRODUCT'
+            };
+        }),
     ];
 
     // Filter items
@@ -1765,6 +1784,72 @@ export default function POSPage() {
                                 style={{ padding: '10px 20px', fontSize: '14px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, opacity: savingCustomer ? 0.7 : 1 }}>
                                 {savingCustomer ? 'Đang lưu...' : 'Lưu'} <span style={{ background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>F8</span>
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* PRODUCT VARIANT SELECTION MODAL */}
+            {selectingVariantFor && (
+                <div className="modal-overlay" style={{ zIndex: 1100 }}>
+                    <div className="modal-card" style={{ maxWidth: '450px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>Chọn phân loại: {selectingVariantFor.name}</h2>
+                            <button onClick={() => setSelectingVariantFor(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>&times;</button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
+                            {products.filter(v => v.parent_id === selectingVariantFor.id && v.is_active).map(variant => (
+                                <button
+                                    key={variant.id}
+                                    disabled={variant.stock_quantity <= 0}
+                                    onClick={() => {
+                                        handleProductSaleClick(variant);
+                                        setSelectingVariantFor(null);
+                                    }}
+                                    style={{
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                        padding: '14px 16px', borderRadius: '12px', border: `1px solid ${variant.stock_quantity > 0 ? '#e2e8f0' : '#f1f5f9'}`,
+                                        background: variant.stock_quantity > 0 ? '#fff' : '#f8fafc', cursor: variant.stock_quantity > 0 ? 'pointer' : 'not-allowed',
+                                        opacity: variant.stock_quantity > 0 ? 1 : 0.6,
+                                        boxShadow: variant.stock_quantity > 0 ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                                        transition: 'all 0.2s ease', textAlign: 'left'
+                                    }}
+                                    onMouseEnter={e => {
+                                        if (variant.stock_quantity > 0) {
+                                            e.currentTarget.style.borderColor = '#f59e0b';
+                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(245, 158, 11, 0.1)';
+                                            e.currentTarget.style.transform = 'translateY(-1px)';
+                                        }
+                                    }}
+                                    onMouseLeave={e => {
+                                        if (variant.stock_quantity > 0) {
+                                            e.currentTarget.style.borderColor = '#e2e8f0';
+                                            e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+                                            e.currentTarget.style.transform = 'translateY(0)';
+                                        }
+                                    }}
+                                >
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e293b', marginBottom: '4px' }}>
+                                            {variant.sku || variant.name.replace(selectingVariantFor.name + ' — ', '')}
+                                        </div>
+                                        <div style={{ fontSize: '13px', color: '#64748b' }}>
+                                            {variant.price.toLocaleString('vi-VN')}đ / {variant.unit}
+                                        </div>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                        {variant.stock_quantity > 0 ? (
+                                            <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
+                                                Còn {variant.stock_quantity}
+                                            </span>
+                                        ) : (
+                                            <span style={{ background: '#fee2e2', color: '#991b1b', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
+                                                Hết hàng
+                                            </span>
+                                        )}
+                                    </div>
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>
