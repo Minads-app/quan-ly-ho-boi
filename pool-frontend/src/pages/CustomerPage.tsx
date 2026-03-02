@@ -347,7 +347,7 @@ export default function CustomerPage() {
                         <p style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Chưa có khách hàng.</p>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {filteredCustomers.map((c, i) => {
+                            {filteredCustomers.map((c) => {
                                 const st = getStatusBadge(c.overallStatus);
                                 const isExpanded = expandedId === c.id;
                                 return (
