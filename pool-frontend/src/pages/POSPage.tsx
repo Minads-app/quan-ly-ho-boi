@@ -1522,84 +1522,12 @@ export default function POSPage() {
                             return (
                                 <form onSubmit={(e) => { e.preventDefault(); doCheckoutOrder(); }}>
                                     {hasAdvanced && (
-                                        <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
-                                            <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#1e293b' }}>
-                                                👤 Thông tin cấp thẻ
-                                            </div>
-
-                                            {/* Toggle Khách mới / Khách cũ */}
-                                            <div style={{ display: 'flex', gap: '4px', marginBottom: '14px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '8px' }}>
-                                                <button type="button" className={`btn ${customerMode === 'NEW' ? 'btn-primary' : 'btn-ghost'}`}
-                                                    style={{ flex: 1, margin: 0, padding: '8px', fontSize: '13px' }}
-                                                    onClick={() => { setCustomerMode('NEW'); setCustomerName(''); setCustomerPhone(''); setCardCode(''); setCustSearchResults([]); }}>
-                                                    👤 Khách mới
-                                                </button>
-                                                <button type="button" className={`btn ${customerMode === 'EXISTING' ? 'btn-primary' : 'btn-ghost'}`}
-                                                    style={{ flex: 1, margin: 0, padding: '8px', fontSize: '13px' }}
-                                                    onClick={() => setCustomerMode('EXISTING')}>
-                                                    🔍 Khách cũ
-                                                </button>
-                                            </div>
-
-                                            {customerMode === 'EXISTING' && (
-                                                <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                    <label>Tìm khách hàng</label>
-                                                    <input type="text" placeholder="Nhập mã thẻ, SĐT hoặc tên khách..."
-                                                        value={custSearchTerm}
-                                                        onChange={async (e) => {
-                                                            const term = e.target.value;
-                                                            setCustSearchTerm(term);
-                                                            if (term.length < 2) { setCustSearchResults([]); return; }
-                                                            setSearchingCust(true);
-                                                            const { data } = await supabase
-                                                                .from('customers')
-                                                                .select('*')
-                                                                .or(`card_code.ilike.%${term}%,phone.ilike.%${term}%,full_name.ilike.%${term}%`)
-                                                                .order('full_name')
-                                                                .limit(15);
-                                                            setCustSearchResults((data || []) as Customer[]);
-                                                            setSearchingCust(false);
-                                                        }}
-                                                        style={{ fontSize: '14px' }}
-                                                    />
-                                                    {searchingCust && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Đang tìm...</span>}
-                                                    {custSearchResults.length > 0 && (
-                                                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff' }}>
-                                                            {custSearchResults.map((c, i) => (
-                                                                <div key={c.id || i} onClick={() => {
-                                                                    setCustomerName(c.full_name);
-                                                                    setCustomerPhone(c.phone);
-                                                                    setCardCode(c.card_code);
-                                                                    setSelectedCustomerId(c.id);
-                                                                    setCustSearchResults([]);
-                                                                    setCustSearchTerm('');
-                                                                }} style={{
-                                                                    padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)',
-                                                                    fontSize: '13px', transition: 'background 0.15s'
-                                                                }}
-                                                                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                                                                    onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                                                                    <strong>{c.full_name || 'N/A'}</strong>
-                                                                    <span style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>📞 {c.phone || '—'}</span>
-                                                                    <span style={{ marginLeft: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                <label>Mã Thẻ Nhựa <span style={{ color: 'red' }}>*</span></label>
-                                                <input type="text" required placeholder="Quét mã thẻ..." value={cardCode} onChange={e => setCardCode(e.target.value)} onBlur={handleCardBlur} style={{ fontSize: '15px' }} />
-                                            </div>
-                                            <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                <label>Họ và Tên</label>
-                                                <input type="text" placeholder="Tên khách hàng" value={customerName} onChange={e => setCustomerName(e.target.value)} style={{ fontSize: '14px' }} />
-                                            </div>
-                                            <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                <label>SĐT <span style={{ color: 'red' }}>*</span></label>
-                                                <input type="tel" required placeholder="Số điện thoại" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} onBlur={handlePhoneBlur} style={{ fontSize: '14px' }} />
+                                        <div style={{ background: '#f0fdf4', padding: '14px 16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #bbf7d0' }}>
+                                            <div style={{ fontSize: '13px', fontWeight: 600, color: '#166534', marginBottom: '4px' }}>👤 Thông tin cấp thẻ</div>
+                                            <div style={{ fontSize: '14px', fontWeight: 600 }}>{customerName || 'Chưa có tên'}</div>
+                                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                                                {cardCode && <span>🏷️ {cardCode}</span>}
+                                                {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
                                             </div>
                                         </div>
                                     )}
