@@ -21,6 +21,8 @@ export interface Profile {
     created_at: string;
     is_active?: boolean;
     can_use_camera?: boolean;
+    can_create_expense?: boolean;
+    can_manage_inventory?: boolean;
     permissions?: PermissionsMatrix;
 }
 
@@ -83,4 +85,14 @@ export interface CheckQrResult {
     customer_name?: string;
     pool_close_time?: string;
     remaining_sessions?: number | null;
+}
+
+export interface RetailProduct {
+    id: string;
+    name: string;
+    price: number;
+    stock_quantity: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
 }

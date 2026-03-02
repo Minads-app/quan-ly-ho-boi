@@ -11,6 +11,8 @@ import DashboardPage from './pages/DashboardPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import StaffPage from './pages/StaffPage';
 import CustomerPage from './pages/CustomerPage';
+import InventoryPage from './pages/InventoryPage';
+import CashPage from './pages/CashPage';
 import './index.css';
 
 function AppRoutes() {
@@ -136,6 +138,21 @@ function AppRoutes() {
             </>
           )}
 
+          {/* New Retail & Cash Modules */}
+          {(profile.can_manage_inventory || profile.role === 'ADMIN') && (
+            <NavLink to="/inventory" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">📦</span>
+              <span>Quản lý Kho</span>
+            </NavLink>
+          )}
+
+          {(profile.can_create_expense || profile.role === 'ADMIN') && (
+            <NavLink to="/cash" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">💵</span>
+              <span>Quỹ & Phiếu Chi</span>
+            </NavLink>
+          )}
+
           {/* Management Menu */}
           {canView('staff') && (
             <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
@@ -207,6 +224,14 @@ function AppRoutes() {
           } />
           <Route path="/settings" element={
             canView('settings') ? <SettingsPage /> : <Navigate to="/pos" />
+          } />
+
+          {/* Inventory & Cash */}
+          <Route path="/inventory" element={
+            profile.can_manage_inventory || profile.role === 'ADMIN' ? <InventoryPage /> : <Navigate to="/pos" />
+          } />
+          <Route path="/cash" element={
+            profile.can_create_expense || profile.role === 'ADMIN' ? <CashPage /> : <Navigate to="/pos" />
           } />
 
           {/* Mặc định Redirect */}

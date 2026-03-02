@@ -1,0 +1,28 @@
+Chào bạn, để kết nối phần mềm này với Cổng kiểm soát (Barie / Turnstile), tôi xin gợi ý giải pháp phần cứng phổ biến và tiết kiệm chi phí nhất tại Việt Nam hiện nay:
+
+1. Mạch Điều Khiển Trung Tâm (Relay Controller)
+Bạn cần một Mạch Relay có thể kết nối với mạng LAN của hồ bơi để nhận lệnh "Mở cửa" từ Laptop/PC đang chạy phần mềm bán vé.
+
+Gợi ý: Module Ethernet W5500 Relay (loại 1 kênh hoặc 2 kênh)
+Đặc điểm: Tích hợp chip mạng W5500 (cắm dây mạng LAN vào thẳng board), hỗ trợ tiếp điểm chuẩn (COM, NO, NC). Khi phần mềm báo khách quẹt thẻ hợp lệ, Laptop sẽ gửi một lệnh qua mạng LAN xuống mạch này. Mạch sẽ đá Relay (đóng điện 1 giây rồi nhả) -> Cổng Barie sẽ nhận được tín hiệu và mở cửa.
+Giá tham khảo: Rất rẻ, chỉ từ 300.000đ - 600.000đ cho một board mạch TCP/IP Modbus (có thể dễ dàng tìm mua trên Shopee, Lazada hoặc các cửa hàng linh kiện như Hshop, Nshop).
+(Lưu ý: Nếu bạn dùng 2 cửa - 1 cửa vào, 1 cửa ra - thì mua loại Relay 2 kênh. Nếu chỉ kiểm soát cửa vào thì mua loại 1 kênh là đủ).
+
+2. Cổng Xoay Tripod Turnstile hoặc Flap Barrier
+Đây là các dạng cổng tự động thường thấy ở hồ bơi, phòng gym. Hầu hết 100% các loại cổng này trên thị trường đều hỗ trợ chuẩn "Tiếp điểm khô" (Dry Contact). Tức là chỉ cần chập 2 dây tín hiệu lại với nhau là cửa sẽ mở. Nhờ vậy nó tương thích hoàn toàn với Module Relay ở mục 1.
+
+Một số Model Cổng Xoay tham khảo (phổ biến tại Việt Nam):
+
+Tripod Turnstile (Cổng xoay ba chấu): Đây là loại rẻ và bền nhất, chống nước tốt lắp ngoài trời.
+Model tham khảo: ZKTeco TS1000 Pro, ZKTeco TS2000 Pro, YK-TT122...
+Giá dao động: ~ 6.000.000đ - 10.000.000đ / cổng.
+Flap Barrier / Swing Gate (Cổng trượt / mở đôi): Loại này sang trọng hơn, phù hợp lễ tân trong nhà.
+Model tham khảo: ZKTeco FBL1000 Pro, ZKTeco FBL2000 Pro...
+Giá dao động: ~ 15.000.000đ - 30.000.000đ / cổng.
+🛠 Hướng Điển Hình Để Lắp Đặt:
+Bạn mua một Cổng Xoay Tripod ZKTeco và thuê thợ lắp cố định.
+Mua thêm một mạch Relay Ethernet W5500 2-Channel.
+Nối 2 dây tín hiệu từ "Mainboard của cổng xoay" vào chốt COM và NO của bo mạch Relay. Cắm dây mạng LAN cho mạch Relay.
+Bạn ghim 1 cái máy Quét Mã Vạch ngay chỗ cổng xoay, nối dây USB dài kéo về máy tính Lễ Tân (hoặc dùng súng bắn mã vạch không dây Bluetooth/2.4GHz).
+Tôi sẽ giúp bạn viết một file server.js nhỏ chạy ngầm trên máy tính lễ tân để kết nối phần mềm vé bơi hiện tại với TCP IP của mạch Relay.
+Nếu bạn chốt phương án phần cứng nào, hãy phản hồi lại thông số mạng (IP, Port, Giao thức) của bo mạch bạn sẽ mua. Khi đó tôi sẽ code bộ kết nối cho bạn! Mời bạn xem và cho ý kiến.

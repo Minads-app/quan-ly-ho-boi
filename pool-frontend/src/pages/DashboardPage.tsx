@@ -27,6 +27,16 @@ interface TicketRow {
     lesson_schedule_type: string | null;
 }
 
+interface RetailRow {
+    id: string;
+    product_name: string;
+    quantity: number;
+    subtotal: number;
+    sold_at: string;
+    sold_by_name: string | null;
+    payment_method: string;
+}
+
 interface ScanLogRow {
     id: string;
     scanned_at: string;
@@ -51,6 +61,7 @@ export default function DashboardPage() {
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [tickets, setTickets] = useState<TicketRow[]>([]);
+    const [retailItems, setRetailItems] = useState<RetailRow[]>([]);
     const [scanLogs, setScanLogs] = useState<ScanLogRow[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -85,6 +96,7 @@ export default function DashboardPage() {
 
     useEffect(() => {
         fetchTickets();
+        fetchRetailItems();
         if (activeTab === 'SESSIONS') fetchScanLogs();
         fetchBusinessInfo();
     }, [dateRange, customFrom, customTo, activeTab]);
@@ -172,6 +184,50 @@ export default function DashboardPage() {
             setTickets(mapped);
         }
         setLoading(false);
+    }
+
+    async function fetchRetailItems() {
+        const { from, to } = getDateBounds();
+
+        let query = supabase
+            .from('orders')
+            .select(`
+                id, created_at, payment_method, created_by,
+                profiles:created_by(full_name),
+                order_items!inner(id, quantity, subtotal, products!inner(name))
+            `)
+            .gte('created_at', from + 'T00:00:00+07:00')
+            .lte('created_at', to + 'T23:59:59+07:00')
+            .order('created_at', { ascending: false });
+
+        if (!isAdmin && profile && activeTab !== 'WARNINGS') {
+            query = query.eq('created_by', profile.id);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+            console.error('Error fetching retail:', error);
+            setRetailItems([]);
+        } else {
+            const mapped: RetailRow[] = [];
+            (data || []).forEach((order: any) => {
+                const items = order.order_items || [];
+                items.forEach((item: any) => {
+                    if (item.products) {
+                        mapped.push({
+                            id: item.id,
+                            product_name: item.products.name,
+                            quantity: item.quantity,
+                            subtotal: item.subtotal,
+                            sold_at: order.created_at,
+                            sold_by_name: order.profiles?.full_name || '—',
+                            payment_method: order.payment_method || 'CASH'
+                        });
+                    }
+                });
+            });
+            setRetailItems(mapped);
+        }
     }
 
     async function fetchScanLogs() {
@@ -271,10 +327,14 @@ export default function DashboardPage() {
 
     // --- Computed data ---
     const dailyTickets = tickets.filter(t => t.category === 'DAILY');
-    const totalRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
-    const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
-    const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0);
-    const revCard = tickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0);
+
+    const totalTicketRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
+    const totalRetailRevenue = retailItems.reduce((s, r) => s + r.subtotal, 0);
+    const totalRevenue = totalTicketRevenue + totalRetailRevenue;
+
+    const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CASH').reduce((s, r) => s + r.subtotal, 0);
+    const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER').reduce((s, r) => s + r.subtotal, 0);
+    const revCard = tickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CARD').reduce((s, r) => s + r.subtotal, 0);
 
     // --- FORMAT ---
     const fmt = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
@@ -391,14 +451,23 @@ export default function DashboardPage() {
         const countDaily = tickets.filter(t => t.category === 'DAILY').length;
         const countMultiMonthly = tickets.filter(t => t.category === 'MULTI' || t.category === 'MONTHLY').length;
         const countLesson = tickets.filter(t => t.category === 'LESSON').length;
+        const countRetail = retailItems.reduce((s, r) => s + r.quantity, 0);
 
         const tableHtml = `<table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
             ${tickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
             return `<tr><td>${i + 1}</td><td>${t.type_name}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
-            <tr class="total-row"><td colspan="6">TỔNG CỘNG (${tickets.length} vé)</td><td style="text-align:right">${fmt(totalRevenue)}</td><td colspan="2"></td></tr>
+            <tr class="total-row"><td colspan="6">TỔNG CỘNG VÉ (${tickets.length} vé)</td><td style="text-align:right">${fmt(totalTicketRevenue)}</td><td colspan="2"></td></tr>
             </tbody></table>
+            
+            ${retailItems.length > 0 ? `
+            <h3 style="margin-top: 24px; margin-bottom: 8px;">🛒 Sản Phẩm Bán Lẻ</h3>
+            <table><thead><tr><th>STT</th><th>Sản phẩm</th><th>Số lượng</th><th>H/T Thanh toán</th><th>Thành tiền</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
+            ${retailItems.map((r, i) => `<tr><td>${i + 1}</td><td>${r.product_name}</td><td>${r.quantity}</td><td>${r.payment_method === 'CASH' ? 'Tiền mặt' : r.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS'}</td><td style="text-align:right">${fmt(r.subtotal)}</td><td>${r.sold_by_name}</td><td>${fmtDateTime(r.sold_at)}</td></tr>`).join('')}
+            <tr class="total-row"><td colspan="4">TỔNG CỘNG SẢN PHẨM (${countRetail} món)</td><td style="text-align:right">${fmt(totalRetailRevenue)}</td><td colspan="2"></td></tr>
+            </tbody></table>
+            ` : ''}
             
             <div style="display:flex; justify-content:space-between; margin-top:24px; gap: 24px;">
                 <div style="padding: 16px; border: 1px solid #999; flex: 1; font-weight: bold; line-height: 1.8;">
@@ -406,6 +475,7 @@ export default function DashboardPage() {
                     <div style="display:flex; justify-content:space-between; color: #3b82f6;"><span>Vé Lẻ (QR):</span> <span>${countDaily} vé</span></div>
                     <div style="display:flex; justify-content:space-between; color: #f59e0b;"><span>Gói Bơi (Tháng/Lượt):</span> <span>${countMultiMonthly} vé</span></div>
                     <div style="display:flex; justify-content:space-between; color: #ec4899;"><span>Khách Học Bơi:</span> <span>${countLesson} vé</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #8b5cf6;"><span>Sản Phẩm Bán Lẻ:</span> <span>${countRetail} món</span></div>
                     <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #000;"><span>TỔNG VÉ BÁN:</span> <span>${tickets.length} vé</span></div>
                 </div>
 
@@ -423,9 +493,8 @@ export default function DashboardPage() {
                 {renderDateFilter()}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
                     {[{ label: 'Tổng doanh thu', value: fmt(totalRevenue), color: '#10b981' },
-                    { label: 'Vé Lẻ (QR)', value: `${countDaily} vé`, color: '#3b82f6' },
-                    { label: 'Gói Bơi', value: `${countMultiMonthly} vé`, color: '#f59e0b' },
-                    { label: 'Khách Học Bơi', value: `${countLesson} vé`, color: '#ec4899' },
+                    { label: 'Doanh thu Vé', value: fmt(totalTicketRevenue), color: '#3b82f6' },
+                    { label: 'Doanh thu SP', value: fmt(totalRetailRevenue), color: '#8b5cf6' },
                     { label: 'Tiền mặt', value: fmt(revCash), color: '#64748b' },
                     { label: 'Chuyển khoản', value: fmt(revTransfer), color: '#d97706' },
                     { label: 'Thẻ POS', value: fmt(revCard), color: '#8b5cf6' }
@@ -446,7 +515,12 @@ export default function DashboardPage() {
                         ])
                     )}>📊 Xuất Excel</button>
                 </div>
-                {renderTicketTable(tickets)}
+                {renderTicketTable(tickets, 'Danh sách Vé đã Bán')}
+                {retailItems.length > 0 && (
+                    <div style={{ marginTop: '32px' }}>
+                        {renderRetailTable(retailItems)}
+                    </div>
+                )}
             </>
         );
     }
@@ -740,9 +814,10 @@ export default function DashboardPage() {
         );
     }
 
-    function renderTicketTable(data: TicketRow[]) {
+    function renderTicketTable(data: TicketRow[], title?: string) {
         return (
-            <div style={{ overflowX: 'auto' }}>
+            <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
+                {title && <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🎟️ {title} ({data.length} vé)</h3>}
                 <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                         <tr>
@@ -773,6 +848,45 @@ export default function DashboardPage() {
                                 <td colSpan={4} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({data.length} vé)</td>
                                 <td></td>
                                 <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, t) => s + t.price_paid, 0))}</td>
+                                <td colSpan={2} style={tdS}></td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
+    function renderRetailTable(data: RetailRow[]) {
+        const totalQty = data.reduce((s, r) => s + r.quantity, 0);
+        return (
+            <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🛒 Sản Phẩm Bán Lẻ Đã Bán ({totalQty} món)</h3>
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                        <tr>
+                            <th style={thS}>#</th><th style={thS}>Sản phẩm</th><th style={thS}>Số lượng</th><th style={thS}>Thanh toán</th><th style={thS}>Thành tiền</th><th style={thS}>Người bán</th><th style={thS}>Thời gian</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {data.length === 0 ? (
+                            <tr><td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có giao dịch bán lẻ.</td></tr>
+                        ) : data.map((r, i) => (
+                            <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={tdS}>{i + 1}</td>
+                                <td style={tdS}><span style={{ fontWeight: 500 }}>{r.product_name}</span></td>
+                                <td style={{ ...tdS, textAlign: 'center', fontWeight: 600 }}>{r.quantity}</td>
+                                <td style={tdS}>{r.payment_method === 'CASH' ? '💵 TM' : r.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(r.subtotal)}</td>
+                                <td style={tdS}>{r.sold_by_name}</td>
+                                <td style={tdS}>{fmtDateTime(r.sold_at)}</td>
+                            </tr>
+                        ))}
+                        {data.length > 0 && (
+                            <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
+                                <td colSpan={3} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({totalQty} món)</td>
+                                <td></td>
+                                <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, r) => s + r.subtotal, 0))}</td>
                                 <td colSpan={2} style={tdS}></td>
                             </tr>
                         )}

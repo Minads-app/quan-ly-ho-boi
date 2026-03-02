@@ -27,6 +27,8 @@ interface Profile {
     created_at: string;
     is_active?: boolean;
     can_use_camera?: boolean;
+    can_create_expense?: boolean;
+    can_manage_inventory?: boolean;
     permissions?: PermissionsMatrix;
 }
 
@@ -59,6 +61,8 @@ export default function StaffPage() {
     const [showPermModal, setShowPermModal] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState<Profile | null>(null);
     const [tempPermissions, setTempPermissions] = useState<PermissionsMatrix>(defaultPermissions);
+    const [tempCreateExpense, setTempCreateExpense] = useState(false);
+    const [tempManageInventory, setTempManageInventory] = useState(false);
     const [isSavingPerms, setIsSavingPerms] = useState(false);
 
     useEffect(() => {
@@ -218,6 +222,8 @@ export default function StaffPage() {
             }
         }
         setTempPermissions(merged);
+        setTempCreateExpense(staff.can_create_expense || false);
+        setTempManageInventory(staff.can_manage_inventory || false);
         setShowPermModal(true);
     }
 
@@ -227,13 +233,22 @@ export default function StaffPage() {
 
         const { error } = await supabase
             .from('profiles')
-            .update({ permissions: tempPermissions })
+            .update({
+                permissions: tempPermissions,
+                can_create_expense: tempCreateExpense,
+                can_manage_inventory: tempManageInventory
+            })
             .eq('id', selectedStaff.id);
 
         if (error) {
             alert('Lỗi lưu quyền: ' + error.message);
         } else {
-            setStaffList(prev => prev.map(p => p.id === selectedStaff.id ? { ...p, permissions: tempPermissions } : p));
+            setStaffList(prev => prev.map(p => p.id === selectedStaff.id ? {
+                ...p,
+                permissions: tempPermissions,
+                can_create_expense: tempCreateExpense,
+                can_manage_inventory: tempManageInventory
+            } : p));
             setShowPermModal(false);
             alert('Cập nhật phân quyền thành công!');
         }
@@ -531,6 +546,26 @@ export default function StaffPage() {
                                         <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
                                         <td style={{ textAlign: 'center' }}><input type="checkbox" checked={tempPermissions.settings?.edit ?? false} onChange={e => handlePermChange('settings', 'edit', e.target.checked)} /></td>
                                         <td style={{ textAlign: 'center', color: '#94a3b8' }}>—</td>
+                                    </tr>
+                                    {/* Quản lý Kho */}
+                                    <tr style={{ background: 'rgba(234,88,12,0.05)' }}>
+                                        <td><strong>📦 Quản lý Kho (Sản phẩm)</strong></td>
+                                        <td colSpan={4} style={{ textAlign: 'center' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}>
+                                                <input type="checkbox" checked={tempManageInventory} onChange={e => setTempManageInventory(e.target.checked)} />
+                                                <span>Có quyền Quản lý kho (Nhập/Xuất/Tồn)</span>
+                                            </label>
+                                        </td>
+                                    </tr>
+                                    {/* Phiếu Chi */}
+                                    <tr style={{ background: 'rgba(234,88,12,0.05)' }}>
+                                        <td><strong>💵 Quản lý Quỹ (Phiếu chi)</strong></td>
+                                        <td colSpan={4} style={{ textAlign: 'center' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}>
+                                                <input type="checkbox" checked={tempCreateExpense} onChange={e => setTempCreateExpense(e.target.checked)} />
+                                                <span>Có quyền Lập phiếu chi tiền mặt</span>
+                                            </label>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>

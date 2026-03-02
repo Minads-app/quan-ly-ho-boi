@@ -2,7 +2,27 @@ import { useEffect, useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { TicketType, Ticket } from '../types';
+import type { TicketType, Ticket, RetailProduct } from '../types';
+
+export interface CartItem {
+    cart_id: string;
+    type: 'TICKET' | 'PRODUCT';
+    item: any;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+    promoId?: string;
+    privateSessions?: number;
+    privateBirthYear?: number;
+    privateBirthYear2?: number;
+    customerName2?: string;
+    privateDurationVal?: number;
+    privateDurationUnit?: 'months' | 'days';
+    privateUnlimited?: boolean;
+    customerName?: string;
+    customerPhone?: string;
+    cardCode?: string;
+}
 
 interface SoldTicket extends Ticket {
     type_name: string;
@@ -45,6 +65,10 @@ export default function POSPage() {
     const [selling, setSelling] = useState(false);
     const [soldTickets, setSoldTickets] = useState<SoldTicket[]>([]); // Array of sold tickets
 
+    // Cart & Products state
+    const [cart, setCart] = useState<CartItem[]>([]);
+    const [products, setProducts] = useState<RetailProduct[]>([]);
+
     // Daily tickets quantity mapping
     const [dailyQuantities, setDailyQuantities] = useState<Record<string, number>>({});
 
@@ -69,14 +93,6 @@ export default function POSPage() {
     const [bizInfo, setBizInfo] = useState<BusinessInfo>({});
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'TRANSFER' | 'CARD'>('CASH');
-    const [pendingTicketData, setPendingTicketData] = useState<{
-        ticketType: TicketType;
-        name: string | null;
-        phone: string | null;
-        promoId: string | null;
-        code: string | null;
-        quantity: number; // New parameter
-    } | null>(null);
 
     // Active Tab (Bán Vé | Check-in Thẻ)
     const [activeTab, setActiveTab] = useState<'SELL' | 'CHECKIN'>('SELL');
@@ -151,7 +167,13 @@ export default function POSPage() {
     useEffect(() => {
         fetchTicketTypes();
         fetchPromotions();
+        fetchProducts();
         fetchBusinessInfo();
+
+        async function fetchProducts() {
+            const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+            if (data) setProducts(data);
+        }
 
         async function fetchBusinessInfo() {
             const { data } = await supabase.from('system_settings').select('key, value');
@@ -263,170 +285,149 @@ export default function POSPage() {
         setPrivateBirthYear2('');
     }
 
-    async function doSellTicket(
-        ticketType: TicketType,
-        name: string | null,
-        phone: string | null,
-        promoId: string | null,
-        code: string | null,
-        paymentMethod: 'CASH' | 'TRANSFER' | 'CARD',
-        name2?: string | null,
-        birthYear2?: number | null
-    ) {
+    function addToCart(type: 'TICKET' | 'PRODUCT', item: any, quantity: number = 1) {
+        setCart(prev => {
+            const existing = prev.find(c => c.type === type && c.item.id === item.id);
+            if (existing && type === 'PRODUCT') {
+                return prev.map(c => c.cart_id === existing.cart_id ? { ...c, quantity: c.quantity + quantity, subtotal: (c.quantity + quantity) * c.unitPrice } : c);
+            }
+            if (existing && type === 'TICKET' && item.category === 'DAILY') {
+                return prev.map(c => c.cart_id === existing.cart_id ? { ...c, quantity: c.quantity + quantity, subtotal: (c.quantity + quantity) * c.unitPrice } : c);
+            }
+            return [...prev, {
+                cart_id: Date.now() + Math.random().toString(),
+                type, item, quantity, unitPrice: item.price, subtotal: item.price * quantity
+            }];
+        });
+    }
+
+    async function doCheckoutOrder() {
+        if (cart.length === 0) return;
         setSelling(true);
+
         const closeTime = await getPoolCloseTime();
 
-        // Calculate valid_until based on validity_days constraint from settings
-        let validUntil = null;
-        let validFrom = null;
-        let customDurationMonths = null;
-        let customValidityDays = null;
-
-        if (ticketType.category === 'DAILY') {
-            // Daily tickets: set valid_from and valid_until immediately
-            if (ticketType.validity_days) {
-                const today = new Date();
-                const tzOffset = today.getTimezoneOffset() * 60000;
-                const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
-                validFrom = localISOTime.split('T')[0];
-
-                const expDate = new Date(today);
-                const daysToAdd = ticketType.validity_days > 0 ? ticketType.validity_days - 1 : 0;
-                expDate.setDate(today.getDate() + daysToAdd);
-                const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
-                validUntil = localISOExp.split('T')[0];
+        const p_items = cart.map(c => {
+            if (c.type === 'PRODUCT') {
+                return { type: 'PRODUCT', id: c.item.id, quantity: c.quantity, unit_price: c.unitPrice, subtotal: c.subtotal };
             }
-        } else {
-            // MULTI / MONTHLY / LESSON: Deferred activation
-            // valid_from = NULL, valid_until = NULL → sẽ được kích hoạt khi check-in lần đầu
-            validFrom = null;
-            validUntil = null;
 
-            // For private lessons with specific duration entered by staff
-            const isPrivateLesson = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
-            if (isPrivateLesson && !privateUnlimited && privateDurationVal) {
-                // Store duration info to be used at first checkin
-                if (privateDurationUnit === 'months') {
-                    customDurationMonths = Number(privateDurationVal);
-                } else {
-                    customValidityDays = Number(privateDurationVal);
+            let validFrom = null;
+            let validUntil = null;
+            let customDurationMonths = null;
+            let customValidityDays = null;
+
+            if (c.item.category === 'DAILY') {
+                if (c.item.validity_days) {
+                    const today = new Date();
+                    const tzOffset = today.getTimezoneOffset() * 60000;
+                    const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
+                    validFrom = localISOTime.split('T')[0];
+                    const expDate = new Date(today);
+                    const daysToAdd = c.item.validity_days > 0 ? c.item.validity_days - 1 : 0;
+                    expDate.setDate(today.getDate() + daysToAdd);
+                    const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
+                    validUntil = localISOExp.split('T')[0];
+                }
+            } else {
+                if (!c.privateUnlimited && c.privateDurationVal) {
+                    if (c.privateDurationUnit === 'months') {
+                        customDurationMonths = Number(c.privateDurationVal);
+                    } else {
+                        customValidityDays = Number(c.privateDurationVal);
+                    }
                 }
             }
-        }
 
-        // Calculate Promo impacts
-        let finalPrice = ticketType.price;
-        let finalSessions = ticketType.session_count || null;
+            let finalPrice = c.unitPrice;
+            let finalSessions = c.item.session_count || null;
+            if (c.privateSessions) finalSessions = c.privateSessions;
 
-        // For private lessons (1:1 / 1:2): price = unit price × sessions entered by staff
-        const isPrivateLesson = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
-        if (isPrivateLesson && privateSessions) {
-            finalSessions = Number(privateSessions);
-
-            const isOneOnTwo = (ticketType as any).lesson_class_type === 'ONE_ON_TWO';
-            let unitPrice1 = ticketType.price;
-            let unitPrice2 = 0;
-            if (ticketType.age_price_tiers && ticketType.age_price_tiers.length > 0) {
-                const currentYear = new Date().getFullYear();
-                if (privateBirthYear) {
-                    const age1 = currentYear - Number(privateBirthYear);
-                    const tier1 = ticketType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
-                    if (tier1) unitPrice1 = Math.round(tier1.price); // Apply Math.round here
-                }
-                if (isOneOnTwo && privateBirthYear2) {
-                    unitPrice2 = ticketType.price;
-                    const age2 = currentYear - Number(privateBirthYear2);
-                    const tier2 = ticketType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
-                    if (tier2) unitPrice2 = Math.round(tier2.price); // Apply Math.round here
-                }
-            } else if (isOneOnTwo) {
-                unitPrice2 = ticketType.price;
-            }
-            const totalUnitPrice = Math.round(unitPrice1 + unitPrice2);
-            finalPrice = Math.round(totalUnitPrice * finalSessions);
-        }
-
-        if (promoId) {
-            const promo = promotions.find(p => p.id === promoId);
-            if (promo) {
-                if (promo.type === 'AMOUNT') {
-                    finalPrice = Math.max(0, finalPrice - promo.value);
-                } else if (promo.type === 'PERCENT') {
-                    finalPrice = Math.round(finalPrice * (1 - promo.value / 100));
-                } else if (promo.type === 'BONUS_SESSION' && finalSessions !== null) {
-                    finalSessions += promo.value;
+            if (c.promoId) {
+                const promo = promotions.find(p => p.id === c.promoId);
+                if (promo) {
+                    if (promo.type === 'AMOUNT') {
+                        finalPrice = Math.max(0, finalPrice - promo.value);
+                    } else if (promo.type === 'PERCENT') {
+                        finalPrice = Math.round(finalPrice * (1 - promo.value / 100));
+                    } else if (promo.type === 'BONUS_SESSION' && finalSessions !== null) {
+                        finalSessions += promo.value;
+                    }
                 }
             }
-        }
 
-        const quantity = pendingTicketData?.quantity || 1;
-        const payloads = Array.from({ length: quantity }).map(() => ({
-            ticket_type_id: ticketType.id,
-            status: 'UNUSED',
-            customer_name: name,
-            customer_phone: phone,
-            valid_from: validFrom,
-            valid_until: validUntil,
-            sold_by: profile?.id,
-            price_paid: finalPrice,
-            remaining_sessions: finalSessions,
-            total_sessions: finalSessions,
-            promotion_id: promoId || null,
-            card_code: code || null,
-            payment_method: paymentMethod,
-            customer_birth_year: (isPrivateLesson && privateBirthYear) ? Number(privateBirthYear) : null,
-            customer_name_2: (isPrivateLesson && name2) ? name2 : null,
-            customer_birth_year_2: (isPrivateLesson && birthYear2) ? Number(birthYear2) : null,
-            custom_duration_months: customDurationMonths,
-            custom_validity_days: customValidityDays
-        }));
+            return {
+                type: 'TICKET', id: c.item.id, quantity: c.quantity, unit_price: c.quantity > 1 ? c.unitPrice : finalPrice, subtotal: c.subtotal,
+                ticket_metadata: {
+                    customer_name: c.customerName || null,
+                    customer_phone: c.customerPhone || null,
+                    valid_from: validFrom,
+                    valid_until: validUntil,
+                    remaining_sessions: finalSessions,
+                    total_sessions: finalSessions,
+                    promotion_id: c.promoId || null,
+                    card_code: c.cardCode || null,
+                    customer_birth_year: c.privateBirthYear || null,
+                    customer_name_2: c.customerName2 || null,
+                    customer_birth_year_2: c.privateBirthYear2 || null,
+                    custom_duration_months: customDurationMonths,
+                    custom_validity_days: customValidityDays
+                }
+            };
+        });
 
-        const { data, error } = await supabase
-            .from('tickets')
-            .insert(payloads)
-            .select();
+        const total_amount_raw = p_items.reduce((sum, item) => sum + item.subtotal, 0);
 
-        if (error) {
-            alert('Lỗi bán vé: ' + error.message);
+        const { data, error } = await supabase.rpc('create_checkout_order', {
+            p_total_amount: total_amount_raw,
+            p_payment_method: selectedPaymentMethod,
+            p_customer_name: customerName || null,
+            p_customer_phone: customerPhone || null,
+            p_note: '',
+            p_user_id: profile?.id,
+            p_items: p_items
+        });
+
+        if (error || !data?.success) {
+            alert('Lỗi bán hàng: ' + (error?.message || data?.error));
             setSelling(false);
             return;
         }
 
-        // Only show QR print if daily
-        if (ticketType.category === 'DAILY') {
-            const newSoldTickets = data.map((d: any) => ({
-                ...d,
-                type_name: ticketType.name,
-                pool_close_time: closeTime,
-                remaining_sessions: finalSessions,
-                payment_method: paymentMethod as 'CASH' | 'TRANSFER' | 'CARD'
-            }));
-            setSoldTickets(newSoldTickets);
+        if (data.ticket_ids && data.ticket_ids.length > 0) {
+            const { data: generatedTickets } = await supabase.from('tickets').select('*').in('id', data.ticket_ids);
+            if (generatedTickets) {
+                const dailyTickets = generatedTickets.filter(t => {
+                    const c = cart.find(x => x.type === 'TICKET' && x.item.id === t.ticket_type_id);
+                    return c && c.item.category === 'DAILY';
+                });
+                if (dailyTickets.length > 0) {
+                    const closeTime = await getPoolCloseTime();
+                    const mapped = dailyTickets.map(t => {
+                        const c = cart.find(x => x.type === 'TICKET' && x.item.id === t.ticket_type_id);
+                        return {
+                            ...t,
+                            type_name: c!.item.name,
+                            pool_close_time: closeTime,
+                            remaining_sessions: t.remaining_sessions,
+                            payment_method: selectedPaymentMethod
+                        };
+                    });
+                    setSoldTickets(mapped as any);
+                } else {
+                    alert('✅ Thanh toán và lưu thẻ thành công!\nHóa đơn hiển thị bên Dashboard.');
+                }
+            }
         } else {
-            // For LESSON/MULTI/MONTHLY: show note about deferred activation
-            const isDeferred = !validFrom;
-            printReceipt({
-                ticketName: ticketType.name,
-                customerName: name || 'Khách hàng',
-                customerPhone: phone,
-                cardCode: code,
-                pricePaid: finalPrice,
-                originalPrice: ticketType.price,
-                sessions: finalSessions,
-                validFrom: isDeferred ? null : validFrom,
-                validUntil: isDeferred ? null : validUntil,
-                soldAt: new Date().toLocaleString('vi-VN'),
-                promoName: promoId ? promotions.find(p => p.id === promoId)?.name || null : null,
-                paymentMethod: paymentMethod,
-                isDeferred: isDeferred,
-                lessonClassType: (ticketType as any).lesson_class_type || null,
-                customerBirthYear: (isPrivateLesson && privateBirthYear) ? Number(privateBirthYear) : null
-            });
-            alert('✅ Thu tiền và lưu thẻ thành công!\nPhiếu thu đang được in...');
+            alert('✅ Bán sản phẩm xuất kho thành công!');
         }
 
         setSelling(false);
-        setSelectedAdvancedType(null); // Close modal
+        setCart([]);
+        setCustomerName('');
+        setCustomerPhone('');
+        setCardCode('');
+        setSelectedPaymentMethod('CASH');
         setShowPaymentModal(false);
     }
 
@@ -434,17 +435,7 @@ export default function POSPage() {
         e.preventDefault();
         if (!selectedAdvancedType) return;
 
-        if (selectedAdvancedType.category !== 'DAILY' && !cardCode.trim()) {
-            alert('Vui lòng nhập Mã thẻ nhựa!');
-            return;
-        }
-
-        if (selectedAdvancedType.category !== 'DAILY' && !customerPhone.trim()) {
-            alert('Vui lòng nhập Số điện thoại khách hàng!');
-            return;
-        }
-
-        // Validate age for 1:1 and 1:2 private lessons
+        // Validation for private lessons
         const isPrivateLesson = selectedAdvancedType.category === 'LESSON' &&
             ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO');
 
@@ -486,32 +477,59 @@ export default function POSPage() {
             }
         }
 
-        // Prepare data and show payment modal instead of selling directly
-        setPendingTicketData({
-            ticketType: selectedAdvancedType,
-            name: customerName || null,
-            phone: customerPhone || null,
-            promoId: selectedPromoId || null,
-            code: cardCode.trim() || null,
+        let subtotal = selectedAdvancedType.price;
+        if (isPrivateLesson && privateSessions) {
+            let unitPrice1 = selectedAdvancedType.price;
+            let unitPrice2 = 0;
+            if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                const currentYear = new Date().getFullYear();
+                if (privateBirthYear) {
+                    const age1 = currentYear - Number(privateBirthYear);
+                    const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
+                    if (tier1) unitPrice1 = Math.round(tier1.price);
+                }
+                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                    unitPrice2 = selectedAdvancedType.price;
+                    const age2 = currentYear - Number(privateBirthYear2);
+                    const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
+                    if (tier2) unitPrice2 = Math.round(tier2.price);
+                }
+            } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
+                unitPrice2 = selectedAdvancedType.price;
+            }
+            subtotal = Math.round((unitPrice1 + unitPrice2) * Number(privateSessions));
+        }
+
+        setCart(prev => [...prev, {
+            cart_id: Date.now() + Math.random().toString(),
+            type: 'TICKET',
+            item: selectedAdvancedType,
             quantity: 1,
-            name2: (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? customerName2 : null,
-            birthYear2: (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? Number(privateBirthYear2) : null
-        } as any);
-        setSelectedPaymentMethod('CASH');
-        setShowPaymentModal(true);
+            unitPrice: subtotal,
+            subtotal: subtotal,
+            promoId: selectedPromoId || undefined,
+            privateSessions: Number(privateSessions) || undefined,
+            privateBirthYear: Number(privateBirthYear) || undefined,
+            privateBirthYear2: Number(privateBirthYear2) || undefined,
+            customerName2: customerName2 || undefined,
+            privateDurationVal: privateDurationVal ? Number(privateDurationVal) : undefined,
+            privateDurationUnit: privateDurationUnit,
+            privateUnlimited: privateUnlimited,
+            customerName: customerName || undefined,
+            customerPhone: customerPhone || undefined,
+            cardCode: cardCode.trim() || undefined
+        } as any]);
+
+        setSelectedAdvancedType(null);
     }
 
     function handleDailySaleClick(ticketType: TicketType) {
-        setPendingTicketData({
-            ticketType: ticketType,
-            name: null,
-            phone: null,
-            promoId: null,
-            code: null,
-            quantity: dailyQuantities[ticketType.id] || 1
-        });
-        setSelectedPaymentMethod('CASH');
-        setShowPaymentModal(true);
+        const qty = dailyQuantities[ticketType.id] || 1;
+        addToCart('TICKET', ticketType, qty);
+    }
+
+    function handleProductSaleClick(product: RetailProduct) {
+        addToCart('PRODUCT', product, 1);
     }
 
     function handlePrint() {
@@ -978,6 +996,37 @@ export default function POSPage() {
         );
     };
 
+    const renderProductButton = (p: RetailProduct) => {
+        const outOfStock = p.stock_quantity <= 0;
+        return (
+            <button key={p.id} onClick={() => handleProductSaleClick(p)} disabled={selling || outOfStock}
+                style={{
+                    background: '#fff', border: 'none', borderRadius: '14px', padding: 0,
+                    cursor: outOfStock ? 'not-allowed' : 'pointer', textAlign: 'left', overflow: 'hidden',
+                    boxShadow: '0 2px 12px rgba(0,0,0,0.08)', transition: 'all 0.2s ease',
+                    transform: 'translateY(0)', opacity: outOfStock ? 0.6 : 1
+                }}
+                onMouseEnter={e => { if (!outOfStock) { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px #f59e0b30`; } }}
+                onMouseLeave={e => { if (!outOfStock) { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.08)'; } }}>
+                <div style={{ height: '4px', background: `linear-gradient(90deg, #fbbf24, #f59e0b)` }} />
+                <div style={{ padding: '18px 20px', paddingBottom: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '28px' }}>🥤</span>
+                        <div>
+                            <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1d27' }}>{p.name}</div>
+                        </div>
+                    </div>
+                    <div style={{ fontSize: '24px', fontWeight: 800, background: `linear-gradient(135deg, #fbbf24, #d97706)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
+                        {p.price.toLocaleString('vi-VN')} đ
+                    </div>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: outOfStock ? '#ef4444' : '#64748b' }}>
+                        {outOfStock ? 'Hết hàng' : `Kho: ${p.stock_quantity}`}
+                    </div>
+                </div>
+            </button>
+        );
+    };
+
     // Show sold ticket with QR
     if (soldTickets.length > 0) {
         return (
@@ -1064,37 +1113,101 @@ export default function POSPage() {
             </div>
 
             {activeTab === 'SELL' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', animation: 'fadeIn 0.3s ease' }}>
-                    {/* COL 1 — Vé Lượt */}
-                    <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                            <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #3b82f6, #6366f1)' }} />
-                            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>Vé Lượt</h2>
+                <div style={{ display: 'flex', gap: '24px', animation: 'fadeIn 0.3s ease', alignItems: 'flex-start' }}>
+
+                    {/* LEFT COLUMN: Catalog */}
+                    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '20px', alignContent: 'start' }}>
+                        {/* COL 1 — Vé Lượt */}
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                                <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #3b82f6, #6366f1)' }} />
+                                <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>Vé Lượt</h2>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                {dailyTypes.length > 0 ? dailyTypes.map(renderTicketButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có vé.</p>}
+                            </div>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {dailyTypes.length > 0 ? dailyTypes.map(renderTicketButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có vé lượt nào đang mở bán.</p>}
+
+                        {/* COL 2 — Vé Nhiều Buổi / Khoá Học */}
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                                <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #8b5cf6, #a855f7)' }} />
+                                <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>Vé Tháng / Khóa Học</h2>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                {advancedTypes.map(renderTicketButton)}
+                                {lessonTypes.map(renderLessonButton)}
+                                {advancedTypes.length === 0 && lessonTypes.length === 0 && <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có vé đặc biệt.</p>}
+                            </div>
+                        </div>
+
+                        {/* COL 3 — Sản phẩm */}
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                                <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #fbbf24, #f59e0b)' }} />
+                                <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>Hàng Hóa / Sản Phẩm</h2>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                {products.length > 0 ? products.map(renderProductButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có sản phẩm.</p>}
+                            </div>
                         </div>
                     </div>
 
-                    {/* COL 2 — Vé Nhiều Buổi / Vé Tháng */}
-                    <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                            <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #8b5cf6, #a855f7)' }} />
-                            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>Vé Nhiều Buổi / Vé Tháng</h2>
+                    {/* RIGHT COLUMN: CART */}
+                    <div style={{ width: '360px', background: '#fff', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 120px)', position: 'sticky', top: '24px' }}>
+                        <div style={{ padding: '20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>🛒 Giỏ hàng</h2>
+                            <span style={{ background: 'var(--bg-hover)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 }}>{cart.length} món</span>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {advancedTypes.length > 0 ? advancedTypes.map(renderTicketButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có loại vé đặc biệt nào.</p>}
-                        </div>
-                    </div>
 
-                    {/* COL 3 — Gói Khóa Học Bơi */}
-                    <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                            <div style={{ width: '4px', height: '24px', borderRadius: '4px', background: 'linear-gradient(180deg, #10b981, #059669)' }} />
-                            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1a1d27' }}>📚 Gói Khóa Học Bơi</h2>
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {cart.length === 0 ? (
+                                <div style={{ textAlign: 'center', color: 'var(--text-muted)', margin: '40px 0' }}>
+                                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>🛍️</div>
+                                    <p>Giỏ hàng trống</p>
+                                </div>
+                            ) : (
+                                cart.map(c => (
+                                    <div key={c.cart_id} style={{ display: 'flex', gap: '12px', paddingBottom: '16px', borderBottom: '1px dashed #e2e8f0' }}>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>{c.item.name} {c.type === 'TICKET' && c.item.category === 'LESSON' ? (c.privateSessions ? `(${c.privateSessions} buổi)` : '') : ''}</span>
+                                                <button onClick={() => setCart(prev => prev.filter(x => x.cart_id !== c.cart_id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0 4px' }}>&times;</button>
+                                            </div>
+                                            {(c.customerName || c.customerName2) && (
+                                                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>
+                                                    👤 {c.customerName} {c.customerName2 ? `& ${c.customerName2}` : ''}
+                                                </div>
+                                            )}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                                                <div style={{ color: 'var(--accent-blue)', fontWeight: 700, fontSize: '14px' }}>{c.unitPrice.toLocaleString('vi-VN')}đ</div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '2px' }}>
+                                                    <button onClick={() => setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: Math.max(1, x.quantity - 1), subtotal: Math.max(1, x.quantity - 1) * x.unitPrice } : x))} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
+                                                    <span style={{ fontSize: '13px', fontWeight: 600, width: '20px', textAlign: 'center' }}>{c.quantity}</span>
+                                                    <button onClick={() => setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: x.quantity + 1, subtotal: (x.quantity + 1) * x.unitPrice } : x))} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {lessonTypes.length > 0 ? lessonTypes.map(renderLessonButton) : <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Chưa có gói khóa học nào.</p>}
+
+                        <div style={{ padding: '20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottomLeftRadius: '16px', borderBottomRightRadius: '16px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '18px', fontWeight: 800 }}>
+                                <span>Tổng cộng:</span>
+                                <span style={{ color: 'var(--accent-green)' }}>{cart.reduce((s, c) => s + c.subtotal, 0).toLocaleString('vi-VN')}đ</span>
+                            </div>
+                            <button className="btn btn-primary" style={{ width: '100%', padding: '14px', fontSize: '15px' }} disabled={cart.length === 0 || selling}
+                                onClick={() => {
+                                    const hasAdvanced = cart.some(c => c.type === 'TICKET' && c.item.category !== 'DAILY');
+                                    if (hasAdvanced) {
+                                        setCustomerMode('NEW');
+                                    }
+                                    setShowPaymentModal(true);
+                                }}>
+                                Thanh Toán
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1189,108 +1302,7 @@ export default function POSPage() {
                         <form onSubmit={handleAdvancedSubmit}>
                             {selectedAdvancedType.category !== 'DAILY' && (
                                 <>
-                                    {/* Toggle Khách mới / Khách cũ */}
-                                    <div style={{ display: 'flex', gap: '4px', marginBottom: '14px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '8px' }}>
-                                        <button type="button" className={`btn ${customerMode === 'NEW' ? 'btn-primary' : 'btn-ghost'}`}
-                                            style={{ flex: 1, margin: 0, padding: '8px', fontSize: '13px' }}
-                                            onClick={() => { setCustomerMode('NEW'); setCustomerName(''); setCustomerPhone(''); setCardCode(''); setCustSearchResults([]); }}>
-                                            👤 Khách mới
-                                        </button>
-                                        <button type="button" className={`btn ${customerMode === 'EXISTING' ? 'btn-primary' : 'btn-ghost'}`}
-                                            style={{ flex: 1, margin: 0, padding: '8px', fontSize: '13px' }}
-                                            onClick={() => setCustomerMode('EXISTING')}>
-                                            🔍 Khách cũ
-                                        </button>
-                                    </div>
-
-                                    {customerMode === 'EXISTING' && (
-                                        <div className="form-group" style={{ marginBottom: '12px' }}>
-                                            <label>Tìm khách hàng</label>
-                                            <input type="text" placeholder="Nhập mã thẻ, SĐT hoặc tên khách..."
-                                                value={custSearchTerm}
-                                                onChange={async (e) => {
-                                                    const term = e.target.value;
-                                                    setCustSearchTerm(term);
-                                                    if (term.length < 2) { setCustSearchResults([]); return; }
-                                                    setSearchingCust(true);
-                                                    const { data } = await supabase
-                                                        .from('tickets')
-                                                        .select('customer_name, customer_phone, customer_birth_year, card_code, ticket_types!inner(category)')
-                                                        .or(`card_code.ilike.%${term}%,customer_phone.ilike.%${term}%,customer_name.ilike.%${term}%`)
-                                                        .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
-                                                        .limit(20);
-                                                    // Deduplicate by phone
-                                                    const seen = new Set<string>();
-                                                    const unique = (data || []).filter((d: any) => {
-                                                        const key = d.customer_phone || d.card_code;
-                                                        if (!key || seen.has(key)) return false;
-                                                        seen.add(key);
-                                                        return true;
-                                                    }).map((d: any) => ({
-                                                        name: d.customer_name || '',
-                                                        phone: d.customer_phone || '',
-                                                        card_code: d.card_code || '',
-                                                        birth_year: d.customer_birth_year || null
-                                                    }));
-                                                    setCustSearchResults(unique);
-                                                    setSearchingCust(false);
-                                                }}
-                                                style={{ fontSize: '14px' }}
-                                            />
-                                            {searchingCust && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Đang tìm...</span>}
-                                            {custSearchResults.length > 0 && (
-                                                <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto' }}>
-                                                    {custSearchResults.map((c, i) => (
-                                                        <div key={i} onClick={() => {
-                                                            setCustomerName(c.name);
-                                                            setCustomerPhone(c.phone);
-                                                            setCardCode(c.card_code);
-                                                            if (c.birth_year) setPrivateBirthYear(c.birth_year);
-                                                            setCustSearchResults([]);
-                                                            setCustSearchTerm('');
-                                                        }} style={{
-                                                            padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)',
-                                                            fontSize: '13px', transition: 'background 0.15s'
-                                                        }}
-                                                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                                                            onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                                                            <strong>{c.name || 'N/A'}</strong>
-                                                            <span style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>📞 {c.phone || '—'}</span>
-                                                            <span style={{ marginLeft: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    <div className="form-group">
-                                        <label>Mã Thẻ (Quét bằng máy hoặc nhập tay) <span style={{ color: 'red' }}>*</span></label>
-                                        <input type="text" required
-                                            placeholder="Quét mã vạch trên thẻ vào đây"
-                                            value={cardCode}
-                                            onChange={e => setCardCode(e.target.value)}
-                                            onBlur={handleCardBlur}
-                                            style={{ backgroundColor: '#fff', fontSize: '16px', fontWeight: 'bold' }}
-                                        />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Họ và Tên khách</label>
-                                        <input type="text"
-                                            placeholder="Nhập tên khách hàng"
-                                            value={customerName}
-                                            onChange={e => setCustomerName(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Số điện thoại <span style={{ color: 'red' }}>*</span></label>
-                                        <input type="tel" required
-                                            placeholder="Nhập SĐT khách hàng"
-                                            value={customerPhone}
-                                            onChange={e => setCustomerPhone(e.target.value)}
-                                            onBlur={handlePhoneBlur}
-                                        />
-                                    </div>
+                                    {/* Khách hàng thông tin đã được chuyển qua Modal Thanh Toán (Checkout Form) */}
                                 </>
                             )}
 
@@ -1460,56 +1472,123 @@ export default function POSPage() {
                     </div>
                 </div>
             )}
-            {/* MODAL THANH TOÁN */}
-            {showPaymentModal && pendingTicketData && (
+            {/* MODAL THANH TOÁN (Giỏ Hàng) */}
+            {showPaymentModal && cart.length > 0 && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
                     onClick={() => setShowPaymentModal(false)}>
                     <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '400px', width: '90%', boxShadow: 'var(--shadow-lg)' }}
                         onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                            <h2 style={{ fontSize: '18px' }}>💳 Chọn hình thức thanh toán</h2>
+                            <h2 style={{ fontSize: '18px' }}>💳 Thanh toán Đơn hàng</h2>
                             <button onClick={() => setShowPaymentModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
                         </div>
 
                         {(() => {
-                            // Tính giá thực tế cho private lesson (unitPrice × sessions)
-                            const tt = pendingTicketData.ticketType;
-                            const isPrivateLesson = tt.category === 'LESSON' && ((tt as any).lesson_class_type === 'ONE_ON_ONE' || (tt as any).lesson_class_type === 'ONE_ON_TWO');
-                            let actualPrice = tt.price;
-                            if (isPrivateLesson && privateSessions) {
-                                let unitPrice1 = tt.price;
-                                let unitPrice2 = 0;
-                                if (tt.age_price_tiers && tt.age_price_tiers.length > 0) {
-                                    const currentYear = new Date().getFullYear();
-                                    if (privateBirthYear) {
-                                        const age1 = currentYear - Number(privateBirthYear);
-                                        const tier1 = tt.age_price_tiers.find(tier => age1 >= tier.minAge && age1 <= tier.maxAge);
-                                        if (tier1) unitPrice1 = tier1.price;
-                                    }
-                                    if ((tt as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                                        unitPrice2 = tt.price;
-                                        const age2 = currentYear - Number(privateBirthYear2);
-                                        const tier2 = tt.age_price_tiers.find(tier => age2 >= tier.minAge && age2 <= tier.maxAge);
-                                        if (tier2) unitPrice2 = tier2.price;
-                                    }
-                                } else if ((tt as any).lesson_class_type === 'ONE_ON_TWO') {
-                                    unitPrice2 = tt.price;
-                                }
-                                actualPrice = Math.round((unitPrice1 + unitPrice2) * Number(privateSessions));
-                            }
-                            if (pendingTicketData.promoId) {
-                                const promo = promotions.find(p => p.id === pendingTicketData.promoId);
-                                if (promo) {
-                                    if (promo.type === 'AMOUNT') actualPrice = Math.max(0, actualPrice - promo.value);
-                                    if (promo.type === 'PERCENT') actualPrice = Math.round(actualPrice * (1 - promo.value / 100));
-                                }
-                            }
+                            const hasAdvanced = cart.some(c => c.type === 'TICKET' && c.item.category !== 'DAILY');
+                            const actualPrice = cart.reduce((s, c) => s + c.subtotal, 0);
                             const isFreeTicket = actualPrice === 0;
 
                             return (
-                                <>
+                                <form onSubmit={(e) => { e.preventDefault(); doCheckoutOrder(); }}>
+                                    {hasAdvanced && (
+                                        <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#1e293b' }}>
+                                                👤 Thông tin cấp thẻ
+                                            </div>
+
+                                            {/* Toggle Khách mới / Khách cũ */}
+                                            <div style={{ display: 'flex', gap: '4px', marginBottom: '14px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '8px' }}>
+                                                <button type="button" className={`btn ${customerMode === 'NEW' ? 'btn-primary' : 'btn-ghost'}`}
+                                                    style={{ flex: 1, margin: 0, padding: '8px', fontSize: '13px' }}
+                                                    onClick={() => { setCustomerMode('NEW'); setCustomerName(''); setCustomerPhone(''); setCardCode(''); setCustSearchResults([]); }}>
+                                                    👤 Khách mới
+                                                </button>
+                                                <button type="button" className={`btn ${customerMode === 'EXISTING' ? 'btn-primary' : 'btn-ghost'}`}
+                                                    style={{ flex: 1, margin: 0, padding: '8px', fontSize: '13px' }}
+                                                    onClick={() => setCustomerMode('EXISTING')}>
+                                                    🔍 Khách cũ
+                                                </button>
+                                            </div>
+
+                                            {customerMode === 'EXISTING' && (
+                                                <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                    <label>Tìm khách hàng</label>
+                                                    <input type="text" placeholder="Nhập mã thẻ, SĐT hoặc tên khách..."
+                                                        value={custSearchTerm}
+                                                        onChange={async (e) => {
+                                                            const term = e.target.value;
+                                                            setCustSearchTerm(term);
+                                                            if (term.length < 2) { setCustSearchResults([]); return; }
+                                                            setSearchingCust(true);
+                                                            const { data } = await supabase
+                                                                .from('tickets')
+                                                                .select('customer_name, customer_phone, card_code, ticket_types!inner(category)')
+                                                                .or(`card_code.ilike.%${term}%,customer_phone.ilike.%${term}%,customer_name.ilike.%${term}%`)
+                                                                .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+                                                                .limit(20);
+                                                            const seen = new Set<string>();
+                                                            const unique = (data || []).filter((d: any) => {
+                                                                const key = d.customer_phone || d.card_code;
+                                                                if (!key || seen.has(key)) return false;
+                                                                seen.add(key);
+                                                                return true;
+                                                            }).map((d: any) => ({
+                                                                name: d.customer_name || '',
+                                                                phone: d.customer_phone || '',
+                                                                card_code: d.card_code || ''
+                                                            }));
+                                                            setCustSearchResults(unique);
+                                                            setSearchingCust(false);
+                                                        }}
+                                                        style={{ fontSize: '14px' }}
+                                                    />
+                                                    {searchingCust && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Đang tìm...</span>}
+                                                    {custSearchResults.length > 0 && (
+                                                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff' }}>
+                                                            {custSearchResults.map((c, i) => (
+                                                                <div key={i} onClick={() => {
+                                                                    setCustomerName(c.name);
+                                                                    setCustomerPhone(c.phone);
+                                                                    setCardCode(c.card_code);
+                                                                    setCustSearchResults([]);
+                                                                    setCustSearchTerm('');
+                                                                }} style={{
+                                                                    padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)',
+                                                                    fontSize: '13px', transition: 'background 0.15s'
+                                                                }}
+                                                                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                                                                    onMouseLeave={e => (e.currentTarget.style.background = '')}>
+                                                                    <strong>{c.name || 'N/A'}</strong>
+                                                                    <span style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>📞 {c.phone || '—'}</span>
+                                                                    <span style={{ marginLeft: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                <label>Mã Thẻ Nhựa <span style={{ color: 'red' }}>*</span></label>
+                                                <input type="text" required placeholder="Quét mã thẻ..." value={cardCode} onChange={e => setCardCode(e.target.value)} onBlur={handleCardBlur} style={{ fontSize: '15px' }} />
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                <label>Họ và Tên</label>
+                                                <input type="text" placeholder="Tên khách hàng" value={customerName} onChange={e => setCustomerName(e.target.value)} style={{ fontSize: '14px' }} />
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: '12px' }}>
+                                                <label>SĐT <span style={{ color: 'red' }}>*</span></label>
+                                                <input type="tel" required placeholder="Số điện thoại" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} onBlur={handlePhoneBlur} style={{ fontSize: '14px' }} />
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {!isFreeTicket ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+                                            <div style={{ marginBottom: '8px', fontWeight: 600, fontSize: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>Tổng tiền:</span>
+                                                <span style={{ color: 'var(--accent-green)' }}>{actualPrice.toLocaleString('vi-VN')}đ</span>
+                                            </div>
                                             <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CASH' ? 'var(--bg-hover)' : 'transparent' }}>
                                                 <input type="radio" name="payment" value="CASH" checked={selectedPaymentMethod === 'CASH'} onChange={() => setSelectedPaymentMethod('CASH')} />
                                                 <span style={{ fontSize: '16px', fontWeight: 500 }}>💵 Tiền mặt</span>
@@ -1525,9 +1604,6 @@ export default function POSPage() {
                                                     <div>Ngân hàng: <strong>{bizInfo.bank_name}</strong></div>
                                                     <div>Số tài khoản: <strong style={{ color: '#0f172a', fontSize: '15px' }}>{bizInfo.bank_account_number}</strong></div>
                                                     <div>Chủ TK: <strong>{bizInfo.bank_account_name}</strong></div>
-                                                    <div style={{ marginTop: '8px', color: '#64748b', fontStyle: 'italic' }}>
-                                                        (Vui lòng kiểm tra màn hình chuyển khoản của khách)
-                                                    </div>
                                                 </div>
                                             )}
 
@@ -1538,29 +1614,17 @@ export default function POSPage() {
                                         </div>
                                     ) : (
                                         <div style={{ marginBottom: '24px', textAlign: 'center', color: 'var(--accent-green)' }}>
-                                            <p style={{ fontSize: '16px', fontWeight: 600 }}>Vé miễn phí (0đ)</p>
-                                            <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Vui lòng xác nhận để phát hành vé.</p>
+                                            <p style={{ fontSize: '16px', fontWeight: 600 }}>Miễn phí (0đ)</p>
                                         </div>
                                     )}
 
                                     <div style={{ display: 'flex', gap: '12px' }}>
                                         <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPaymentModal(false)}>Hủy</button>
-                                        <button type="button" className="btn btn-primary" style={{ flex: 2 }} disabled={selling} onClick={() => {
-                                            doSellTicket(
-                                                pendingTicketData.ticketType,
-                                                pendingTicketData.name,
-                                                pendingTicketData.phone,
-                                                pendingTicketData.promoId,
-                                                pendingTicketData.code,
-                                                isFreeTicket ? 'CASH' : selectedPaymentMethod,
-                                                (pendingTicketData as any).name2,
-                                                (pendingTicketData as any).birthYear2
-                                            );
-                                        }}>
-                                            {selling ? 'Đang xử lý...' : (isFreeTicket ? 'PHÁT HÀNH VÉ' : 'THANH TOÁN & IN VÉ')}
+                                        <button type="submit" className="btn btn-primary" style={{ flex: 2 }} disabled={selling}>
+                                            {selling ? 'Đang xử lý...' : (isFreeTicket ? 'PHÁT HÀNH' : 'XÁC NHẬN THANH TOÁN')}
                                         </button>
                                     </div >
-                                </>
+                                </form>
                             );
                         })()}
                     </div>
