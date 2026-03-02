@@ -100,6 +100,54 @@ export default function POSPage() {
     const [availablePackages, setAvailablePackages] = useState<any[]>([]);
     const [pendingCheckinCode, setPendingCheckinCode] = useState('');
 
+    async function handleCardBlur() {
+        if (!cardCode.trim() || customerMode !== 'NEW') return;
+        const { data } = await supabase
+            .from('tickets')
+            .select('customer_name, customer_phone, customer_birth_year, card_code, ticket_types!inner(category)')
+            .eq('card_code', cardCode.trim())
+            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+            .limit(1);
+
+        if (data && data.length > 0) {
+            const confirmed = window.confirm('Mã thẻ đã tồn tại, bạn có muốn đăng ký cho khách cũ không?');
+            if (confirmed) {
+                setCustomerMode('EXISTING');
+                const cust = data[0];
+                setCustomerName(cust.customer_name || '');
+                setCustomerPhone(cust.customer_phone || '');
+                setCardCode(cust.card_code || '');
+                if (cust.customer_birth_year) setPrivateBirthYear(cust.customer_birth_year);
+            } else {
+                setCardCode(''); // Clear it
+            }
+        }
+    }
+
+    async function handlePhoneBlur() {
+        if (!customerPhone.trim() || customerMode !== 'NEW') return;
+        const { data } = await supabase
+            .from('tickets')
+            .select('customer_name, customer_phone, customer_birth_year, card_code, ticket_types!inner(category)')
+            .eq('customer_phone', customerPhone.trim())
+            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+            .limit(1);
+
+        if (data && data.length > 0) {
+            const confirmed = window.confirm('Số điện thoại đã tồn tại, bạn có muốn đăng ký cho khách cũ không?');
+            if (confirmed) {
+                setCustomerMode('EXISTING');
+                const cust = data[0];
+                setCustomerName(cust.customer_name || '');
+                setCustomerPhone(cust.customer_phone || '');
+                setCardCode(cust.card_code || '');
+                if (cust.customer_birth_year) setPrivateBirthYear(cust.customer_birth_year);
+            } else {
+                setCustomerPhone(''); // Clear it
+            }
+        }
+    }
+
     useEffect(() => {
         fetchTicketTypes();
         fetchPromotions();
@@ -1222,6 +1270,7 @@ export default function POSPage() {
                                             placeholder="Quét mã vạch trên thẻ vào đây"
                                             value={cardCode}
                                             onChange={e => setCardCode(e.target.value)}
+                                            onBlur={handleCardBlur}
                                             style={{ backgroundColor: '#fff', fontSize: '16px', fontWeight: 'bold' }}
                                         />
                                     </div>
@@ -1239,6 +1288,7 @@ export default function POSPage() {
                                             placeholder="Nhập SĐT khách hàng"
                                             value={customerPhone}
                                             onChange={e => setCustomerPhone(e.target.value)}
+                                            onBlur={handlePhoneBlur}
                                         />
                                     </div>
                                 </>
