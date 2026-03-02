@@ -186,10 +186,7 @@ export default function POSPage() {
         async function fetchProducts() {
             const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
             if (data) {
-                // Show only leaf products: standalone (no variants) + variant children
-                const parentIds = new Set(data.filter(p => p.parent_id).map(p => p.parent_id));
-                const leafProducts = data.filter(p => p.parent_id || !parentIds.has(p.id));
-                setProducts(leafProducts);
+                setProducts(data);
             }
         }
 
