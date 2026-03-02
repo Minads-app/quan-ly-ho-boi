@@ -271,7 +271,6 @@ export default function DashboardPage() {
 
     // --- Computed data ---
     const dailyTickets = tickets.filter(t => t.category === 'DAILY');
-    const lessonTickets = tickets.filter(t => t.type_price === 0);
     const totalRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
     const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
     const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0);
@@ -388,6 +387,11 @@ export default function DashboardPage() {
 
     function renderRevenueTab() {
         const { from, to } = getDateBounds();
+
+        const countDaily = tickets.filter(t => t.category === 'DAILY').length;
+        const countMultiMonthly = tickets.filter(t => t.category === 'MULTI' || t.category === 'MONTHLY').length;
+        const countLesson = tickets.filter(t => t.category === 'LESSON').length;
+
         const tableHtml = `<table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
             ${tickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
@@ -396,12 +400,22 @@ export default function DashboardPage() {
             <tr class="total-row"><td colspan="6">TỔNG CỘNG (${tickets.length} vé)</td><td style="text-align:right">${fmt(totalRevenue)}</td><td colspan="2"></td></tr>
             </tbody></table>
             
-            <div style="margin-top: 24px; padding: 16px; border: 1px solid #999; width: 300px; font-weight: bold; line-height: 1.8;">
-                <h3 style="margin-bottom: 8px; font-size: 14px; text-transform: uppercase;">Thống kê Thanh Toán</h3>
-                <div style="display:flex; justify-content:space-between"><span>Tiền mặt:</span> <span>${fmt(revCash)}</span></div>
-                <div style="display:flex; justify-content:space-between"><span>Chuyển khoản:</span> <span>${fmt(revTransfer)}</span></div>
-                <div style="display:flex; justify-content:space-between"><span>Quẹt Thẻ POS:</span> <span>${fmt(revCard)}</span></div>
-                <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #10b981;"><span>TỔNG THU:</span> <span>${fmt(totalRevenue)}</span></div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px; gap: 24px;">
+                <div style="padding: 16px; border: 1px solid #999; flex: 1; font-weight: bold; line-height: 1.8;">
+                    <h3 style="margin-bottom: 8px; font-size: 14px; text-transform: uppercase;">Thống kê Hạng Mục Vé</h3>
+                    <div style="display:flex; justify-content:space-between; color: #3b82f6;"><span>Vé Lẻ (QR):</span> <span>${countDaily} vé</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #f59e0b;"><span>Gói Bơi (Tháng/Lượt):</span> <span>${countMultiMonthly} vé</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #ec4899;"><span>Khách Học Bơi:</span> <span>${countLesson} vé</span></div>
+                    <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #000;"><span>TỔNG VÉ BÁN:</span> <span>${tickets.length} vé</span></div>
+                </div>
+
+                <div style="padding: 16px; border: 1px solid #999; flex: 1; font-weight: bold; line-height: 1.8;">
+                    <h3 style="margin-bottom: 8px; font-size: 14px; text-transform: uppercase;">Thống kê Thanh Toán</h3>
+                    <div style="display:flex; justify-content:space-between; color: #64748b;"><span>Tiền mặt:</span> <span>${fmt(revCash)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #d97706;"><span>Chuyển khoản:</span> <span>${fmt(revTransfer)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #8b5cf6;"><span>Quẹt Thẻ POS:</span> <span>${fmt(revCard)}</span></div>
+                    <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #10b981;"><span>TỔNG THU:</span> <span>${fmt(totalRevenue)}</span></div>
+                </div>
             </div>`;
 
         return (
@@ -409,10 +423,11 @@ export default function DashboardPage() {
                 {renderDateFilter()}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
                     {[{ label: 'Tổng doanh thu', value: fmt(totalRevenue), color: '#10b981' },
-                    { label: 'Số vé bán', value: `${tickets.length - lessonTickets.length} vé`, color: '#3b82f6' },
-                    { label: 'Khách Học Bơi', value: `${lessonTickets.length} vé`, color: '#ec4899' },
+                    { label: 'Vé Lẻ (QR)', value: `${countDaily} vé`, color: '#3b82f6' },
+                    { label: 'Gói Bơi', value: `${countMultiMonthly} vé`, color: '#f59e0b' },
+                    { label: 'Khách Học Bơi', value: `${countLesson} vé`, color: '#ec4899' },
                     { label: 'Tiền mặt', value: fmt(revCash), color: '#64748b' },
-                    { label: 'Chuyển khoản', value: fmt(revTransfer), color: '#f59e0b' },
+                    { label: 'Chuyển khoản', value: fmt(revTransfer), color: '#d97706' },
                     { label: 'Thẻ POS', value: fmt(revCard), color: '#8b5cf6' }
                     ].map(k => (
                         <div key={k.label} style={{ flex: 1, minWidth: '120px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
