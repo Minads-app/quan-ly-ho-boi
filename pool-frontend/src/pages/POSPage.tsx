@@ -145,6 +145,35 @@ export default function POSPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeCategory, setActiveCategory] = useState<'ALL' | 'DAILY' | 'ADVANCED' | 'LESSON' | 'PRODUCT'>('ALL');
 
+    // Modal printing keyboard shortcuts (Esc to close, Enter to print)
+    useEffect(() => {
+        function handlePrintKeyDown(e: KeyboardEvent) {
+            if (soldTickets.length > 0) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSoldTickets([]);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handlePrint();
+                }
+            } else if (checkoutReceipt) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCheckoutReceipt(null);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    document.getElementById('btn-print-receipt')?.click();
+                }
+            }
+        }
+        window.addEventListener('keydown', handlePrintKeyDown, true);
+        return () => window.removeEventListener('keydown', handlePrintKeyDown, true);
+    }, [soldTickets, checkoutReceipt]);
+
     // Keyboard shortcuts: F2=CHECKIN tab, F3=customer search, F4=SELL tab, F6-F10=customer hotkey
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
@@ -1024,10 +1053,10 @@ export default function POSPage() {
 
                     <div className="sold-ticket-actions">
                         <button className="btn btn-primary" onClick={handlePrint}>
-                            🖨️ In Vé
+                            🖨️ In Vé <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(Enter)</span>
                         </button>
                         <button className="btn btn-secondary" onClick={() => setSoldTickets([])}>
-                            ← Bán vé tiếp
+                            ← Bán vé tiếp <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
                         </button>
                     </div>
                 </div>
@@ -1141,11 +1170,11 @@ export default function POSPage() {
                     </div>
 
                     <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-                        <button className="btn btn-primary" style={{ flex: 1, padding: '12px' }} onClick={printReceipt}>
-                            🖨️ In Hóa Đơn
+                        <button id="btn-print-receipt" className="btn btn-primary" style={{ flex: 1, padding: '12px' }} onClick={printReceipt}>
+                            🖨️ In Hóa Đơn <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(Enter)</span>
                         </button>
                         <button className="btn btn-secondary" style={{ flex: 1, padding: '12px' }} onClick={() => setCheckoutReceipt(null)}>
-                            ← Bán vé tiếp
+                            ← Bán vé tiếp <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
                         </button>
                     </div>
                 </div>

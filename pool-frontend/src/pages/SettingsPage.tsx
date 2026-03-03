@@ -156,6 +156,7 @@ export default function SettingsPage() {
         if (data) {
             const s: Record<string, string> = {};
             for (const row of data) {
+                if (row.key === 'pool_weekly_schedule') continue; // Handled separately by fetchWeekSchedule
                 try {
                     // value is stored as JSONB, parse the quoted string
                     s[row.key] = typeof row.value === 'string'
