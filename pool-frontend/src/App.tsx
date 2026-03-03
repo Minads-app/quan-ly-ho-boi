@@ -193,13 +193,15 @@ function AppRoutes() {
           <div className="user-info">
             <div className="user-name">{profile.full_name}</div>
             <div className="user-role">{profile.role}</div>
-            <button
-              className="btn btn-ghost"
-              style={{ marginTop: '8px', padding: '4px 8px', fontSize: '11px', width: '100%' }}
-              onClick={() => setShowPasswordModal(true)}
-            >
-              🔑 Đổi mật khẩu
-            </button>
+            {profile.role === 'ADMIN' && (
+              <button
+                className="btn btn-ghost"
+                style={{ marginTop: '8px', padding: '4px 8px', fontSize: '11px', width: '100%' }}
+                onClick={() => setShowPasswordModal(true)}
+              >
+                🔑 Đổi mật khẩu
+              </button>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm" onClick={signOut}>
             Đăng xuất

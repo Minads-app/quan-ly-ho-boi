@@ -57,6 +57,12 @@ export default function StaffPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [createError, setCreateError] = useState('');
 
+    // Modal state for Admin Reset Password
+    const [showResetModal, setShowResetModal] = useState(false);
+    const [resetStaff, setResetStaff] = useState<Profile | null>(null);
+    const [adminNewPassword, setAdminNewPassword] = useState('');
+    const [isResetting, setIsResetting] = useState(false);
+
     // Modal state for Permissions Matrix
     const [showPermModal, setShowPermModal] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState<Profile | null>(null);
@@ -252,7 +258,35 @@ export default function StaffPage() {
             setShowPermModal(false);
             alert('Cập nhật phân quyền thành công!');
         }
+        setShowPermModal(false);
         setIsSavingPerms(false);
+    }
+
+    async function handleAdminResetPassword(e: React.FormEvent) {
+        e.preventDefault();
+        if (!resetStaff) return;
+        if (adminNewPassword.length < 6) return alert('Mật khẩu phải từ 6 ký tự trở lên');
+
+        if (!confirm(`Xác nhận đổi mật khẩu cho nhân sự: ${resetStaff.full_name}?`)) return;
+
+        setIsResetting(true);
+        const { data, error } = await supabase.rpc('admin_reset_user_password', {
+            p_user_id: resetStaff.id,
+            p_new_password: adminNewPassword
+        });
+
+        setIsResetting(false);
+
+        if (error) {
+            alert('Lỗi khi đổi mật khẩu: ' + error.message);
+        } else if (data && data.success === false) {
+            alert('Lỗi: ' + data.error);
+        } else {
+            alert('Đổi mật khẩu thành công!');
+            setShowResetModal(false);
+            setAdminNewPassword('');
+            setResetStaff(null);
+        }
     }
 
     function handlePermChange(module: keyof PermissionsMatrix, action: string, value: boolean) {
@@ -381,6 +415,14 @@ export default function StaffPage() {
                                                 >
                                                     ⚙️ Phân quyền
                                                 </button>
+                                                <button
+                                                    className="btn btn-ghost"
+                                                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.875rem', margin: 0, border: '1px solid #e2e8f0' }}
+                                                    onClick={() => { setResetStaff(staff); setShowResetModal(true); setAdminNewPassword(''); }}
+                                                    title="Trưởng quản lý đổi mật khẩu cho nhân sự này"
+                                                >
+                                                    🔑 Đổi MK
+                                                </button>
                                             </div>
                                         </div>
                                     </td>
@@ -463,6 +505,47 @@ export default function StaffPage() {
                                     disabled={isCreating}
                                 >
                                     {isCreating ? 'Đang tạo...' : 'Tạo tài khoản'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Reset Password Modal */}
+            {showResetModal && resetStaff && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '400px' }}>
+                        <h2>Đổi mật khẩu cho: {resetStaff.full_name}</h2>
+                        <form onSubmit={handleAdminResetPassword}>
+                            <div className="form-group">
+                                <label>Mật khẩu mới (ít nhất 6 ký tự)</label>
+                                <input
+                                    type="password"
+                                    required
+                                    minLength={6}
+                                    value={adminNewPassword}
+                                    onChange={e => setAdminNewPassword(e.target.value)}
+                                    placeholder="******"
+                                />
+                            </div>
+                            <div className="modal-actions" style={{ marginTop: '24px' }}>
+                                <button
+                                    type="button"
+                                    className="btn btn-ghost"
+                                    style={{ flex: 1 }}
+                                    onClick={() => { setShowResetModal(false); setResetStaff(null); }}
+                                    disabled={isResetting}
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="btn btn-primary"
+                                    style={{ flex: 1 }}
+                                    disabled={isResetting}
+                                >
+                                    {isResetting ? 'Đang đổi...' : 'Xác nhận Đổi MK'}
                                 </button>
                             </div>
                         </form>
