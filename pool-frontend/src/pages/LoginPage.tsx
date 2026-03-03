@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 export default function LoginPage() {
     const { signIn } = useAuth();
@@ -7,6 +8,29 @@ export default function LoginPage() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Business info
+    const [bizName, setBizName] = useState('Hồ bơi HBA Minh Khai');
+    const [bizLogo, setBizLogo] = useState('');
+
+    useEffect(() => {
+        async function fetchBizInfo() {
+            const { data } = await supabase.from('system_settings').select('key, value').in('key', ['business_name', 'business_logo']);
+            if (data) {
+                data.forEach(r => {
+                    let val = '';
+                    try {
+                        val = typeof r.value === 'string' ? r.value.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(r.value)).replace(/^"|"$/g, '');
+                    } catch (e) {
+                        val = typeof r.value === 'string' ? r.value : String(r.value);
+                    }
+                    if (r.key === 'business_name' && val) setBizName(val);
+                    if (r.key === 'business_logo' && val) setBizLogo(val);
+                });
+            }
+        }
+        fetchBizInfo();
+    }, []);
 
     async function handleSubmit(e: FormEvent) {
         e.preventDefault();
@@ -21,8 +45,14 @@ export default function LoginPage() {
         <div className="login-container">
             <div className="login-card">
                 <div className="login-header">
-                    <div className="login-icon">🏊</div>
-                    <h1>Hệ Thống Vé Bơi</h1>
+                    {bizLogo ? (
+                        <div className="login-icon" style={{ background: 'none', border: 'none', padding: 0 }}>
+                            <img src={bizLogo} alt="Logo" style={{ maxHeight: '64px', objectFit: 'contain' }} />
+                        </div>
+                    ) : (
+                        <div className="login-icon">🏊</div>
+                    )}
+                    <h1>{bizName}</h1>
                     <p>Đăng nhập để tiếp tục</p>
                 </div>
 
