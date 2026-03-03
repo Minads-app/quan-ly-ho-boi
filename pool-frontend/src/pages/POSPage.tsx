@@ -534,10 +534,10 @@ export default function POSPage() {
                         };
                     });
                     setSoldTickets(mapped as any); // Render single QR tickets
-                } else {
-                    // No daily tickets, but we still want to show the Master Receipt
-                    setCheckoutReceipt(receipt);
                 }
+
+                // ALWAYS generate Master Receipt
+                setCheckoutReceipt(receipt);
             }
         } else {
             // Only retail products sold
@@ -597,56 +597,59 @@ export default function POSPage() {
             if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
                 const currentYear = new Date().getFullYear();
                 const age1 = currentYear - Number(privateBirthYear);
-                const isAge1Valid = selectedAdvancedType.age_price_tiers.some(tier => age1 >= tier.minAge && age1 <= tier.maxAge);
+                const isAge1Valid = selectedAdvancedType.age_price_tiers.some(tier => age1 >= tier.minAge && (tier.maxAge === null ? true : age1 <= tier.maxAge));
+                let isAge2Valid = true;
 
-                if (!isAge1Valid) {
-                    alert('Học viên 1 không thỏa điều kiện tuổi học bơi');
+                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                    const age2 = currentYear - Number(privateBirthYear2);
+                    isAge2Valid = selectedAdvancedType.age_price_tiers.some(tier => age2 >= tier.minAge && (tier.maxAge === null ? true : age2 <= tier.maxAge));
+                }
+
+                if (!isAge1Valid || !isAge2Valid) {
+                    alert('Độ tuổi học viên không phù hợp với khóa học này. Vui lòng chọn khóa học khác.');
                     return;
                 }
+            }
+        }
 
-                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
-                    const age2 = currentYear - Number(privateBirthYear2);
-                    const isAge2Valid = selectedAdvancedType.age_price_tiers.some(tier => age2 >= tier.minAge && age2 <= tier.maxAge);
-                    if (!isAge2Valid) {
-                        alert('Học viên 2 không thỏa điều kiện tuổi học bơi');
-                        return;
+        const calculateAdvancedPrice = () => {
+            let subtotal = selectedAdvancedType.price;
+            if (isPrivateLesson && privateSessions) {
+                let unitPrice1 = selectedAdvancedType.price;
+                let unitPrice2 = 0;
+                if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                    const currentYear = new Date().getFullYear();
+                    if (privateBirthYear) {
+                        const age1 = currentYear - Number(privateBirthYear);
+                        const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && (t.maxAge === null ? true : age1 <= t.maxAge));
+                        if (tier1) unitPrice1 = Math.round(tier1.price);
                     }
-                }
-            }
-        }
-
-        let subtotal = selectedAdvancedType.price;
-        if (isPrivateLesson && privateSessions) {
-            let unitPrice1 = selectedAdvancedType.price;
-            let unitPrice2 = 0;
-            if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
-                const currentYear = new Date().getFullYear();
-                if (privateBirthYear) {
-                    const age1 = currentYear - Number(privateBirthYear);
-                    const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
-                    if (tier1) unitPrice1 = Math.round(tier1.price);
-                }
-                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                    if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
+                        unitPrice2 = selectedAdvancedType.price;
+                        const age2 = currentYear - Number(privateBirthYear2);
+                        const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && (t.maxAge === null ? true : age2 <= t.maxAge));
+                        if (tier2) unitPrice2 = Math.round(tier2.price);
+                    }
+                } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
                     unitPrice2 = selectedAdvancedType.price;
-                    const age2 = currentYear - Number(privateBirthYear2);
-                    const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
-                    if (tier2) unitPrice2 = Math.round(tier2.price);
                 }
-            } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
-                unitPrice2 = selectedAdvancedType.price;
+                subtotal = Math.round((unitPrice1 + unitPrice2) * Number(privateSessions));
             }
-            subtotal = Math.round((unitPrice1 + unitPrice2) * Number(privateSessions));
-        }
+            return subtotal;
+        };
 
+        const privateSessionsVal = Number(privateSessions) || undefined;
+
+        // ADD TO CART 
         setCart(prev => [...prev, {
-            cart_id: Date.now() + Math.random().toString(),
+            cart_id: crypto.randomUUID(),
             type: 'TICKET',
             item: selectedAdvancedType,
-            quantity: 1,
-            unitPrice: subtotal,
-            subtotal: subtotal,
+            quantity: 1, // advanced ticket always qty=1
+            unitPrice: calculateAdvancedPrice(),
+            subtotal: calculateAdvancedPrice(),
             promoId: selectedPromoId || undefined,
-            privateSessions: Number(privateSessions) || undefined,
+            privateSessions: privateSessionsVal,
             privateBirthYear: Number(privateBirthYear) || undefined,
             privateBirthYear2: Number(privateBirthYear2) || undefined,
             customerName2: customerName2 || undefined,
@@ -1056,7 +1059,7 @@ export default function POSPage() {
                             🖨️ In Vé <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(Enter)</span>
                         </button>
                         <button className="btn btn-secondary" onClick={() => setSoldTickets([])}>
-                            ← Bán vé tiếp <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
+                            {checkoutReceipt ? 'Tiếp tục in hóa đơn →' : '← Bán vé tiếp'} <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
                         </button>
                     </div>
                 </div>
