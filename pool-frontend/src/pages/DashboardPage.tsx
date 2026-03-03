@@ -361,10 +361,9 @@ export default function DashboardPage() {
                     <div style="font-weight:700; margin-bottom:4px;">Quản lý</div>
                     <div style="font-size:10px; font-style:italic; color:#666;">(Ký và ghi rõ họ tên)</div>
                     <div style="height:60px;"></div>
-                </div>
             </div>`;
 
-        const win = window.open('', '_blank', 'width=1100,height=700');
+        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
         if (!win) return;
         win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
         <style>
@@ -402,6 +401,7 @@ export default function DashboardPage() {
             ${tableHtml}
             ${signatureFooter}
             <p class="footer">${bizInfo.name} — Phầm mềm quản lý bán vé tự động</p>
+            <div style="text-align: center; margin-top: 32px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>
             <script>setTimeout(function(){ window.print(); }, 500);<\/script>
         </body></html>`);
         win.document.close();

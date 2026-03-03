@@ -716,7 +716,8 @@ export default function POSPage() {
       </head>
       <body>
         ${printContent}
-        <script>setTimeout(function(){window.print();},500);<\/script>
+        <div style="text-align: center; margin-top: 16px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>
+        <script>setTimeout(function(){window.print();},500);</script>
       </body>
       </html>
     `);
@@ -1037,7 +1038,7 @@ export default function POSPage() {
     if (checkoutReceipt) {
         const isA5 = bizInfo.print_format === 'A5';
         const printReceipt = () => {
-            const win = window.open('', '_blank', isA5 ? 'width=700,height=900' : 'width=400,height=600');
+            const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
             if (!win) return;
             const content = document.querySelector('.checkout-receipt-card')?.innerHTML || '';
             const htmlParts = [
@@ -1063,11 +1064,14 @@ export default function POSPage() {
                 '.items-table th, .items-table td { border-bottom: 1px dashed #ccc; padding: 6px 0; text-align: right; }',
                 '.items-table th:first-child, .items-table td:first-child { text-align: left; }',
                 '.total-row { font-size: ' + (isA5 ? '20px' : '16px') + '; font-weight: bold; margin-top: 12px; padding-top: 12px; border-top: 2px dashed #000; }',
-                '.footer { text-align: center; margin-top: 24px; font-size: ' + (isA5 ? '14px' : '11px') + '; color: #666; font-style: italic; }',
                 '</style>',
                 '</head>',
                 '<body>',
                 content,
+                '<div class="footer" style="margin-top: 24px; text-align: center;">',
+                '<div>Cảm ơn quý khách và hẹn gặp lại!</div>',
+                '<div style="margin-top: 8px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
+                '</div>',
                 '<script>setTimeout(function(){window.print();},500);</' + 'script>',
                 '</body>',
                 '</html>'
@@ -1679,7 +1683,7 @@ export default function POSPage() {
                                     Hủy bỏ
                                 </button>
                                 <button type="submit" className="btn btn-primary" disabled={selling}>
-                                    {selling ? 'Đang xử lý...' : (selectedAdvancedType.category === 'DAILY' ? 'Thu tiền & In vé' : 'Thu tiền')}
+                                    {selling ? 'Đang xử lý...' : (selectedAdvancedType.category === 'DAILY' ? 'Thêm vào bill & In vé' : 'Thêm vào bill')}
                                 </button>
                             </div>
                         </form>

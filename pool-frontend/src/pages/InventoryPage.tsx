@@ -90,7 +90,7 @@ export default function InventoryPage() {
 
     const printInventorySlip = (mode: 'IMPORT' | 'EXPORT', items: SlipItem[], note: string) => {
         const isA5 = bizInfo.print_format === 'A5';
-        const win = window.open('', '_blank', isA5 ? 'width=700,height=900' : 'width=400,height=600');
+        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
         if (!win) return;
 
         const slipId = (mode === 'IMPORT' ? 'NK-' : 'XK-') + Date.now().toString().slice(-6);
@@ -150,6 +150,7 @@ export default function InventoryPage() {
             '<div><p>Người giao/nhận</p><br><br><p>(Ký, ghi rõ họ tên)</p></div>',
             '<div><p>Người lập phiếu</p><br><br><p>' + (profile?.full_name || 'Admin') + '</p></div>',
             '</div>',
+            '<div style="text-align: center; margin-top: 32px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
             '<script>setTimeout(function(){window.print();},500);</' + 'script>',
             '</body>',
             '</html>'
