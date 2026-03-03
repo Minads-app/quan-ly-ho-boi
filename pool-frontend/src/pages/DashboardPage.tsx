@@ -494,7 +494,8 @@ export default function DashboardPage() {
         const tableHtml = `<table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
             ${tickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
-            return `<tr><td>${i + 1}</td><td>${t.type_name}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
+            const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
+            return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
             <tr class="total-row"><td colspan="6">TỔNG CỘNG VÉ (${tickets.length} vé)</td><td style="text-align:right">${fmt(totalTicketRevenue)}</td><td colspan="2"></td></tr>
             </tbody></table>
@@ -555,11 +556,14 @@ export default function DashboardPage() {
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport(`Báo cáo Doanh thu (${from} → ${to})`, tableHtml)}>🖨️ In A4</button>
                     <button className="btn btn-secondary" onClick={() => exportExcel(`doanh_thu_${from}_${to}`, ['STT', 'Loại vé', 'Khách hàng', 'SĐT', 'Mã thẻ', 'H/T Thanh toán', 'Giá bán', 'Người bán', 'Thời gian'],
-                        tickets.map((t, i) => [
-                            String(i + 1), t.type_name, t.customer_name || 'Khách lẻ', t.customer_phone || '', t.card_code || '',
-                            t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
-                            String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at)
-                        ])
+                        tickets.map((t, i) => {
+                            const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
+                            return [
+                                String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.customer_phone || '', t.card_code || '',
+                                t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
+                                String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at)
+                            ]
+                        })
                     )}>📊 Xuất Excel</button>
                 </div>
                 {renderTicketTable(tickets, 'Danh sách Vé đã Bán')}
@@ -860,7 +864,8 @@ export default function DashboardPage() {
             <table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Thời gian</th></tr></thead><tbody>
             ${mySalesTickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
-            return `<tr><td>${i + 1}</td><td>${t.type_name}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
+            const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
+            return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
             <tr class="total-row"><td colspan="5">TỔNG CỘNG (${mySalesTickets.length} vé)</td><td style="text-align:right">${fmt(myRevenue)}</td><td></td></tr></tbody></table>`;
 
@@ -880,11 +885,14 @@ export default function DashboardPage() {
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport(`Báo cáo Vé Dài Hạn Đã Bán (${profile?.full_name}) — ${from} → ${to}`, tableHtml)}>🖨️ In A4</button>
                     <button className="btn btn-secondary" onClick={() => exportExcel(`ve_dai_han_da_ban_${from}_${to}`, ['STT', 'Loại vé', 'Khách hàng', 'Mã thẻ', 'H/T Thanh toán', 'Giá bán', 'Thời gian'],
-                        mySalesTickets.map((t, i) => [
-                            String(i + 1), t.type_name, t.customer_name || 'Khách lẻ', t.card_code || '',
-                            t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
-                            String(t.price_paid), fmtDateTime(t.sold_at)
-                        ])
+                        mySalesTickets.map((t, i) => {
+                            const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
+                            return [
+                                String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.card_code || '',
+                                t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
+                                String(t.price_paid), fmtDateTime(t.sold_at)
+                            ]
+                        })
                     )}>📊 Xuất Excel</button>
                 </div>
                 {renderTicketTable(mySalesTickets)}
@@ -909,8 +917,8 @@ export default function DashboardPage() {
                             <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                 <td style={tdS}>{i + 1}</td>
                                 <td style={tdS}>
-                                    <span style={{ background: t.category === 'DAILY' ? '#dcfce7' : t.category === 'MONTHLY' ? '#dbeafe' : '#fef3c7', color: t.category === 'DAILY' ? '#166534' : t.category === 'MONTHLY' ? '#1d4ed8' : '#92400e', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
-                                        {t.type_name}
+                                    <span style={{ background: t.category === 'DAILY' ? '#dcfce7' : t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#fce7f3' : '#fef3c7', color: t.category === 'DAILY' ? '#166534' : t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#be185d' : '#92400e', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
+                                        {t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.type_name}
                                     </span>
                                 </td>
                                 <td style={tdS}>{t.customer_name || 'Khách lẻ'}</td>
