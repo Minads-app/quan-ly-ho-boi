@@ -563,7 +563,7 @@ export default function InventoryPage() {
     }
 
     // ===================== SLIP MODE (like POS cart) =====================
-    if (slipMode) {
+    if (slipMode === 'IMPORT' || slipMode === 'EXPORT') {
         const isImport = slipMode === 'IMPORT';
         const modeColor = isImport ? '#10b981' : '#f59e0b';
         const modeLabel = isImport ? 'Nhập Kho' : 'Xuất Kho';
