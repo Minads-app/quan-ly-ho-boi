@@ -67,6 +67,7 @@ export default function POSPage() {
     const [loading, setLoading] = useState(true);
     const [selling, setSelling] = useState(false);
     const [soldTickets, setSoldTickets] = useState<SoldTicket[]>([]); // Array of sold tickets
+    const [pendingTickets, setPendingTickets] = useState<any[]>([]); // Tickets to be shown after the invoice
     const [checkoutReceipt, setCheckoutReceipt] = useState<any | null>(null);
 
     // Cart & Products state
@@ -153,6 +154,7 @@ export default function POSPage() {
                     e.preventDefault();
                     e.stopPropagation();
                     setCheckoutReceipt(null);
+                    setPendingTickets([]);
                     setSoldTickets([]);
                 } else if (e.key === 'Enter') {
                     e.preventDefault();
@@ -534,7 +536,7 @@ export default function POSPage() {
                             payment_method: selectedPaymentMethod
                         };
                     });
-                    setSoldTickets(mapped as any); // Render single QR tickets
+                    setPendingTickets(mapped as any); // Store single QR tickets
                 }
 
                 // ALWAYS generate Master Receipt
@@ -997,12 +999,6 @@ export default function POSPage() {
             const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
             if (!win) return;
 
-            // Open ticket window synchronously to bypass popup blocker
-            let ticketWin: Window | null = null;
-            if (soldTickets.length > 0) {
-                ticketWin = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
-            }
-
             const content = document.querySelector('.checkout-receipt-card')?.innerHTML || '';
             const htmlParts = [
                 '<!DOCTYPE html>',
@@ -1042,9 +1038,14 @@ export default function POSPage() {
             win.document.write(htmlParts.join('\n'));
             win.document.close();
 
-            if (soldTickets.length > 0 && ticketWin) {
-                handlePrint(ticketWin);
-            }
+            // Transition to ticket popups after invoice
+            setTimeout(() => {
+                setCheckoutReceipt(null);
+                if (pendingTickets.length > 0) {
+                    setSoldTickets(pendingTickets);
+                    setPendingTickets([]);
+                }
+            }, 500);
         };
 
         return (
@@ -1110,7 +1111,7 @@ export default function POSPage() {
                         <button id="btn-print-receipt" className="btn btn-primary" style={{ flex: 1, padding: '12px' }} onClick={printReceipt}>
                             🖨️ In Hóa Đơn <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(Enter)</span>
                         </button>
-                        <button className="btn btn-secondary" style={{ flex: 1, padding: '12px' }} onClick={() => { setCheckoutReceipt(null); setSoldTickets([]); }}>
+                        <button className="btn btn-secondary" style={{ flex: 1, padding: '12px' }} onClick={() => { setCheckoutReceipt(null); setPendingTickets([]); setSoldTickets([]); }}>
                             ← Bán vé tiếp <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
                         </button>
                     </div>
