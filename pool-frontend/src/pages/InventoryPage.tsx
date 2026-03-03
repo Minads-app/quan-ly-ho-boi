@@ -190,7 +190,6 @@ export default function InventoryPage() {
         const items = await fetchAuditDetails(auditId);
         if (!items) return;
 
-        const isA5 = bizInfo.print_format === 'A5';
         const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
         if (!win) return;
 
