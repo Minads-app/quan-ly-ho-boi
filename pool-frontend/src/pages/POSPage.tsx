@@ -676,10 +676,10 @@ export default function POSPage() {
         addToCart('PRODUCT', product, 1);
     }
 
-    function handlePrint() {
+    function handlePrint(preOpenedWindow?: Window | null) {
         if (!printRef.current) return;
         const printContent = printRef.current.innerHTML;
-        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
+        const win = preOpenedWindow || window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
         if (!win) return;
 
         const isA5 = bizInfo.print_format === 'A5';
@@ -996,6 +996,13 @@ export default function POSPage() {
         const printReceipt = () => {
             const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
             if (!win) return;
+
+            // Open ticket window synchronously to bypass popup blocker
+            let ticketWin: Window | null = null;
+            if (soldTickets.length > 0) {
+                ticketWin = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
+            }
+
             const content = document.querySelector('.checkout-receipt-card')?.innerHTML || '';
             const htmlParts = [
                 '<!DOCTYPE html>',
@@ -1035,10 +1042,8 @@ export default function POSPage() {
             win.document.write(htmlParts.join('\n'));
             win.document.close();
 
-            if (soldTickets.length > 0) {
-                setTimeout(() => {
-                    handlePrint();
-                }, 800);
+            if (soldTickets.length > 0 && ticketWin) {
+                handlePrint(ticketWin);
             }
         };
 
@@ -1113,7 +1118,7 @@ export default function POSPage() {
 
                 {/* TỰ ĐỘNG IN VÉ (ẨN) */}
                 {soldTickets.length > 0 && (
-                    <div style={{ display: 'none' }}>
+                    <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', visibility: 'hidden' }}>
                         <div className="sold-ticket-card" ref={printRef}>
                             {soldTickets.map((ticket, index) => (
                                 <div className="ticket-print" key={ticket.id}>
@@ -1245,7 +1250,7 @@ export default function POSPage() {
                     </div>
 
                     <div className="sold-ticket-actions">
-                        <button className="btn btn-primary" onClick={handlePrint}>
+                        <button className="btn btn-primary" onClick={() => handlePrint()}>
                             🖨️ In Vé <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(Enter)</span>
                         </button>
                         <button className="btn btn-secondary" onClick={() => setSoldTickets([])}>
