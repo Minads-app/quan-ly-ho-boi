@@ -66,6 +66,7 @@ export default function POSPage() {
     const [loading, setLoading] = useState(true);
     const [selling, setSelling] = useState(false);
     const [soldTickets, setSoldTickets] = useState<SoldTicket[]>([]); // Array of sold tickets
+    const [checkoutReceipt, setCheckoutReceipt] = useState<any | null>(null);
 
     // Cart & Products state
     const [cart, setCart] = useState<CartItem[]>([]);
@@ -466,6 +467,23 @@ export default function POSPage() {
             return;
         }
 
+        // Build receipt object before clearing cart
+        const receipt = {
+            order_id: data.order_id,
+            items: cart.map(c => ({
+                name: c.item.name,
+                quantity: c.quantity,
+                unitPrice: c.unitPrice,
+                subtotal: c.subtotal,
+                isLesson: c.type === 'TICKET' && c.item.category === 'LESSON'
+            })),
+            totalPrice: total_amount_raw,
+            customerName,
+            customerPhone,
+            paymentMethod: selectedPaymentMethod,
+            createdAt: new Date().toISOString()
+        };
+
         if (data.ticket_ids && data.ticket_ids.length > 0) {
             const { data: generatedTickets } = await supabase.from('tickets').select('*').in('id', data.ticket_ids);
             if (generatedTickets) {
@@ -485,13 +503,15 @@ export default function POSPage() {
                             payment_method: selectedPaymentMethod
                         };
                     });
-                    setSoldTickets(mapped as any);
+                    setSoldTickets(mapped as any); // Render single QR tickets
                 } else {
-                    alert('✅ Thanh toán và lưu thẻ thành công!\nHóa đơn hiển thị bên Dashboard.');
+                    // No daily tickets, but we still want to show the Master Receipt
+                    setCheckoutReceipt(receipt);
                 }
             }
         } else {
-            alert('✅ Bán sản phẩm xuất kho thành công!');
+            // Only retail products sold
+            setCheckoutReceipt(receipt);
         }
 
         setSelling(false);
@@ -691,6 +711,7 @@ export default function POSPage() {
             font-size: ${isA5 ? '13px' : '10px'};
             color: #999;
           }
+          @media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }
         </style>
       </head>
       <body>
@@ -949,7 +970,13 @@ export default function POSPage() {
                                 {/* Tiêu đề vé phân biệt theo loại */}
                                 <h2>{ticket.pass_category === 'LESSON' ? '📚 VÉ HỌC BƠI' : ticket.pass_category ? '🏊 VÉ BƠI TRẢ TRƯỚC' : '🏊 VÉ BƠI'}</h2>
 
-                                <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên 1:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                {(ticket as any).customer_name_2 && (
+                                    <div><strong>Học viên 2:</strong> {(ticket as any).customer_name_2} - NS: {(ticket as any).customer_birth_year_2 || 'N/A'}</div>
+                                )}
+                                {(ticket as any).guardian_name && (
+                                    <div style={{ fontSize: '11px', marginTop: '2px' }}><strong>Giám hộ:</strong> {(ticket as any).guardian_name} - {(ticket as any).guardian_phone}</div>
+                                )}
                                 <div><strong>Hiệu lực:</strong> {ticket.valid_from === ticket.valid_until ? 'Trong ngày' : `${ticket.valid_from} → ${ticket.valid_until} `}</div>
 
                                 {/* Số buổi còn lại (từ gói gốc) cho vé trả trước / học bơi */}
@@ -998,6 +1025,121 @@ export default function POSPage() {
                             🖨️ In Vé
                         </button>
                         <button className="btn btn-secondary" onClick={() => setSoldTickets([])}>
+                            ← Bán vé tiếp
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Show Master Receipt 
+    if (checkoutReceipt) {
+        const isA5 = bizInfo.print_format === 'A5';
+        const printReceipt = () => {
+            const win = window.open('', '_blank', isA5 ? 'width=700,height=900' : 'width=400,height=600');
+            if (!win) return;
+            const content = document.querySelector('.checkout-receipt-card')?.innerHTML || '';
+            const htmlParts = [
+                '<!DOCTYPE html>',
+                '<html>',
+                '<head>',
+                '<meta charset="utf-8">',
+                '<title>In Hóa Đơn</title>',
+                '<style>',
+                '@page { size: ' + (isA5 ? 'A5 relative' : '80mm auto') + '; margin: 0; }',
+                '@media screen { body { width: ' + (isA5 ? '100%' : '80mm') + '; aspect-ratio: 4/3; margin: 0 auto; overflow: hidden; } }',
+                '@media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }',
+                '* { margin: 0; padding: 0; box-sizing: border-box; }',
+                'body { font-family: "Times New Roman", Times, serif; width: 100%; max-width: ' + (isA5 ? '148mm' : '320px') + '; margin: 0 auto; padding: ' + (isA5 ? '20px' : '16px') + '; font-size: ' + (isA5 ? '18px' : '13px') + '; color: #000; background: #fff; }',
+                '.text-center { text-align: center; }',
+                '.mb-2 { margin-bottom: 8px; }',
+                '.mb-4 { margin-bottom: 16px; }',
+                'h1 { font-size: ' + (isA5 ? '24px' : '18px') + '; text-transform: uppercase; margin-bottom: 4px; }',
+                'h2 { font-size: ' + (isA5 ? '20px' : '16px') + '; text-transform: uppercase; margin-bottom: 16px; border-bottom: 2px dashed #000; padding-bottom: 8px; }',
+                '.row { display: flex; justify-content: space-between; margin-bottom: 4px; }',
+                '.bold { font-weight: bold; }',
+                '.items-table { width: 100%; border-collapse: collapse; margin-top: 12px; margin-bottom: 12px; }',
+                '.items-table th, .items-table td { border-bottom: 1px dashed #ccc; padding: 6px 0; text-align: right; }',
+                '.items-table th:first-child, .items-table td:first-child { text-align: left; }',
+                '.total-row { font-size: ' + (isA5 ? '20px' : '16px') + '; font-weight: bold; margin-top: 12px; padding-top: 12px; border-top: 2px dashed #000; }',
+                '.footer { text-align: center; margin-top: 24px; font-size: ' + (isA5 ? '14px' : '11px') + '; color: #666; font-style: italic; }',
+                '</style>',
+                '</head>',
+                '<body>',
+                content,
+                '<script>setTimeout(function(){window.print();},500);</' + 'script>',
+                '</body>',
+                '</html>'
+            ];
+            win.document.write(htmlParts.join('\n'));
+            win.document.close();
+        };
+
+        return (
+            <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh' }}>
+                <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', maxWidth: '400px', width: '100%' }}>
+                    <div className="checkout-receipt-card" style={{ color: '#000' }}>
+                        <div className="text-center mb-4">
+                            {bizInfo.business_logo && <img src={bizInfo.business_logo} alt="Logo" style={{ maxHeight: '50px', marginBottom: '8px' }} />}
+                            <h1>{bizInfo.business_name || 'Hệ Thống Vé Bơi'}</h1>
+                            {bizInfo.business_address && <div style={{ fontSize: '12px' }}>{bizInfo.business_address}</div>}
+                            {bizInfo.business_phone && <div style={{ fontSize: '12px' }}>ĐT: {bizInfo.business_phone}</div>}
+                        </div>
+
+                        <h2 className="text-center">HÓA ĐƠN BÁN HÀNG</h2>
+
+                        <div className="row" style={{ fontSize: '12px' }}><span>Ngày:</span> <span>{new Date(checkoutReceipt.createdAt).toLocaleString('vi-VN')}</span></div>
+                        <div className="row" style={{ fontSize: '12px' }}><span>Mã HĐ:</span> <span>{checkoutReceipt.order_id.substring(0, 8).toUpperCase()}</span></div>
+                        <div className="row" style={{ fontSize: '12px' }}><span>Thu ngân:</span> <span>{profile?.full_name || 'Admin'}</span></div>
+                        {(checkoutReceipt.customerName || checkoutReceipt.customerPhone) && (
+                            <div className="row" style={{ fontSize: '12px' }}>
+                                <span>Khách:</span>
+                                <span>{checkoutReceipt.customerName || ''} {checkoutReceipt.customerPhone ? `- ${checkoutReceipt.customerPhone}` : ''}</span>
+                            </div>
+                        )}
+
+                        <table className="items-table" style={{ fontSize: '13px' }}>
+                            <thead>
+                                <tr>
+                                    <th>Tên Hàng</th>
+                                    <th>SL</th>
+                                    <th>Đ.Giá</th>
+                                    <th>T.Tiền</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {checkoutReceipt.items.map((it: any, i: number) => (
+                                    <tr key={i}>
+                                        <td>{it.name}</td>
+                                        <td>{it.quantity}</td>
+                                        <td>{it.unitPrice.toLocaleString('vi-VN')}</td>
+                                        <td>{it.subtotal.toLocaleString('vi-VN')}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        <div className="row total-row">
+                            <span>TỔNG CỘNG:</span>
+                            <span>{checkoutReceipt.totalPrice.toLocaleString('vi-VN')}đ</span>
+                        </div>
+                        <div className="row" style={{ fontSize: '13px', marginTop: '8px' }}>
+                            <span>Thanh toán:</span>
+                            <span>{checkoutReceipt.paymentMethod === 'CASH' ? 'Tiền mặt' : checkoutReceipt.paymentMethod === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS'}</span>
+                        </div>
+
+                        <div className="footer">
+                            <p>Cảm ơn quý khách và hẹn gặp lại!</p>
+                            <p>Phần mềm quản lý bán vé tự động</p>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                        <button className="btn btn-primary" style={{ flex: 1, padding: '12px' }} onClick={printReceipt}>
+                            🖨️ In Hóa Đơn
+                        </button>
+                        <button className="btn btn-secondary" style={{ flex: 1, padding: '12px' }} onClick={() => setCheckoutReceipt(null)}>
                             ← Bán vé tiếp
                         </button>
                     </div>

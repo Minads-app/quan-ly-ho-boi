@@ -383,6 +383,7 @@ export default function DashboardPage() {
             th { background: #f0f0f0; font-weight: 700; }
             .total-row { font-weight: 900; background: #e8f5e9; }
             .footer { margin-top: 16px; font-size: 10px; color: #999; text-align: center; }
+            @media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }
         </style></head><body>
             <div class="header">
                 ${bizInfo.logo ? `<img src="${bizInfo.logo}" alt="Logo" />` : ''}

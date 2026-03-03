@@ -124,21 +124,21 @@ export default function CashPage() {
                 </button>
             </div>
 
-            <div className="dashboard-stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', marginTop: '24px' }}>
-                <div className="stat-card" style={{ borderLeft: '4px solid #10b981' }}>
-                    <h3>Tổng Thu Tiền Mặt (Hôm nay)</h3>
-                    <div className="value" style={{ color: '#10b981' }}>{totalThu.toLocaleString('vi-VN')} ₫</div>
-                    <p className="trend" style={{ opacity: 0.8 }}>Tiền bán vé + hàng hóa</p>
+            <div className="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginTop: '24px' }}>
+                <div className="stat-card" style={{ borderLeft: '4px solid #10b981', padding: '16px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Tổng Thu (Hôm nay)</h3>
+                    <div className="value" style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981', margin: '4px 0' }}>{totalThu.toLocaleString('vi-VN')} ₫</div>
+                    <p className="trend" style={{ opacity: 0.8, fontSize: '12px' }}>Tiền bán vé + đồ</p>
                 </div>
-                <div className="stat-card" style={{ borderLeft: '4px solid #ef4444' }}>
-                    <h3>Tổng Đã Chi (Hôm nay)</h3>
-                    <div className="value" style={{ color: '#ef4444' }}>{totalChi.toLocaleString('vi-VN')} ₫</div>
-                    <p className="trend" style={{ opacity: 0.8 }}>Gồm {expenses.length} phiếu chi</p>
+                <div className="stat-card" style={{ borderLeft: '4px solid #ef4444', padding: '16px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Tổng Chi (Hôm nay)</h3>
+                    <div className="value" style={{ fontSize: '20px', fontWeight: 'bold', color: '#ef4444', margin: '4px 0' }}>{totalChi.toLocaleString('vi-VN')} ₫</div>
+                    <p className="trend" style={{ opacity: 0.8, fontSize: '12px' }}>{expenses.length} phiếu chi</p>
                 </div>
-                <div className="stat-card" style={{ borderLeft: '4px solid #3b82f6', background: tonTienMat < 0 ? '#fee2e2' : '' }}>
-                    <h3>TỒN QUỸ TIỀN MẶT</h3>
-                    <div className="value" style={{ color: tonTienMat < 0 ? '#ef4444' : '#3b82f6' }}>{tonTienMat.toLocaleString('vi-VN')} ₫</div>
-                    <p className="trend" style={{ opacity: 0.8 }}>Tiền thực tế tại quầy (Thu - Chi)</p>
+                <div className="stat-card" style={{ borderLeft: '4px solid #3b82f6', background: tonTienMat < 0 ? '#fee2e2' : 'var(--bg-card)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>TỒN QUỸ HIỆN TẠI</h3>
+                    <div className="value" style={{ fontSize: '20px', fontWeight: 'bold', color: tonTienMat < 0 ? '#ef4444' : '#3b82f6', margin: '4px 0' }}>{tonTienMat.toLocaleString('vi-VN')} ₫</div>
+                    <p className="trend" style={{ opacity: 0.8, fontSize: '12px' }}>Thu - Chi</p>
                 </div>
             </div>
 

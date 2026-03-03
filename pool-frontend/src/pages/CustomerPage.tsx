@@ -13,6 +13,10 @@ interface PackageRow {
     category: string;
     customer_name: string | null;
     customer_phone: string | null;
+    customer_name_2?: string | null;
+    customer_birth_year_2?: number | null;
+    guardian_name?: string | null;
+    guardian_phone?: string | null;
     card_code: string | null;
     status: string;
     valid_from: string | null;
@@ -96,6 +100,7 @@ export default function CustomerPage() {
                 id, customer_name, customer_phone, card_code, status,
                 valid_from, valid_until, remaining_sessions, total_sessions,
                 price_paid, sold_at, package_code,
+                customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
                 ticket_types!inner (name, category, price, session_count),
                 profiles:sold_by (full_name),
                 promotions:promotion_id (name, type, value)
@@ -112,6 +117,10 @@ export default function CustomerPage() {
             category: t.ticket_types?.category || '',
             customer_name: t.customer_name,
             customer_phone: t.customer_phone,
+            customer_name_2: t.customer_name_2,
+            customer_birth_year_2: t.customer_birth_year_2,
+            guardian_name: t.guardian_name,
+            guardian_phone: t.guardian_phone,
             card_code: t.card_code,
             status: computeStatus(t),
             valid_from: t.valid_from,
@@ -543,7 +552,9 @@ export default function CustomerPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {[
                                 { label: 'Mã gói', value: selectedPkg.package_code || '—' },
-                                { label: 'Họ tên', value: selectedPkg.customer_name || '—' },
+                                { label: selectedPkg.category === 'LESSON' ? 'Học viên 1' : 'Họ tên', value: selectedPkg.customer_name || '—' },
+                                ...(selectedPkg.category === 'LESSON' && selectedPkg.customer_name_2 ? [{ label: 'Học viên 2', value: `${selectedPkg.customer_name_2} - NS: ${selectedPkg.customer_birth_year_2 || 'N/A'}` }] : []),
+                                ...(selectedPkg.guardian_name ? [{ label: 'Người giám hộ', value: `${selectedPkg.guardian_name} - ${selectedPkg.guardian_phone || 'N/A'}` }] : []),
                                 { label: 'Số điện thoại', value: selectedPkg.customer_phone || '—' },
                                 ...(isAdmin ? [{ label: 'Mã thẻ', value: selectedPkg.card_code || '—' }] : []),
                                 { label: 'Loại thẻ', value: selectedPkg.type_name },

@@ -51,10 +51,26 @@ export default function InventoryPage() {
     const [varPrice, setVarPrice] = useState(0);
     const [editingVariant, setEditingVariant] = useState<RetailProduct | null>(null);
 
+    // Variant selection for Slip (Import/Export)
+    const [selectingVariantFor, setSelectingVariantFor] = useState<RetailProduct | null>(null);
+    const [bizInfo, setBizInfo] = useState<any>({});
+
     useEffect(() => {
         fetchProducts();
         if (activeTab === 'HISTORY') fetchLogs();
+        fetchBizInfo();
     }, [activeTab]);
+
+    async function fetchBizInfo() {
+        const { data } = await supabase.from('system_settings').select('*');
+        if (data) {
+            const info: any = {};
+            data.forEach(item => {
+                info[item.key] = item.value;
+            });
+            setBizInfo(info);
+        }
+    }
 
     async function fetchProducts() {
         setLoading(true);
@@ -72,6 +88,76 @@ export default function InventoryPage() {
         if (data) setLogs(data as any);
     }
 
+    const printInventorySlip = (mode: 'IMPORT' | 'EXPORT', items: SlipItem[], note: string) => {
+        const isA5 = bizInfo.print_format === 'A5';
+        const win = window.open('', '_blank', isA5 ? 'width=700,height=900' : 'width=400,height=600');
+        if (!win) return;
+
+        const slipId = (mode === 'IMPORT' ? 'NK-' : 'XK-') + Date.now().toString().slice(-6);
+        const slipTitle = mode === 'IMPORT' ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO';
+        const currentDate = new Date().toLocaleString('vi-VN');
+
+        const trs = items.map((it, i) => `
+            <tr>
+                <td style="text-align: center;">${i + 1}</td>
+                <td>${it.product.name}</td>
+                <td style="text-align: center;">${it.product.unit || 'cái'}</td>
+                <td style="text-align: right; font-weight: bold;">${it.quantity}</td>
+            </tr>
+        `).join('');
+
+        const htmlParts = [
+            '<!DOCTYPE html>',
+            '<html>',
+            '<head>',
+            '<meta charset="utf-8">',
+            '<title>In Phiếu Kho</title>',
+            '<style>',
+            '@page { size: ' + (isA5 ? 'A5 relative' : '80mm auto') + '; margin: 0; }',
+            '@media screen { body { width: ' + (isA5 ? '100%' : '80mm') + '; aspect-ratio: 4/3; margin: 0 auto; overflow: hidden; } }',
+            '@media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }',
+            '* { margin: 0; padding: 0; box-sizing: border-box; }',
+            'body { font-family: "Times New Roman", Times, serif; width: 100%; max-width: ' + (isA5 ? '148mm' : '320px') + '; margin: 0 auto; padding: ' + (isA5 ? '20px' : '16px') + '; font-size: ' + (isA5 ? '18px' : '13px') + '; color: #000; background: #fff; }',
+            '.text-center { text-align: center; }',
+            '.mb-2 { margin-bottom: 8px; }',
+            '.mb-4 { margin-bottom: 16px; }',
+            'h1 { font-size: ' + (isA5 ? '24px' : '18px') + '; text-transform: uppercase; margin-bottom: 4px; }',
+            'h2 { font-size: ' + (isA5 ? '20px' : '16px') + '; text-transform: uppercase; margin-bottom: 16px; border-bottom: 2px dashed #000; padding-bottom: 8px; }',
+            '.info-row { display: flex; justify-content: space-between; margin-bottom: 6px; }',
+            '.items-table { width: 100%; border-collapse: collapse; margin-top: 16px; margin-bottom: 16px; font-size: 14px; }',
+            '.items-table th, .items-table td { border: 1px solid #000; padding: 6px; }',
+            '.items-table th { font-weight: bold; background: #eee; }',
+            '.footer { text-align: center; margin-top: 32px; font-size: 14px; font-style: italic; display: flex; justify-content: space-around; }',
+            '.footer div { width: 45%; }',
+            '</style>',
+            '</head>',
+            '<body>',
+            '<div class="text-center mb-4">',
+            bizInfo.business_logo ? '<img src="' + bizInfo.business_logo + '" style="max-height: 50px; margin-bottom: 8px;" />' : '',
+            '<h1>' + (bizInfo.business_name || 'Hệ Thống Vé Bơi') + '</h1>',
+            bizInfo.business_address ? '<div style="font-size: 12px;">' + bizInfo.business_address + '</div>' : '',
+            '</div>',
+            '<h2 class="text-center">' + slipTitle + '</h2>',
+            '<div class="info-row"><span>Mã phiếu:</span> <strong>' + slipId + '</strong></div>',
+            '<div class="info-row"><span>Thời gian:</span> <span>' + currentDate + '</span></div>',
+            '<div class="info-row"><span>Người lập:</span> <span>' + (profile?.full_name || 'Admin') + '</span></div>',
+            note ? '<div class="info-row"><span>Ghi chú:</span> <span>' + note + '</span></div>' : '',
+            '<table class="items-table">',
+            '<thead><tr><th>STT</th><th>Sản phẩm</th><th>ĐVT</th><th>Số lượng</th></tr></thead>',
+            '<tbody>' + trs + '</tbody>',
+            '</table>',
+            '<div class="footer">',
+            '<div><p>Người giao/nhận</p><br><br><p>(Ký, ghi rõ họ tên)</p></div>',
+            '<div><p>Người lập phiếu</p><br><br><p>' + (profile?.full_name || 'Admin') + '</p></div>',
+            '</div>',
+            '<script>setTimeout(function(){window.print();},500);</' + 'script>',
+            '</body>',
+            '</html>'
+        ];
+        win.document.write(htmlParts.join('\\n'));
+        win.document.close();
+    };
+
     // --- SLIP FUNCTIONS ---
     function openSlip(mode: 'IMPORT' | 'EXPORT') {
         setSlipMode(mode);
@@ -85,6 +171,7 @@ export default function InventoryPage() {
         setSlipItems([]);
         setSlipNote('');
         setSearchTerm('');
+        setSelectingVariantFor(null);
     }
 
     function addToSlip(product: RetailProduct) {
@@ -145,6 +232,9 @@ export default function InventoryPage() {
         setIsSaving(false);
         if (!hasError) {
             alert(`✅ ${slipMode === 'IMPORT' ? 'Nhập kho' : 'Xuất kho'} ${slipItems.length} sản phẩm thành công!`);
+            if (window.confirm('Bạn có muốn in phiếu này không?')) {
+                printInventorySlip(slipMode!, slipItems, slipNote);
+            }
             closeSlip();
             fetchProducts();
         }
@@ -251,19 +341,15 @@ export default function InventoryPage() {
     // --- HELPERS ---
     const parentProducts = products.filter(p => !p.parent_id);
     const getVariants = (parentId: string) => products.filter(p => p.parent_id === parentId);
-    const hasVariants = (parentId: string) => products.some(p => p.parent_id === parentId);
 
     // Dynamic unit options from existing products
     const existingUnits = Array.from(new Set(products.map(p => p.unit).filter(Boolean)));
     const unitOptions = Array.from(new Set([...DEFAULT_UNIT_OPTIONS, ...existingUnits])).sort();
 
-    // For slip / stock views: show leaf products (standalone + variants, but not parents that have variants)
-    const leafProducts = products.filter(p => {
-        if (p.parent_id) return true; // Is a variant — show it
-        return !hasVariants(p.id); // Show standalone products (no variants)
-    });
+    // For slip views: show ONLY parent products (which have variants grouped inside) or standalone products
+    const gridProducts = products.filter(p => p.parent_id === null);
 
-    const filteredProducts = leafProducts.filter(p => {
+    const filteredProducts = gridProducts.filter(p => {
         if (!searchTerm.trim()) return true;
         return p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (p.sku || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -326,35 +412,59 @@ export default function InventoryPage() {
                         {/* Product grid */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', alignContent: 'start' }}>
                             {filteredProducts.length > 0 ? filteredProducts.map(p => {
-                                const inSlip = slipItems.find(x => x.product.id === p.id);
-                                const isDisabled = !isImport && p.stock_quantity <= 0;
+                                const variants = getVariants(p.id);
+                                const hasVars = variants.length > 0;
+                                const totalStock = hasVars ? variants.reduce((s, v) => s + v.stock_quantity, 0) : p.stock_quantity;
+
+                                // check if ANY variant of this parent is in the slip
+                                const inSlipCount = slipItems.filter(x => x.product.parent_id === p.id || x.product.id === p.id).reduce((s, x) => s + x.quantity, 0);
+                                const inSlip = inSlipCount > 0;
+
+                                const isDisabled = !isImport && totalStock <= 0;
+
                                 return (
-                                    <button key={p.id} onClick={() => !isDisabled && addToSlip(p)} disabled={isDisabled}
+                                    <button key={p.id} onClick={() => {
+                                        if (isDisabled) return;
+                                        if (hasVars) {
+                                            setSelectingVariantFor(p);
+                                        } else {
+                                            addToSlip(p);
+                                        }
+                                    }} disabled={isDisabled}
                                         style={{
                                             background: inSlip ? (isImport ? '#f0fdf4' : '#fffbeb') : '#fff',
-                                            border: inSlip ? `2px solid ${modeColor}` : '1px solid #f1f5f9',
+                                            border: inSlip ? `2px solid ${modeColor}` : '1px solid #e2e8f0',
                                             borderRadius: '12px', padding: '14px',
                                             cursor: isDisabled ? 'not-allowed' : 'pointer', textAlign: 'left' as const,
                                             boxShadow: '0 1px 4px rgba(0,0,0,0.04)', transition: 'all 0.15s',
-                                            borderTop: `3px solid ${modeColor}`,
+                                            borderTop: `3px solid ${inSlip ? modeColor : '#e2e8f0'}`,
                                             opacity: isDisabled ? 0.5 : 1,
-                                            display: 'flex', flexDirection: 'column' as const, gap: '6px', minHeight: '100px',
+                                            display: 'flex', flexDirection: 'column' as const, gap: '8px', minHeight: '110px',
                                         }}
-                                        onMouseEnter={e => { if (!isDisabled) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; } }}
-                                        onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)'; }}
+                                        onMouseEnter={e => { if (!isDisabled) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.08)'; e.currentTarget.style.borderColor = modeColor; e.currentTarget.style.borderTopColor = modeColor; } }}
+                                        onMouseLeave={e => { if (!isDisabled && !inSlip) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)'; e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.borderTopColor = '#e2e8f0'; } else if (!isDisabled && inSlip) { e.currentTarget.style.transform = ''; } }}
                                     >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <span style={{ fontSize: '17px' }}>📦</span>
-                                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1d27', lineHeight: 1.3, flex: 1 }}>
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                            <span style={{ fontSize: '18px' }}>📦</span>
+                                            <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', lineHeight: 1.3, flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>
                                                 {p.name}
-                                                {p.sku && <span style={{ color: '#64748b', fontWeight: 400 }}> ({p.sku})</span>}
+                                                {p.sku && !hasVars && <div style={{ color: '#64748b', fontWeight: 400, fontSize: '12px', marginTop: '2px' }}>{p.sku}</div>}
                                             </div>
                                         </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
-                                            <span style={{ fontSize: '12px', color: '#64748b' }}>Kho: <strong>{p.stock_quantity}</strong> {p.unit}</span>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', width: '100%' }}>
+                                            {hasVars ? (
+                                                <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>{variants.length} Lựa chọn</div>
+                                                    <div style={{ fontSize: '11px', color: '#64748b' }}>Tổng kho: {totalStock}</div>
+                                                </div>
+                                            ) : (
+                                                <div style={{ fontSize: '13px', color: '#64748b' }}>
+                                                    Kho: <strong style={{ color: '#1e293b' }}>{totalStock}</strong> {p.unit}
+                                                </div>
+                                            )}
                                             {inSlip && (
-                                                <span style={{ background: modeColor, color: '#fff', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
-                                                    x{inSlip.quantity}
+                                                <span style={{ background: modeColor, color: '#fff', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 700 }}>
+                                                    x{inSlipCount}
                                                 </span>
                                             )}
                                         </div>
@@ -448,7 +558,93 @@ export default function InventoryPage() {
                         </div>
                     </div>
                 </div>
-            </div>
+
+                {/* SLIP VARIANT SELECTION MODAL */}
+                {selectingVariantFor && (
+                    <div className="modal-overlay" style={{ zIndex: 1100 }}>
+                        <div className="modal-card" style={{ maxWidth: '450px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <h2 style={{ fontSize: '18px', margin: 0 }}>Chọn phân loại: {selectingVariantFor.name}</h2>
+                                <button onClick={() => setSelectingVariantFor(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>&times;</button>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
+                                {getVariants(selectingVariantFor.id).filter(v => v.is_active).map(variant => {
+                                    const isDisabled = slipMode === 'EXPORT' && variant.stock_quantity <= 0;
+                                    const inSlipObj = slipItems.find(x => x.product.id === variant.id);
+
+                                    return (
+                                        <button
+                                            key={variant.id}
+                                            disabled={isDisabled}
+                                            onClick={() => {
+                                                addToSlip(variant);
+                                                // Optional: Don't close immediately so user can pick multiple variants
+                                                // setSelectingVariantFor(null);
+                                            }}
+                                            style={{
+                                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                padding: '14px 16px', borderRadius: '12px', border: `1px solid ${!isDisabled ? '#e2e8f0' : '#f1f5f9'}`,
+                                                background: !isDisabled ? (inSlipObj ? (slipMode === 'IMPORT' ? '#f0fdf4' : '#fffbeb') : '#fff') : '#f8fafc',
+                                                cursor: !isDisabled ? 'pointer' : 'not-allowed',
+                                                opacity: !isDisabled ? 1 : 0.6,
+                                                boxShadow: !isDisabled ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                                                transition: 'all 0.2s ease', textAlign: 'left'
+                                            }}
+                                            onMouseEnter={e => {
+                                                if (!isDisabled) {
+                                                    e.currentTarget.style.borderColor = modeColor;
+                                                    e.currentTarget.style.boxShadow = `0 4px 12px ${modeColor}22`;
+                                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                                }
+                                            }}
+                                            onMouseLeave={e => {
+                                                if (!isDisabled) {
+                                                    e.currentTarget.style.borderColor = '#e2e8f0';
+                                                    e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+                                                    e.currentTarget.style.transform = 'translateY(0)';
+                                                }
+                                            }}
+                                        >
+                                            <div>
+                                                <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e293b', marginBottom: '4px' }}>
+                                                    {variant.sku || variant.name.replace(selectingVariantFor.name + ' — ', '')}
+                                                </div>
+                                                <div style={{ fontSize: '13px', color: '#64748b' }}>
+                                                    {variant.price.toLocaleString('vi-VN')}đ / {variant.unit}
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                {inSlipObj && (
+                                                    <span style={{ background: modeColor, color: '#fff', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 700 }}>
+                                                        Đã chọn: x{inSlipObj.quantity}
+                                                    </span>
+                                                )}
+                                                <div style={{ textAlign: 'right' }}>
+                                                    {!isDisabled ? (
+                                                        <span style={{ background: '#e2e8f0', color: '#334155', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
+                                                            Kho: {variant.stock_quantity}
+                                                        </span>
+                                                    ) : (
+                                                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
+                                                            Hết hàng
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <div style={{ marginTop: '16px', textAlign: 'right', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                                <button className="btn btn-primary" onClick={() => setSelectingVariantFor(null)} style={{ background: modeColor, borderColor: modeColor }}>
+                                    Xong
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+                }
+            </div >
         );
     }
 
@@ -527,29 +723,16 @@ export default function InventoryPage() {
                                                         <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({variants.length} biến thể)</span>
                                                     </td>
                                                     <td>
-                                                        <span className="badge badge-outline" style={{ fontSize: '13px', padding: '4px 8px' }}>
-                                                            Tổng: {totalStock.toLocaleString('vi-VN')}
-                                                        </span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                                                            <span className="badge badge-outline" style={{ fontSize: '13px', padding: '4px 8px' }}>
+                                                                Tổng: {totalStock.toLocaleString('vi-VN')}
+                                                            </span>
+                                                            <span style={{ color: '#0ea5e9', fontSize: '12px', textDecoration: 'underline', cursor: 'pointer' }} onClick={() => { setActiveTab('CATALOG'); setTimeout(() => openEditProductModal(parent), 100); }}>Xem chi tiết →</span>
+                                                        </div>
                                                     </td>
                                                     <td>{parent.unit}</td>
                                                     <td>{parent.is_active ? 'Đang bán' : 'Ngừng bán'}</td>
                                                 </tr>
-                                                {variants.map(v => (
-                                                    <tr key={v.id} style={{ opacity: v.is_active ? 1 : 0.6 }}>
-                                                        <td style={{ paddingLeft: '40px' }}>
-                                                            <span style={{ color: '#64748b', marginRight: '4px' }}>↳</span>
-                                                            {v.sku && <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, marginRight: '6px' }}>{v.sku}</span>}
-                                                            {v.name}
-                                                        </td>
-                                                        <td>
-                                                            <span className={`badge ${v.stock_quantity <= 5 ? 'badge-error' : 'badge-success'}`} style={{ fontSize: '14px', padding: '4px 8px' }}>
-                                                                {v.stock_quantity.toLocaleString('vi-VN')}
-                                                            </span>
-                                                        </td>
-                                                        <td>{v.unit}</td>
-                                                        <td>{v.is_active ? 'Đang bán' : 'Ngừng bán'}</td>
-                                                    </tr>
-                                                ))}
                                             </tbody>
                                         ) : (
                                             // Standalone product
