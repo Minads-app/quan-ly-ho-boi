@@ -153,6 +153,7 @@ export default function POSPage() {
                     e.preventDefault();
                     e.stopPropagation();
                     setCheckoutReceipt(null);
+                    setSoldTickets([]);
                 } else if (e.key === 'Enter') {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1031,8 +1032,14 @@ export default function POSPage() {
                 '</body>',
                 '</html>'
             ];
-            win.document.write(htmlParts.join('\\n'));
+            win.document.write(htmlParts.join('\n'));
             win.document.close();
+
+            if (soldTickets.length > 0) {
+                setTimeout(() => {
+                    handlePrint();
+                }, 800);
+            }
         };
 
         return (
@@ -1098,11 +1105,76 @@ export default function POSPage() {
                         <button id="btn-print-receipt" className="btn btn-primary" style={{ flex: 1, padding: '12px' }} onClick={printReceipt}>
                             🖨️ In Hóa Đơn <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(Enter)</span>
                         </button>
-                        <button className="btn btn-secondary" style={{ flex: 1, padding: '12px' }} onClick={() => setCheckoutReceipt(null)}>
-                            {soldTickets.length > 0 ? 'Tiếp tục in vé →' : '← Bán vé tiếp'} <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
+                        <button className="btn btn-secondary" style={{ flex: 1, padding: '12px' }} onClick={() => { setCheckoutReceipt(null); setSoldTickets([]); }}>
+                            ← Bán vé tiếp <span style={{ fontSize: '11px', opacity: 0.8, marginLeft: '4px' }}>(ESC)</span>
                         </button>
                     </div>
                 </div>
+
+                {/* TỰ ĐỘNG IN VÉ (ẨN) */}
+                {soldTickets.length > 0 && (
+                    <div style={{ display: 'none' }}>
+                        <div className="sold-ticket-card" ref={printRef}>
+                            {soldTickets.map((ticket, index) => (
+                                <div className="ticket-print" key={ticket.id}>
+                                    <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+                                        {bizInfo.business_logo && <img src={bizInfo.business_logo} alt="Logo" style={{ maxHeight: '40px', marginBottom: '4px' }} />}
+                                        <div className="subtitle" style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 600 }}>{bizInfo.business_name || 'Hệ Thống Vé Bơi'}</div>
+                                    </div>
+                                    {/* Tiêu đề vé phân biệt theo loại */}
+                                    <h2>{ticket.pass_category === 'LESSON' ? '📚 VÉ HỌC BƠI' : ticket.pass_category ? '🏊 VÉ BƠI TRẢ TRƯỚC' : '🏊 VÉ BƠI'}</h2>
+
+                                    <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên 1:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                    {(ticket as any).customer_name_2 && (
+                                        <div><strong>Học viên 2:</strong> {(ticket as any).customer_name_2} - NS: {(ticket as any).customer_birth_year_2 || 'N/A'}</div>
+                                    )}
+                                    {(ticket as any).guardian_name && (
+                                        <div style={{ fontSize: '11px', marginTop: '2px' }}><strong>Giám hộ:</strong> {(ticket as any).guardian_name} - {(ticket as any).guardian_phone}</div>
+                                    )}
+                                    <div><strong>Hiệu lực:</strong> {ticket.valid_from === ticket.valid_until ? 'Trong ngày' : `${ticket.valid_from} → ${ticket.valid_until} `}</div>
+
+                                    {/* Số buổi còn lại (từ gói gốc) cho vé trả trước / học bơi */}
+                                    {ticket.pass_category && ticket.pass_remaining_sessions !== undefined && ticket.pass_remaining_sessions !== null && (
+                                        <div style={{ marginTop: '6px', fontWeight: 'bold', borderTop: '1px dashed #ccc', paddingTop: '6px', fontSize: '14px' }}>
+                                            {ticket.pass_category === 'LESSON' ? 'Số buổi học còn lại' : 'Số buổi bơi còn lại'}: {ticket.pass_remaining_sessions} buổi
+                                        </div>
+                                    )}
+
+                                    {/* Chỉ hiển thị giá cho vé bơi thường (không phải check-in trả trước) */}
+                                    {!ticket.pass_category && (
+                                        <div className="info-row">
+                                            <span className="label">Giá</span>
+                                            <span className="value">{formatPrice(ticket.price_paid)}</span>
+                                        </div>
+                                    )}
+                                    <div className="info-row">
+                                        <span className="label">{ticket.pass_category ? 'Check-in lúc' : 'Bán lúc'}</span>
+                                        <span className="value">{formatTime(ticket.sold_at)}</span>
+                                    </div>
+                                    <div className="info-row">
+                                        <span className="label">Hết hạn</span>
+                                        <span className="value">Hôm nay, {bizInfo.pool_close_time || '20:00'}</span>
+                                    </div>
+
+                                    <div className="qr-wrapper">
+                                        <QRCodeSVG
+                                            value={ticket.id}
+                                            size={180}
+                                            level="H"
+                                            includeMargin
+                                        />
+                                    </div>
+
+                                    <p className="footer">
+                                        Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
+                                        Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
+                                        {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
