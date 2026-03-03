@@ -46,8 +46,8 @@ export default function LoginPage() {
             <div className="login-card">
                 <div className="login-header">
                     {bizLogo ? (
-                        <div className="login-icon" style={{ background: 'none', border: 'none', padding: 0 }}>
-                            <img src={bizLogo} alt="Logo" style={{ maxHeight: '64px', objectFit: 'contain' }} />
+                        <div style={{ marginBottom: '16px' }}>
+                            <img src={bizLogo} alt="Logo" style={{ maxHeight: '80px', maxWidth: '100%', objectFit: 'contain' }} />
                         </div>
                     ) : (
                         <div className="login-icon">🏊</div>
