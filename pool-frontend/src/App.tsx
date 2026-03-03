@@ -21,6 +21,26 @@ function AppRoutes() {
   const [bizLogo, setBizLogo] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // Change password state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPassword.length < 6) return alert('Mật khẩu phải từ 6 ký tự trở lên');
+    setIsChangingPassword(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setIsChangingPassword(false);
+    if (error) {
+      alert('Lỗi đổi mật khẩu: ' + error.message);
+    } else {
+      alert('Đổi mật khẩu thành công!');
+      setShowPasswordModal(false);
+      setNewPassword('');
+    }
+  }
+
   useEffect(() => {
     async function loadBiz() {
       const { data } = await supabase.from('system_settings').select('key, value').in('key', ['business_name', 'business_logo']);
@@ -173,6 +193,13 @@ function AppRoutes() {
           <div className="user-info">
             <div className="user-name">{profile.full_name}</div>
             <div className="user-role">{profile.role}</div>
+            <button
+              className="btn btn-ghost"
+              style={{ marginTop: '8px', padding: '4px 8px', fontSize: '11px', width: '100%' }}
+              onClick={() => setShowPasswordModal(true)}
+            >
+              🔑 Đổi mật khẩu
+            </button>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={signOut}>
             Đăng xuất
@@ -237,13 +264,54 @@ function AppRoutes() {
           {/* Mặc định Redirect */}
           <Route path="*" element={
             <Navigate to={
-              canView('reports') ? "/analytics" :
+              canView('reports') ? "/dashboard" :
                 canView('gate') ? "/gate" :
                   canView('pos') ? "/pos" : "/pos"
             } />
           } />
         </Routes>
       </main>
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '400px' }}>
+            <h2>Đổi mật khẩu</h2>
+            <form onSubmit={handleChangePassword}>
+              <div className="form-group">
+                <label>Mật khẩu mới</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder="Nhập ít nhất 6 ký tự"
+                />
+              </div>
+              <div className="modal-actions" style={{ marginTop: '24px' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ flex: 1 }}
+                  onClick={() => setShowPasswordModal(false)}
+                  disabled={isChangingPassword}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ flex: 1 }}
+                  disabled={isChangingPassword}
+                >
+                  {isChangingPassword ? 'Đang đổi...' : 'Đổi mật khẩu'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

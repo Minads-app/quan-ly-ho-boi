@@ -22,6 +22,7 @@ interface TicketRow {
     category: string;
     type_price: number;
     sold_by_name: string | null;
+    sold_by_id: string | null;
     payment_method: string;
     lesson_class_type: string | null;
     lesson_schedule_type: string | null;
@@ -34,6 +35,7 @@ interface RetailRow {
     subtotal: number;
     sold_at: string;
     sold_by_name: string | null;
+    created_by_id: string | null;
     payment_method: string;
 }
 
@@ -131,18 +133,13 @@ export default function DashboardPage() {
             .from('tickets')
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
-                valid_from, valid_until, remaining_sessions, total_sessions, payment_method,
+                valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by,
                 ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
                 profiles:sold_by (full_name)
             `)
             .gte('sold_at', from + 'T00:00:00+07:00')
             .lte('sold_at', to + 'T23:59:59+07:00')
             .order('sold_at', { ascending: false });
-
-        // For non-admin staff, only show their own sales (unless they are viewing warnings)
-        if (!isAdmin && profile && activeTab !== 'WARNINGS') {
-            query = query.eq('sold_by', profile.id);
-        }
 
         const { data, error } = await query;
 
@@ -176,6 +173,7 @@ export default function DashboardPage() {
                     category: t.ticket_types?.category || '',
                     type_price: t.ticket_types?.price || 0,
                     sold_by_name: t.profiles?.full_name || '—',
+                    sold_by_id: t.sold_by,
                     payment_method: t.payment_method || 'CASH',
                     lesson_class_type: t.ticket_types?.lesson_class_type || null,
                     lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null
@@ -200,10 +198,6 @@ export default function DashboardPage() {
             .lte('created_at', to + 'T23:59:59+07:00')
             .order('created_at', { ascending: false });
 
-        if (!isAdmin && profile && activeTab !== 'WARNINGS') {
-            query = query.eq('created_by', profile.id);
-        }
-
         const { data, error } = await query;
         if (error) {
             console.error('Error fetching retail:', error);
@@ -221,6 +215,7 @@ export default function DashboardPage() {
                             subtotal: item.subtotal,
                             sold_at: order.created_at,
                             sold_by_name: order.profiles?.full_name || '—',
+                            created_by_id: order.created_by,
                             payment_method: order.payment_method || 'CASH'
                         });
                     }
@@ -283,7 +278,7 @@ export default function DashboardPage() {
             .from('tickets')
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
-                valid_from, valid_until, remaining_sessions, total_sessions, payment_method,
+                valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by,
                 ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
                 profiles:sold_by (full_name)
             `)
@@ -307,6 +302,7 @@ export default function DashboardPage() {
             category: t.ticket_types?.category || '',
             type_price: t.ticket_types?.price || 0,
             sold_by_name: t.profiles?.full_name || '—',
+            sold_by_id: t.sold_by,
             payment_method: t.payment_method || 'CASH',
             lesson_class_type: t.ticket_types?.lesson_class_type || null,
             lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null
@@ -765,7 +761,7 @@ export default function DashboardPage() {
     function renderMySalesTab() {
         const { from, to } = getDateBounds();
         // Lọc bỏ mọi thứ không phải là MONTHLY và MULTI (Tức là chỉ hiển thị Vé nhiều buổi hoặc Vé tháng đã bán)
-        const mySalesTickets = tickets.filter(t => t.category === 'MONTHLY' || t.category === 'MULTI');
+        const mySalesTickets = tickets.filter(t => (t.category === 'MONTHLY' || t.category === 'MULTI') && t.sold_by_id === profile?.id);
 
         const myRevenue = mySalesTickets.reduce((s, t) => s + t.price_paid, 0);
         const myCash = mySalesTickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
