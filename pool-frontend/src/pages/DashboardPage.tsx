@@ -39,6 +39,14 @@ interface RetailRow {
     payment_method: string;
 }
 
+interface ExpenseRow {
+    id: string;
+    amount: number;
+    reason: string;
+    created_at: string;
+    created_by_name: string | null;
+}
+
 interface ScanLogRow {
     id: string;
     scanned_at: string;
@@ -64,6 +72,7 @@ export default function DashboardPage() {
     const [customTo, setCustomTo] = useState('');
     const [tickets, setTickets] = useState<TicketRow[]>([]);
     const [retailItems, setRetailItems] = useState<RetailRow[]>([]);
+    const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
     const [scanLogs, setScanLogs] = useState<ScanLogRow[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -99,6 +108,7 @@ export default function DashboardPage() {
     useEffect(() => {
         fetchTickets();
         fetchRetailItems();
+        fetchExpenses();
         if (activeTab === 'SESSIONS') fetchScanLogs();
         fetchBusinessInfo();
     }, [dateRange, customFrom, customTo, activeTab]);
@@ -222,6 +232,34 @@ export default function DashboardPage() {
                 });
             });
             setRetailItems(mapped);
+        }
+    }
+
+    async function fetchExpenses() {
+        const { from, to } = getDateBounds();
+
+        const { data, error } = await supabase
+            .from('expenses')
+            .select(`
+                id, amount, reason, created_at,
+                profiles:created_by (full_name)
+            `)
+            .gte('created_at', from + 'T00:00:00+07:00')
+            .lte('created_at', to + 'T23:59:59+07:00')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching expenses:', error);
+            setExpenses([]);
+        } else {
+            const mapped = (data || []).map((e: any) => ({
+                id: e.id,
+                amount: e.amount,
+                reason: e.reason,
+                created_at: e.created_at,
+                created_by_name: e.profiles?.full_name || '—'
+            }));
+            setExpenses(mapped);
         }
     }
 
@@ -449,6 +487,9 @@ export default function DashboardPage() {
         const countMultiMonthly = tickets.filter(t => t.category === 'MULTI' || t.category === 'MONTHLY').length;
         const countLesson = tickets.filter(t => t.category === 'LESSON').length;
         const countRetail = retailItems.reduce((s, r) => s + r.quantity, 0);
+        const countExpenses = expenses.length;
+
+        const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
 
         const tableHtml = `<table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
             ${tickets.map((t, i) => {
@@ -466,6 +507,14 @@ export default function DashboardPage() {
             </tbody></table>
             ` : ''}
             
+            ${expenses.length > 0 ? `
+            <h3 style="margin-top: 24px; margin-bottom: 8px;">💵 Phiếu Chi Tiền Mặt</h3>
+            <table><thead><tr><th>STT</th><th>Thời gian</th><th>Lý do chi</th><th>Người lập phiếu</th><th>Số tiền chi</th></tr></thead><tbody>
+            ${expenses.map((e, i) => `<tr><td>${i + 1}</td><td>${fmtDateTime(e.created_at)}</td><td>${e.reason}</td><td>${e.created_by_name}</td><td style="text-align:right; color: red;">-${fmt(e.amount)}</td></tr>`).join('')}
+            <tr class="total-row"><td colspan="4">TỔNG CHI TIỀN MẶT (${countExpenses} phiếu)</td><td style="text-align:right; color:red;">-${fmt(totalExpenses)}</td></tr>
+            </tbody></table>
+            ` : ''}
+            
             <div style="display:flex; justify-content:space-between; margin-top:24px; gap: 24px;">
                 <div style="padding: 16px; border: 1px solid #999; flex: 1; font-weight: bold; line-height: 1.8;">
                     <h3 style="margin-bottom: 8px; font-size: 14px; text-transform: uppercase;">Thống kê Hạng Mục Vé</h3>
@@ -478,10 +527,11 @@ export default function DashboardPage() {
 
                 <div style="padding: 16px; border: 1px solid #999; flex: 1; font-weight: bold; line-height: 1.8;">
                     <h3 style="margin-bottom: 8px; font-size: 14px; text-transform: uppercase;">Thống kê Thanh Toán</h3>
-                    <div style="display:flex; justify-content:space-between; color: #64748b;"><span>Tiền mặt:</span> <span>${fmt(revCash)}</span></div>
-                    <div style="display:flex; justify-content:space-between; color: #d97706;"><span>Chuyển khoản:</span> <span>${fmt(revTransfer)}</span></div>
-                    <div style="display:flex; justify-content:space-between; color: #8b5cf6;"><span>Quẹt Thẻ POS:</span> <span>${fmt(revCard)}</span></div>
-                    <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #10b981;"><span>TỔNG THU:</span> <span>${fmt(totalRevenue)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #64748b;"><span>Thu tiền mặt:</span> <span>${fmt(revCash)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #d97706;"><span>Thu chuyển khoản:</span> <span>${fmt(revTransfer)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #8b5cf6;"><span>Thu quẹt thẻ POS:</span> <span>${fmt(revCard)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #ef4444; border-top: 1px dashed #ccc; margin-top: 4px; padding-top: 4px;"><span>Chi tiền mặt:</span> <span>-${fmt(totalExpenses)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #10b981; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px;"><span>TỔNG THU (ĐÃ TRỪ CHI):</span> <span>${fmt(totalRevenue - totalExpenses)}</span></div>
                 </div>
             </div>`;
 
@@ -489,12 +539,12 @@ export default function DashboardPage() {
             <>
                 {renderDateFilter()}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-                    {[{ label: 'Tổng doanh thu', value: fmt(totalRevenue), color: '#10b981' },
+                    {[{ label: 'Thực thu (Đã trừ chi)', value: fmt(totalRevenue - totalExpenses), color: '#10b981' },
                     { label: 'Doanh thu Vé', value: fmt(totalTicketRevenue), color: '#3b82f6' },
                     { label: 'Doanh thu SP', value: fmt(totalRetailRevenue), color: '#8b5cf6' },
-                    { label: 'Tiền mặt', value: fmt(revCash), color: '#64748b' },
-                    { label: 'Chuyển khoản', value: fmt(revTransfer), color: '#d97706' },
-                    { label: 'Thẻ POS', value: fmt(revCard), color: '#8b5cf6' }
+                    { label: 'Thu tiền mặt', value: fmt(revCash), color: '#64748b' },
+                    { label: 'Thu CK & Thẻ', value: fmt(revTransfer + revCard), color: '#d97706' },
+                    { label: 'Chi tiền mặt', value: `-${fmt(totalExpenses)}`, color: '#ef4444' }
                     ].map(k => (
                         <div key={k.label} style={{ flex: 1, minWidth: '120px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
                             <div style={{ fontSize: '18px', fontWeight: 700, color: k.color }}>{k.value}</div>
@@ -516,6 +566,37 @@ export default function DashboardPage() {
                 {retailItems.length > 0 && (
                     <div style={{ marginTop: '32px' }}>
                         {renderRetailTable(retailItems)}
+                    </div>
+                )}
+                {expenses.length > 0 && (
+                    <div style={{ marginTop: '32px' }}>
+                        <h2 style={{ fontSize: '18px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>💵</span> Lịch Sử Phiếu Chi Tiền Mặt
+                        </h2>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr>
+                                        <th style={thS}>Thời gian</th>
+                                        <th style={thS}>Số tiền chi</th>
+                                        <th style={thS}>Lý do</th>
+                                        <th style={thS}>Người lập phiếu</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {expenses.map(exp => (
+                                        <tr key={exp.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                            <td style={tdS}>{fmtDateTime(exp.created_at)}</td>
+                                            <td style={{ ...tdS, fontWeight: 600, color: '#ef4444' }}>
+                                                -{exp.amount.toLocaleString('vi-VN')}đ
+                                            </td>
+                                            <td style={{ ...tdS, whiteSpace: 'normal', maxWidth: '300px' }}>{exp.reason}</td>
+                                            <td style={tdS}>{exp.created_by_name}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
             </>
