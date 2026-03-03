@@ -58,6 +58,7 @@ interface BusinessInfo {
     bank_account_number?: string;
     bank_account_name?: string;
     print_format?: 'K80' | 'A5';
+    pool_close_time?: string;
 }
 
 export default function POSPage() {
@@ -1000,7 +1001,7 @@ export default function POSPage() {
                                 </div>
                                 <div className="info-row">
                                     <span className="label">Hết hạn</span>
-                                    <span className="value">Hôm nay, {ticket.pool_close_time}</span>
+                                    <span className="value">Hôm nay, {bizInfo.pool_close_time || '20:00'}</span>
                                 </div>
 
                                 <div className="qr-wrapper">
