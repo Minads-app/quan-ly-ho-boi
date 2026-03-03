@@ -613,6 +613,11 @@ export default function POSPage() {
                     return;
                 }
             }
+        } else if (selectedAdvancedType.category === 'LESSON' && (selectedAdvancedType as any).lesson_class_type === 'GROUP') {
+            if (!customerName || !customerName.trim()) {
+                alert('Vui lòng tìm và chọn khách hàng (hoặc nhập tên) trước khi mua Gói Bơi Nhóm!');
+                return;
+            }
         }
 
         const calculateAdvancedPrice = () => {
