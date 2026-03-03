@@ -752,7 +752,6 @@ export default function POSPage() {
       </head>
       <body>
         ${printContent}
-        <div style="text-align: center; margin-top: 16px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>
         <script>setTimeout(function(){window.print();},500);</script>
       </body>
       </html>
@@ -1175,6 +1174,7 @@ export default function POSPage() {
                                         Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
                                         Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
                                         {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
+                                        <span style={{ display: 'block', marginTop: '16px', fontSize: '10px', color: '#888', fontStyle: 'italic' }}>Phần mềm quản lý bởi Minads Soft</span>
                                     </p>
                                 </div>
                             ))}
@@ -1245,6 +1245,7 @@ export default function POSPage() {
                                     Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
                                     Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
                                     {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
+                                    <span style={{ display: 'block', marginTop: '16px', fontSize: '10px', color: '#888', fontStyle: 'italic' }}>Phần mềm quản lý bởi Minads Soft</span>
                                 </p>
                             </div>
                         ))}
