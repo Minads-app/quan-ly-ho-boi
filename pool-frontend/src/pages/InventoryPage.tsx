@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { RetailProduct } from '../types';
+import type { RetailProduct, InventoryAudit } from '../types';
+import * as XLSX from 'xlsx';
 
 interface InventoryLog {
     id: string;
@@ -26,12 +27,16 @@ export default function InventoryPage() {
     const { profile } = useAuth();
     const [products, setProducts] = useState<RetailProduct[]>([]);
     const [logs, setLogs] = useState<InventoryLog[]>([]);
+    const [audits, setAudits] = useState<InventoryAudit[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'STOCK' | 'HISTORY' | 'CATALOG'>('STOCK');
+    const [activeTab, setActiveTab] = useState<'STOCK' | 'HISTORY' | 'CATALOG' | 'AUDITS'>('STOCK');
 
     // Slip state
-    const [slipMode, setSlipMode] = useState<'IMPORT' | 'EXPORT' | null>(null);
+    const [slipMode, setSlipMode] = useState<'IMPORT' | 'EXPORT' | 'AUDIT' | null>(null);
     const [slipItems, setSlipItems] = useState<SlipItem[]>([]);
+    const [auditItems, setAuditItems] = useState<{ product: RetailProduct, actual: number }[]>([]);
+    const [showAuditProductSelect, setShowAuditProductSelect] = useState(false);
+    const [searchAuditTerm, setSearchAuditTerm] = useState('');
     const [slipNote, setSlipNote] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -58,6 +63,7 @@ export default function InventoryPage() {
     useEffect(() => {
         fetchProducts();
         if (activeTab === 'HISTORY') fetchLogs();
+        if (activeTab === 'AUDITS') fetchAudits();
         fetchBizInfo();
     }, [activeTab]);
 
@@ -86,6 +92,15 @@ export default function InventoryPage() {
             .order('created_at', { ascending: false })
             .limit(100);
         if (data) setLogs(data as any);
+    }
+
+    async function fetchAudits() {
+        const { data } = await supabase
+            .from('inventory_audits')
+            .select(`*, profiles(full_name)`)
+            .order('created_at', { ascending: false })
+            .limit(50);
+        if (data) setAudits(data as any);
     }
 
     const printInventorySlip = (mode: 'IMPORT' | 'EXPORT', items: SlipItem[], note: string) => {
@@ -159,19 +174,136 @@ export default function InventoryPage() {
         win.document.close();
     };
 
+    const fetchAuditDetails = async (auditId: string) => {
+        const { data, error } = await supabase
+            .from('inventory_audit_items')
+            .select(`*, products ( name, unit, sku )`)
+            .eq('audit_id', auditId);
+        if (error) {
+            alert('Lỗi khi tải chi tiết phiếu kiểm kho');
+            return null;
+        }
+        return data as any[];
+    };
+
+    const printAuditSlipWithData = async (auditId: string, note: string | null) => {
+        const items = await fetchAuditDetails(auditId);
+        if (!items) return;
+
+        const isA5 = bizInfo.print_format === 'A5';
+        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
+        if (!win) return;
+
+        const slipTitle = 'PHIẾU KIỂM KHO';
+        const currentDate = new Date().toLocaleString('vi-VN');
+
+        const trs = items.map((it, i) => {
+            const diff = it.difference;
+            const diffColor = diff > 0 ? '#10b981' : (diff < 0 ? '#ef4444' : '#000');
+            const diffText = diff > 0 ? '+' + diff : diff;
+            return `
+            <tr>
+                <td style="text-align: center;">${i + 1}</td>
+                <td>${it.products.name} ${it.products.sku ? `(SKU: ${it.products.sku})` : ''}</td>
+                <td style="text-align: center;">${it.products.unit || 'cái'}</td>
+                <td style="text-align: right;">${it.system_quantity}</td>
+                <td style="text-align: right; font-weight: bold;">${it.actual_quantity}</td>
+                <td style="text-align: right; color: ${diffColor}; font-weight: bold;">${diffText}</td>
+            </tr>
+        `}).join('');
+
+        const htmlParts = [
+            '<!DOCTYPE html>',
+            '<html>',
+            '<head>',
+            '<meta charset="utf-8">',
+            '<title>In Phiếu Kiểm Kho</title>',
+            '<style>',
+            '@page { size: landscape; margin: 0; }',
+            '@media screen { body { width: 100%; max-width: 297mm; margin: 0 auto; overflow: hidden; } }',
+            '@media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }',
+            '* { margin: 0; padding: 0; box-sizing: border-box; }',
+            'body { font-family: "Times New Roman", Times, serif; width: 100%; max-width: 297mm; margin: 0 auto; padding: 20px; font-size: 14px; color: #000; background: #fff; }',
+            '.text-center { text-align: center; }',
+            '.mb-2 { margin-bottom: 8px; }',
+            '.mb-4 { margin-bottom: 16px; }',
+            'h1 { font-size: 24px; text-transform: uppercase; margin-bottom: 4px; }',
+            'h2 { font-size: 20px; text-transform: uppercase; margin-bottom: 16px; border-bottom: 2px dashed #000; padding-bottom: 8px; }',
+            '.info-row { display: flex; justify-content: space-between; margin-bottom: 6px; }',
+            '.items-table { width: 100%; border-collapse: collapse; margin-top: 16px; margin-bottom: 16px; font-size: 14px; }',
+            '.items-table th, .items-table td { border: 1px solid #000; padding: 8px; }',
+            '.items-table th { font-weight: bold; background: #eee; }',
+            '.footer { text-align: center; margin-top: 32px; font-size: 14px; font-style: italic; display: flex; justify-content: space-around; }',
+            '.footer div { width: 45%; }',
+            '</style>',
+            '</head>',
+            '<body>',
+            '<div class="text-center mb-4">',
+            bizInfo.business_logo ? '<img src="' + bizInfo.business_logo + '" style="max-height: 50px; margin-bottom: 8px;" />' : '',
+            '<h1>' + (bizInfo.business_name || 'Hệ Thống Vé Bơi') + '</h1>',
+            bizInfo.business_address ? '<div style="font-size: 12px;">' + bizInfo.business_address + '</div>' : '',
+            '</div>',
+            '<h2 class="text-center">' + slipTitle + '</h2>',
+            '<div class="info-row"><span>Mã phiếu:</span> <strong>' + auditId.substring(0, 8).toUpperCase() + '</strong></div>',
+            '<div class="info-row"><span>Thời gian:</span> <span>' + currentDate + '</span></div>',
+            '<div class="info-row"><span>Người lập:</span> <span>' + (profile?.full_name || 'Admin') + '</span></div>',
+            note ? '<div class="info-row"><span>Ghi chú:</span> <span>' + note + '</span></div>' : '',
+            '<table class="items-table">',
+            '<thead><tr><th>STT</th><th>Sản phẩm</th><th>ĐVT</th><th>Tồn hệ thống</th><th>Tồn thực tế</th><th>Chênh lệch</th></tr></thead>',
+            '<tbody>' + trs + '</tbody>',
+            '</table>',
+            '<div class="footer">',
+            '<div><p>Quản lý</p><br><br><p>(Ký, ghi rõ họ tên)</p></div>',
+            '<div><p>Người lập phiếu</p><br><br><p>' + (profile?.full_name || 'Admin') + '</p></div>',
+            '</div>',
+            '<div style="text-align: center; margin-top: 32px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
+            '<script>setTimeout(function(){window.print();},500);</' + 'script>',
+            '</body>',
+            '</html>'
+        ];
+        win.document.write(htmlParts.join('\\n'));
+        win.document.close();
+    };
+
+    const exportAuditToExcel = async (auditId: string, note: string | null) => {
+        const items = await fetchAuditDetails(auditId);
+        if (!items) return;
+
+        const dataRows = items.map((it, i) => ({
+            'STT': i + 1,
+            'Mã Phiếu': auditId.substring(0, 8).toUpperCase(),
+            'Sản Phẩm': it.products.name,
+            'SKU': it.products.sku || '',
+            'ĐVT': it.products.unit,
+            'Tồn Hệ Thống': it.system_quantity,
+            'Tồn Thực Tế': it.actual_quantity,
+            'Chênh Lệch': it.difference,
+            'Ghi chú phiếu': note || ''
+        }));
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(dataRows);
+        XLSX.utils.book_append_sheet(wb, ws, "Phieu_Kiem_Kho");
+        XLSX.writeFile(wb, `Kiem_Kho_${auditId.substring(0, 8)}.xlsx`);
+    };
+
     // --- SLIP FUNCTIONS ---
-    function openSlip(mode: 'IMPORT' | 'EXPORT') {
+    function openSlip(mode: 'IMPORT' | 'EXPORT' | 'AUDIT') {
         setSlipMode(mode);
         setSlipItems([]);
+        setAuditItems([]);
         setSlipNote('');
         setSearchTerm('');
+        setSearchAuditTerm('');
     }
 
     function closeSlip() {
         setSlipMode(null);
         setSlipItems([]);
+        setAuditItems([]);
         setSlipNote('');
         setSearchTerm('');
+        setSearchAuditTerm('');
         setSelectingVariantFor(null);
     }
 
@@ -234,12 +366,79 @@ export default function InventoryPage() {
         if (!hasError) {
             alert(`✅ ${slipMode === 'IMPORT' ? 'Nhập kho' : 'Xuất kho'} ${slipItems.length} sản phẩm thành công!`);
             if (window.confirm('Bạn có muốn in phiếu này không?')) {
-                printInventorySlip(slipMode!, slipItems, slipNote);
+                printInventorySlip(slipMode as 'IMPORT' | 'EXPORT', slipItems, slipNote);
             }
             closeSlip();
             fetchProducts();
         }
     }
+
+    // --- AUDIT FUNCTIONS ---
+    function handleAddAllProductsToAudit() {
+        const items = products.filter(p => p.is_active).map(p => ({ product: p, actual: p.stock_quantity }));
+        setAuditItems(items);
+        setShowAuditProductSelect(false);
+    }
+
+    function toggleAuditProductSelect(product: RetailProduct, forceState?: boolean) {
+        setAuditItems(prev => {
+            const exists = prev.some(x => x.product.id === product.id);
+            if (forceState === true && !exists) {
+                return [...prev, { product, actual: product.stock_quantity }];
+            }
+            if (forceState === false && exists) {
+                return prev.filter(x => x.product.id !== product.id);
+            }
+            if (forceState === undefined) {
+                if (exists) return prev.filter(x => x.product.id !== product.id);
+                return [...prev, { product, actual: product.stock_quantity }];
+            }
+            return prev;
+        });
+    }
+
+    function updateAuditItemActual(productId: string, actual: number) {
+        setAuditItems(prev => prev.map(x => x.product.id === productId ? { ...x, actual } : x));
+    }
+
+    function removeAuditItem(productId: string) {
+        setAuditItems(prev => prev.filter(x => x.product.id !== productId));
+    }
+
+    async function handleSubmitAudit() {
+        if (!profile || auditItems.length === 0) return;
+        setIsSaving(true);
+
+        const payload = auditItems.map(item => ({
+            product_id: item.product.id,
+            system_quantity: item.product.stock_quantity,
+            actual_quantity: item.actual
+        }));
+
+        const { data, error } = await supabase.rpc('balance_inventory_audit', {
+            p_note: slipNote || null,
+            p_user_id: profile.id,
+            p_items: payload
+        });
+
+        setIsSaving(false);
+
+        if (error) {
+            alert('Lỗi tạo phiếu kiểm kho: ' + error.message);
+            return;
+        }
+
+        if (data && !data.success) {
+            alert('Lỗi xử lý cân bằng kho: ' + data.error);
+            return;
+        }
+
+        alert('✅ Cân bằng kho & lưu phiếu kiểm kê thành công!');
+        closeSlip();
+        fetchProducts();
+        if (activeTab === 'AUDITS') fetchAudits();
+    }
+
 
     // --- PRODUCT CRUD FUNCTIONS ---
     function openNewProductModal() {
@@ -649,6 +848,268 @@ export default function InventoryPage() {
         );
     }
 
+    // ===================== AUDIT MODE (Full-width form) =====================
+    if (slipMode === 'AUDIT') {
+        const filteredAuditProducts = parentProducts.filter(p => {
+            if (!searchAuditTerm.trim()) return true;
+            return p.name.toLowerCase().includes(searchAuditTerm.toLowerCase()) ||
+                (p.sku || '').toLowerCase().includes(searchAuditTerm.toLowerCase());
+        });
+
+        return (
+            <div className="page-container" style={{ maxWidth: '1000px' }}>
+                <div className="page-header flex-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h1>📝 Tạo Phiếu Kiểm Kho</h1>
+                        <p>Cập nhật số lượng tồn thực tế để cân bằng với hệ thống</p>
+                    </div>
+                    <button className="btn btn-ghost" onClick={closeSlip} style={{ fontSize: '14px' }}>
+                        ← Quay lại Kho
+                    </button>
+                </div>
+
+                <div style={{ background: '#fff', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', padding: '24px', animation: 'fadeIn 0.3s ease', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+                    {/* Header Controls: Search & Add All */}
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', fontSize: '18px', color: '#94a3b8' }}>🔍</span>
+                            <div
+                                style={{ width: '100%', padding: '14px 16px 14px 48px', border: '1px solid #e2e8f0', borderRadius: '12px', fontSize: '15px', color: '#64748b', cursor: 'text', background: '#f8fafc' }}
+                                onClick={() => setShowAuditProductSelect(true)}
+                            >
+                                Bấm để tìm và chọn sản phẩm kiểm kê...
+                            </div>
+                        </div>
+                        <button className="btn btn-outline" style={{ padding: '14px 24px', borderRadius: '12px', color: '#0ea5e9', borderColor: '#0ea5e9', background: '#f0f9ff' }} onClick={handleAddAllProductsToAudit}>
+                            <span style={{ fontSize: '18px', marginRight: '8px' }}>📋</span> Thêm tất cả sản phẩm
+                        </button>
+                    </div>
+
+                    {/* Check List Table */}
+                    <div className="table-responsive" style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
+                        <table className="data-table" style={{ margin: 0 }}>
+                            <thead style={{ background: '#f8fafc' }}>
+                                <tr>
+                                    <th style={{ width: '40px' }}>STT</th>
+                                    <th>Sản phẩm</th>
+                                    <th style={{ width: '15%', textAlign: 'right' }}>Tồn hệ thống</th>
+                                    <th style={{ width: '20%', textAlign: 'center' }}>Tồn thực tế</th>
+                                    <th style={{ width: '15%', textAlign: 'right' }}>Chênh lệch</th>
+                                    <th style={{ width: '60px', textAlign: 'center' }}>Xoá</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {auditItems.length > 0 ? auditItems.map((item, idx) => {
+                                    const diff = item.actual - item.product.stock_quantity;
+                                    const diffColor = diff > 0 ? '#10b981' : (diff < 0 ? '#ef4444' : '#64748b');
+                                    return (
+                                        <tr key={item.product.id}>
+                                            <td style={{ textAlign: 'center', color: '#64748b' }}>{idx + 1}</td>
+                                            <td>
+                                                <div style={{ fontWeight: 600, color: '#1e293b' }}>{item.product.name}</div>
+                                                <div style={{ fontSize: '12px', color: '#94a3b8' }}>ĐVT: {item.product.unit} {item.product.sku ? `· SKU: ${item.product.sku}` : ''}</div>
+                                            </td>
+                                            <td style={{ textAlign: 'right' }}>
+                                                <span style={{ fontWeight: 600, color: '#334155' }}>{item.product.stock_quantity.toLocaleString('vi-VN')}</span>
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={item.actual.toString()}
+                                                    onChange={e => updateAuditItemActual(item.product.id, Math.max(0, parseInt(e.target.value) || 0))}
+                                                    style={{ width: '100px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '15px', fontWeight: 600, background: '#f8fafc', color: '#0f172a', outline: 'none', textAlign: 'center' }}
+                                                    onFocus={e => e.currentTarget.select()}
+                                                />
+                                            </td>
+                                            <td style={{ textAlign: 'right' }}>
+                                                <span style={{ fontWeight: 700, color: diffColor, background: diffColor + '15', padding: '4px 8px', borderRadius: '6px' }}>
+                                                    {diff > 0 ? '+' : ''}{diff.toLocaleString('vi-VN')}
+                                                </span>
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <button onClick={() => removeAuditItem(item.product.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', opacity: 0.6 }} onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}>&times;</button>
+                                            </td>
+                                        </tr>
+                                    );
+                                }) : (
+                                    <tr>
+                                        <td colSpan={6} style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
+                                            <div style={{ fontSize: '40px', marginBottom: '8px' }}>🛒</div>
+                                            <p>Chưa có sản phẩm nào trong danh sách kiểm kê.</p>
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Note & Submit */}
+                    <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ flex: 1 }}>
+                            <label style={{ display: 'block', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>Ghi chú kiểm kho</label>
+                            <input
+                                type="text"
+                                placeholder="Nhập ghi chú (VD: Kiểm kê định kỳ tháng...)"
+                                value={slipNote}
+                                onChange={e => setSlipNote(e.target.value)}
+                                style={{
+                                    width: '100%', padding: '12px 16px', border: '1px solid #cbd5e1',
+                                    borderRadius: '8px', fontSize: '14px', outline: 'none'
+                                }}
+                            />
+                        </div>
+                        <div style={{ width: '250px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 600, color: '#334155', paddingBottom: '8px', borderBottom: '1px dashed #cbd5e1' }}>
+                                <span>Tổng mặt hàng:</span>
+                                <span style={{ color: '#0ea5e9' }}>{auditItems.length}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={closeSlip}>Hủy</button>
+                                <button
+                                    className="btn btn-primary"
+                                    style={{ flex: 2, background: '#0ea5e9', borderColor: '#0ea5e9' }}
+                                    disabled={auditItems.length === 0 || isSaving}
+                                    onClick={handleSubmitAudit}
+                                >
+                                    {isSaving ? 'Đang lưu...' : 'Cân Bằng Kho'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* PRODUCT SELECTION MODAL for AUDIT */}
+                {showAuditProductSelect && (
+                    <div className="modal-overlay" style={{ zIndex: 1200 }}>
+                        <div className="modal-card" style={{ width: '800px', maxWidth: '90vw', height: '80vh', padding: 0, display: 'flex', flexDirection: 'column' }}>
+                            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', borderTopLeftRadius: '16px', borderTopRightRadius: '16px' }}>
+                                <h2 style={{ fontSize: '20px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <button onClick={() => setShowAuditProductSelect(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: '#64748b' }}>&lt;</button>
+                                    Tất cả sản phẩm
+                                </h2>
+                                <button onClick={() => setShowAuditProductSelect(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>&times;</button>
+                            </div>
+
+                            <div style={{ padding: '16px 24px', borderBottom: '1px solid #e2e8f0' }}>
+                                <div style={{ position: 'relative' }}>
+                                    <span style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', fontSize: '16px', color: '#94a3b8' }}>🔍</span>
+                                    <input
+                                        type="text"
+                                        placeholder="Tìm tên sản phẩm hoặc SKU..."
+                                        value={searchAuditTerm}
+                                        onChange={e => setSearchAuditTerm(e.target.value)}
+                                        autoFocus
+                                        style={{ width: '100%', padding: '12px 16px 12px 42px', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '15px', outline: 'none' }}
+                                    />
+                                    {searchAuditTerm && <button onClick={() => setSearchAuditTerm('')} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#94a3b8' }}>&times;</button>}
+                                </div>
+                            </div>
+
+                            <div style={{ flex: 1, overflowY: 'auto', padding: '0' }}>
+                                <table className="data-table" style={{ margin: 0, borderTop: 'none' }}>
+                                    <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: '#f8fafc', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                                        <tr>
+                                            <th style={{ width: '40px', textAlign: 'center', padding: '12px 8px' }}></th>
+                                            <th style={{ padding: '12px 16px' }}>Sản phẩm</th>
+                                            <th style={{ width: '15%', padding: '12px 16px' }}>SKU</th>
+                                            <th style={{ width: '20%', textAlign: 'right', padding: '12px 24px' }}>Tồn kho</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredAuditProducts.map(parent => {
+                                            const variants = getVariants(parent.id);
+                                            const hasVars = variants.length > 0;
+                                            const totalStock = hasVars ? variants.reduce((s, v) => s + v.stock_quantity, 0) : parent.stock_quantity;
+
+                                            // Check selection states
+                                            const isParentSelected = !hasVars ? auditItems.some(x => x.product.id === parent.id) : variants.every(v => auditItems.some(x => x.product.id === v.id));
+                                            const isIndeterminate = hasVars && !isParentSelected && variants.some(v => auditItems.some(x => x.product.id === v.id));
+
+                                            return (
+                                                <React.Fragment key={parent.id}>
+                                                    <tr style={{ background: isParentSelected ? '#f0f9ff' : '#fff', cursor: 'pointer' }} onClick={() => {
+                                                        if (hasVars) {
+                                                            variants.forEach(v => toggleAuditProductSelect(v, !isParentSelected));
+                                                        } else {
+                                                            toggleAuditProductSelect(parent, !isParentSelected);
+                                                        }
+                                                    }}>
+                                                        <td style={{ textAlign: 'center', padding: '16px 8px' }}>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isParentSelected}
+                                                                ref={el => { if (el) el.indeterminate = isIndeterminate; }}
+                                                                readOnly
+                                                                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#0ea5e9' }}
+                                                            />
+                                                        </td>
+                                                        <td style={{ padding: '16px' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                                <div style={{ width: '40px', height: '40px', background: '#f1f5f9', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#94a3b8' }}>
+                                                                    📦
+                                                                </div>
+                                                                <span style={{ fontWeight: 600, fontSize: '15px', color: '#1e293b' }}>{parent.name.toUpperCase()}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ color: '#64748b' }}>{parent.sku || '-'}</td>
+                                                        <td style={{ textAlign: 'right', padding: '16px 24px', fontWeight: 600, color: '#334155' }}>
+                                                            {totalStock.toLocaleString('vi-VN')} {parent.unit}
+                                                        </td>
+                                                    </tr>
+                                                    {/* Variant rows */}
+                                                    {hasVars && variants.map(variant => {
+                                                        const isVarSelected = auditItems.some(x => x.product.id === variant.id);
+                                                        return (
+                                                            <tr key={variant.id} style={{ background: isVarSelected ? '#f8fafc' : '#fff', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); toggleAuditProductSelect(variant, !isVarSelected); }}>
+                                                                <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                                                                    <div style={{ marginLeft: '24px' }}>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isVarSelected}
+                                                                            readOnly
+                                                                            style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#0ea5e9' }}
+                                                                        />
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ padding: '12px 16px', paddingLeft: '70px', color: '#334155', fontSize: '14px' }}>
+                                                                    {variant.sku || variant.name.replace(parent.name + ' — ', '')}
+                                                                </td>
+                                                                <td style={{ color: '#64748b', fontSize: '13px' }}>{variant.sku || '-'}</td>
+                                                                <td style={{ textAlign: 'right', padding: '12px 24px', color: '#64748b', fontSize: '14px' }}>
+                                                                    {variant.stock_quantity.toLocaleString('vi-VN')} {variant.unit}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                        {filteredAuditProducts.length === 0 && (
+                                            <tr><td colSpan={4} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Không tìm thấy sản phẩm.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div style={{ padding: '16px 24px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottomLeftRadius: '16px', borderBottomRightRadius: '16px' }}>
+                                <div style={{ fontSize: '14px', color: '#64748b' }}>
+                                    Đã chọn <strong>{auditItems.length}</strong> sản phẩm
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button className="btn btn-ghost" onClick={() => setShowAuditProductSelect(false)}>Hủy</button>
+                                    <button className="btn btn-primary" style={{ background: '#0ea5e9', borderColor: '#0ea5e9', padding: '10px 24px' }} onClick={() => setShowAuditProductSelect(false)}>Hoàn tất chọn</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+            </div>
+        );
+    }
+
     // ===================== MAIN VIEW =====================
     return (
         <div className="page-container">
@@ -658,6 +1119,9 @@ export default function InventoryPage() {
                     <p>Theo dõi tồn kho, nhập hàng, xuất hủy và quản lý danh mục sản phẩm</p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-primary" style={{ background: '#0ea5e9', borderColor: '#0ea5e9' }} onClick={() => openSlip('AUDIT')}>
+                        📝 Kiểm Kho
+                    </button>
                     <button className="btn btn-primary" style={{ background: '#10b981', borderColor: '#10b981' }} onClick={() => openSlip('IMPORT')}>
                         📥 Nhập Kho
                     </button>
@@ -681,6 +1145,13 @@ export default function InventoryPage() {
                     onClick={() => { setActiveTab('HISTORY'); fetchLogs(); }}
                 >
                     Lịch sử Nhập/Xuất
+                </button>
+                <button
+                    className={`btn ${activeTab === 'AUDITS' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => { setActiveTab('AUDITS'); fetchAudits(); }}
+                >
+                    Phiếu Kiểm Kho
                 </button>
                 <button
                     className={`btn ${activeTab === 'CATALOG' ? 'btn-primary' : 'btn-ghost'}`}
@@ -792,6 +1263,48 @@ export default function InventoryPage() {
                                     ))}
                                     {logs.length === 0 && (
                                         <tr><td colSpan={6} style={{ textAlign: 'center' }}>Chưa có lịch sử.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* ===================== AUDITS TAB ===================== */}
+                    {activeTab === 'AUDITS' && (
+                        <div className="table-responsive">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Mã Phiếu</th>
+                                        <th>Thời gian</th>
+                                        <th>Người lập</th>
+                                        <th>Trạng thái</th>
+                                        <th>Ghi chú</th>
+                                        <th style={{ textAlign: 'center' }}>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {audits.map(audit => (
+                                        <tr key={audit.id}>
+                                            <td><strong>{audit.id.substring(0, 8).toUpperCase()}</strong></td>
+                                            <td>{new Date(audit.created_at).toLocaleString('vi-VN')}</td>
+                                            <td>{audit.profiles?.full_name || 'Hệ thống'}</td>
+                                            <td><span className="badge badge-success">Đã cân bằng</span></td>
+                                            <td style={{ maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {audit.note || '-'}
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <button className="btn btn-ghost btn-sm" onClick={() => printAuditSlipWithData(audit.id, audit.note)} title="In Phiếu Khổ A4 Ngang">
+                                                    🖨️ In
+                                                </button>
+                                                <button className="btn btn-ghost btn-sm" onClick={() => exportAuditToExcel(audit.id, audit.note)} title="Xuất file Excel" style={{ marginLeft: '4px' }}>
+                                                    📊 Excel
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {audits.length === 0 && (
+                                        <tr><td colSpan={6} style={{ textAlign: 'center' }}>Chưa có phiếu kiểm kho nào.</td></tr>
                                     )}
                                 </tbody>
                             </table>

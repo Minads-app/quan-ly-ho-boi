@@ -114,3 +114,23 @@ export interface Customer {
     created_at: string;
     updated_at: string;
 }
+
+export interface InventoryAudit {
+    id: string;
+    status: string;
+    note: string | null;
+    created_by: string;
+    created_at: string;
+    profiles?: { full_name: string };
+}
+
+export interface InventoryAuditItem {
+    id: string;
+    audit_id: string;
+    product_id: string;
+    system_quantity: number;
+    actual_quantity: number;
+    difference: number;
+    created_at: string;
+    products?: { name: string; unit: string; sku: string | null };
+}
