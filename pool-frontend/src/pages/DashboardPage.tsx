@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, no-useless-escape, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -105,23 +106,15 @@ export default function DashboardPage() {
         }
     }
 
-    useEffect(() => {
-        fetchTickets();
-        fetchRetailItems();
-        fetchExpenses();
-        if (activeTab === 'SESSIONS') fetchScanLogs();
-        fetchBusinessInfo();
-    }, [dateRange, customFrom, customTo, activeTab]);
-
     async function fetchBusinessInfo() {
         const { data } = await supabase.from('system_settings').select('key, value');
         if (data) {
-            const info: any = {};
+            const info: Record<string, string> = {};
             data.forEach(r => {
                 let val = r.value;
                 try {
                     val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, '');
-                } catch (e) {
+                } catch {
                     val = typeof val === 'string' ? val : String(val);
                 }
                 info[r.key] = val;
@@ -139,7 +132,7 @@ export default function DashboardPage() {
         setLoading(true);
         const { from, to } = getDateBounds();
 
-        let query = supabase
+        const query = supabase
             .from('tickets')
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
@@ -159,6 +152,7 @@ export default function DashboardPage() {
         } else {
             const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
             const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
             const mapped = (data || []).map((t: any) => {
                 let computedStatus = t.status;
 
@@ -197,7 +191,7 @@ export default function DashboardPage() {
     async function fetchRetailItems() {
         const { from, to } = getDateBounds();
 
-        let query = supabase
+        const query = supabase
             .from('orders')
             .select(`
                 id, created_at, payment_method, created_by,
@@ -214,8 +208,10 @@ export default function DashboardPage() {
             setRetailItems([]);
         } else {
             const mapped: RetailRow[] = [];
+
             (data || []).forEach((order: any) => {
                 const items = order.order_items || [];
+
                 items.forEach((item: any) => {
                     if (item.products) {
                         mapped.push({
@@ -252,6 +248,7 @@ export default function DashboardPage() {
             console.error('Error fetching expenses:', error);
             setExpenses([]);
         } else {
+
             const mapped = (data || []).map((e: any) => ({
                 id: e.id,
                 amount: e.amount,
@@ -285,6 +282,7 @@ export default function DashboardPage() {
             console.error('Error fetching scan logs:', error);
             setScanLogs([]);
         } else {
+
             const mapped = (data || []).map((row: any) => ({
                 id: row.id,
                 scanned_at: row.scanned_at,
@@ -306,9 +304,6 @@ export default function DashboardPage() {
 
     // --- WARNINGS: Fetch all active passes ---
     const [warningTickets, setWarningTickets] = useState<TicketRow[]>([]);
-    useEffect(() => {
-        if (activeTab === 'WARNINGS') fetchWarnings();
-    }, [activeTab]);
 
     async function fetchWarnings() {
         setLoading(true);
@@ -323,6 +318,7 @@ export default function DashboardPage() {
             .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .neq('status', 'EXPIRED')
             .order('valid_until', { ascending: true });
+
 
         const mapped = (data || []).map((t: any) => ({
             id: t.id,
@@ -358,6 +354,20 @@ export default function DashboardPage() {
         setWarningTickets(filtered);
         setLoading(false);
     }
+
+
+    useEffect(() => {
+        fetchTickets();
+        fetchRetailItems();
+        fetchExpenses();
+        if (activeTab === 'SESSIONS') fetchScanLogs();
+        fetchBusinessInfo();
+    }, [dateRange, customFrom, customTo, activeTab]);
+
+    useEffect(() => {
+        if (activeTab === 'WARNINGS') fetchWarnings();
+
+    }, [activeTab]);
 
     // --- Computed data ---
     const dailyTickets = tickets.filter(t => t.category === 'DAILY');

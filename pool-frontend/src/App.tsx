@@ -49,7 +49,7 @@ function AppRoutes() {
           let val = '';
           try {
             val = typeof r.value === 'string' ? r.value.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(r.value)).replace(/^"|"$/g, '');
-          } catch (e) {
+          } catch {
             val = typeof r.value === 'string' ? r.value : String(r.value);
           }
           if (r.key === 'business_name' && val) setBizName(val);
@@ -77,7 +77,7 @@ function AppRoutes() {
   const canView = (module: string) => {
     try {
       if (profile.role === 'ADMIN') return true;
-      const perms = profile.permissions as any;
+      const perms = profile.permissions as unknown as Record<string, { view?: boolean } | undefined>;
       // Nếu chưa có permissions trong DB → cho xem POS mặc định
       if (!perms || typeof perms !== 'object') {
         return module === 'pos'; // Mặc định: chỉ cho xem POS

@@ -2,6 +2,7 @@ export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER';
 export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
 export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED';
 export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO';
+export type CardStatus = 'UNUSED' | 'USED' | 'REVOKED';
 
 export interface PermissionsMatrix {
     pos: { view: boolean };
@@ -72,6 +73,18 @@ export interface SystemSetting {
     key: string;
     value: string;
     updated_at: string;
+}
+
+export interface CardBank {
+    id: string;
+    card_code: string;
+    prefix: string;
+    month_year: string;
+    sequence_number: number;
+    random_string: string;
+    status: CardStatus;
+    created_at: string;
+    created_by: string;
 }
 
 export interface CheckQrResult {

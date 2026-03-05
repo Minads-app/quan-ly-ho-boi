@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/immutability, react-hooks/exhaustive-deps */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -79,17 +80,17 @@ export default function CustomerPage() {
     const [editValidFrom, setEditValidFrom] = useState('');
     const [editValidUntil, setEditValidUntil] = useState('');
 
-    useEffect(() => { fetchAllData(); }, []);
+
+    useEffect(() => {
+        fetchAllData();
+    }, []);
 
     async function fetchAllData() {
-        // Fetch customers from customers table
         const { data: custData } = await supabase
             .from('customers')
             .select('*')
             .order('full_name');
         setAllCustomers((custData || []) as Customer[]);
-
-        // Fetch packages from tickets
         await fetchAllPackages();
     }
 
@@ -110,7 +111,7 @@ export default function CustomerPage() {
 
         if (error) { console.error(error); setLoading(false); return; }
 
-        const mapped: PackageRow[] = (data || []).map((t: any) => ({
+        const mapped: PackageRow[] = (data || []).map((t: Record<string, any>) => ({
             id: t.id,
             package_code: t.package_code,
             type_name: t.ticket_types?.name || '',
@@ -141,7 +142,7 @@ export default function CustomerPage() {
         setLoading(false);
     }
 
-    function computeStatus(t: any): string {
+    function computeStatus(t: Record<string, any>): string {
         if (t.status === 'EXPIRED') return 'EXPIRED';
         const today = new Date().toLocaleDateString('en-CA');
         if (t.valid_until && t.valid_until < today) return 'EXPIRED';
@@ -214,23 +215,89 @@ export default function CustomerPage() {
 
     // --- Card code update ---
     async function handleUpdateCardCode(pkgId: string) {
-        if (!newCardCode.trim()) { alert('Vui lòng nhập mã thẻ mới!'); return; }
+        const inputCardCode = newCardCode.trim();
+        if (!inputCardCode) { alert('Vui lòng nhập mã thẻ mới!'); return; }
         if (!confirm('Bạn có chắc chắn muốn thay đổi mã thẻ cho khách hàng này?')) return;
 
-        // Update all packages with the same old card_code
         const pkg = allPackages.find(p => p.id === pkgId);
         if (!pkg) return;
         const oldCode = pkg.card_code;
 
-        if (oldCode) {
-            await supabase.from('tickets').update({ card_code: newCardCode.trim() }).eq('card_code', oldCode);
+        // --- 1. Validate against card_bank ---
+        const { data: cardRes, error: cardErr } = await supabase
+            .from('card_bank')
+            .select('*')
+            .eq('card_code', inputCardCode)
+            .single();
+
+        let shouldInsertCard = false;
+        let shouldUpdateCardId = null;
+
+        if (cardErr || !cardRes) {
+            if (profile?.role === 'ADMIN') {
+                const c = window.confirm(`Mã thẻ "${inputCardCode}" không có trong ngân hàng thẻ. Bạn có muốn tự động tạo và gán không?`);
+                if (!c) return;
+                shouldInsertCard = true;
+            } else {
+                alert('Mã thẻ không hợp lệ hoặc chưa được khởi tạo. Vui lòng liên hệ Admin.');
+                return;
+            }
         } else {
-            await supabase.from('tickets').update({ card_code: newCardCode.trim() }).eq('id', pkgId);
+            if (cardRes.status !== 'UNUSED') {
+                if (profile?.role === 'ADMIN') {
+                    const c = window.confirm(`Mã thẻ "${inputCardCode}" đã được sử dụng (Trạng thái: ${cardRes.status}). Bạn có chắc chắn muốn ép dùng mã này không?`);
+                    if (!c) return;
+                    shouldUpdateCardId = cardRes.id;
+                } else {
+                    alert(`Mã thẻ này đã được sử dụng hoặc hỏng (Trạng thái: ${cardRes.status}). Vui lòng lấy thẻ khác.`);
+                    return;
+                }
+            } else {
+                shouldUpdateCardId = cardRes.id;
+            }
+        }
+
+        // --- 2. Update tickets ---
+        if (oldCode) {
+            await supabase.from('tickets').update({ card_code: inputCardCode }).eq('card_code', oldCode);
+        } else {
+            await supabase.from('tickets').update({ card_code: inputCardCode }).eq('id', pkgId);
+        }
+
+        // --- 3. Update customer table if needed ---
+        if (pkg.customer_phone) {
+            await supabase.from('customers').update({ card_code: inputCardCode }).eq('phone', pkg.customer_phone);
+            // Also trigger a refresh of customers list
+        }
+
+        // --- 4. Update card bank ---
+        if (shouldInsertCard) {
+            const now = new Date();
+            const monthYear = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(2)}`;
+            await supabase.from('card_bank').insert({
+                card_code: inputCardCode,
+                prefix: 'MANUAL',
+                month_year: monthYear,
+                sequence_number: 0,
+                random_string: 'MANUAL',
+                status: 'USED',
+                created_by: profile?.id
+            });
+        } else if (shouldUpdateCardId) {
+            await supabase.from('card_bank').update({ status: 'USED' }).eq('id', shouldUpdateCardId);
+        }
+
+        // --- 5. Revoke old card ---
+        if (oldCode && oldCode !== inputCardCode) {
+            const { data: oldCard } = await supabase.from('card_bank').select('id').eq('card_code', oldCode).single();
+            if (oldCard) {
+                await supabase.from('card_bank').update({ status: 'REVOKED' }).eq('id', oldCard.id);
+            }
         }
 
         setEditingCardPkgId(null);
         setNewCardCode('');
-        fetchAllPackages();
+        fetchAllData(); // Refresh customers and packages
         alert('✅ Đã cập nhật mã thẻ thành công!');
     }
 
@@ -508,28 +575,28 @@ export default function CustomerPage() {
                                 {filteredPackages.length === 0 ? (
                                     <tr><td colSpan={isAdmin ? 10 : 9} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có gói thẻ nào trong khoảng thời gian này.</td></tr>
                                 ) : filteredPackages.map(t => {
-                                    const pst = getStatusBadge(t.status);
+                                    const st = getStatusBadge(t.status);
                                     return (
-                                        <tr key={t.id} onClick={() => setSelectedPkg(t)}
-                                            style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', transition: 'background 0.15s' }}
+                                        <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-card)', transition: 'background 0.15s', cursor: 'pointer' }}
                                             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                                            onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                                            <td style={{ ...tdS, fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-muted)' }}>{t.package_code || '—'}</td>
+                                            onMouseLeave={e => (e.currentTarget.style.background = '')}
+                                            onClick={() => setSelectedPkg(t)}>
+                                            <td style={{ ...tdS, fontWeight: 700, minWidth: '80px' }}>{t.package_code || '—'}</td>
                                             <td style={{ ...tdS, fontWeight: 600 }}>{t.customer_name || '—'}</td>
                                             <td style={tdS}>{t.customer_phone || '—'}</td>
-                                            {isAdmin && <td style={tdS}><code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code || '—'}</code></td>}
+                                            {isAdmin && <td style={tdS}>{t.card_code || '—'}</td>}
                                             <td style={tdS}>
-                                                <span style={{ background: t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#166534' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{t.type_name}</span>
+                                                <span style={{ background: t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#166534' : '#92400e', padding: '4px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{t.type_name}</span>
                                             </td>
                                             <td style={tdS}>
-                                                <span style={{ background: pst.bg, color: pst.color, padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{pst.text}</span>
+                                                <span style={{ background: st.bg, color: st.color, padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{st.text}</span>
                                             </td>
-                                            <td style={{ ...tdS, textAlign: 'center', fontWeight: 700, color: (t.remaining_sessions !== null && t.remaining_sessions <= 3) ? '#ef4444' : '' }}>
+                                            <td style={{ ...tdS, fontWeight: 700, color: t.remaining_sessions !== null && t.remaining_sessions <= 3 ? '#ef4444' : '' }}>
                                                 {t.remaining_sessions !== null ? `${t.remaining_sessions}/${t.total_sessions ?? t.remaining_sessions}` : '∞'}
                                             </td>
-                                            <td style={tdS}>{fmtDate(t.valid_from)} → {fmtDate(t.valid_until)}</td>
-                                            <td style={{ ...tdS, fontWeight: 600 }}>{fmt(t.price_paid)}</td>
-                                            <td style={tdS}>{fmtDate(t.sold_at)}</td>
+                                            <td style={{ ...tdS, color: 'var(--text-secondary)' }}>{fmtDate(t.valid_from)} → {fmtDate(t.valid_until)}</td>
+                                            <td style={{ ...tdS, fontWeight: 700 }}>{fmt(t.price_paid)}</td>
+                                            <td style={{ ...tdS, color: 'var(--text-secondary)' }}>{fmtDate(t.sold_at)}</td>
                                         </tr>
                                     );
                                 })}

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/immutability, react-hooks/exhaustive-deps, prefer-const */
 import { useEffect, useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../lib/supabase';
@@ -354,8 +355,54 @@ export default function POSPage() {
             return;
         }
         setSavingCustomer(true);
+
+        const inputCardCode = newCustCardCode.trim();
+
+        // 1. Check card_bank
+        const { data: cardRes, error: cardErr } = await supabase
+            .from('card_bank')
+            .select('*')
+            .eq('card_code', inputCardCode)
+            .single();
+
+        let shouldInsertCard = false;
+        let shouldUpdateCardId = null;
+
+        if (cardErr || !cardRes) {
+            if (profile?.role === 'ADMIN') {
+                const confirmCreate = window.confirm(`Mã thẻ "${inputCardCode}" không có trong ngân hàng thẻ. Bạn có muốn tự động tạo và gán cho khách không?`);
+                if (!confirmCreate) {
+                    setSavingCustomer(false);
+                    return;
+                }
+                shouldInsertCard = true;
+            } else {
+                alert('Mã thẻ không hợp lệ hoặc chưa được khởi tạo trong kho thẻ. Vui lòng liên hệ Admin.');
+                setSavingCustomer(false);
+                return;
+            }
+        } else {
+            if (cardRes.status !== 'UNUSED') {
+                if (profile?.role === 'ADMIN') {
+                    const confirmUse = window.confirm(`Mã thẻ "${inputCardCode}" đã được sử dụng hoặc bị hủy (Trạng thái: ${cardRes.status}). Bạn có chắc chắn muốn ép dùng mã này không?`);
+                    if (!confirmUse) {
+                        setSavingCustomer(false);
+                        return;
+                    }
+                    shouldUpdateCardId = cardRes.id;
+                } else {
+                    alert(`Mã thẻ này đã được sử dụng hoặc hỏng (Trạng thái: ${cardRes.status}). Vui lòng lấy thẻ khác.`);
+                    setSavingCustomer(false);
+                    return;
+                }
+            } else {
+                shouldUpdateCardId = cardRes.id;
+            }
+        }
+
+        // 2. Insert customer
         const { data, error } = await supabase.from('customers').insert({
-            card_code: newCustCardCode.trim(),
+            card_code: inputCardCode,
             full_name: newCustName.trim(),
             phone: newCustPhone.trim(),
             email: newCustEmail.trim() || null,
@@ -368,12 +415,29 @@ export default function POSPage() {
 
         if (error) {
             if (error.message.includes('duplicate') || error.message.includes('unique')) {
-                alert('Mã thẻ "' + newCustCardCode + '" đã tồn tại!');
+                alert('Mã thẻ "' + inputCardCode + '" đã tồn tại trong danh sách khách hàng!');
             } else {
                 alert('Lỗi lưu khách hàng: ' + error.message);
             }
             setSavingCustomer(false);
             return;
+        }
+
+        // 3. Update/Insert card bank status
+        if (shouldInsertCard) {
+            const now = new Date();
+            const monthYear = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(2)}`;
+            await supabase.from('card_bank').insert({
+                card_code: inputCardCode,
+                prefix: 'MANUAL',
+                month_year: monthYear,
+                sequence_number: 0,
+                random_string: 'MANUAL',
+                status: 'USED',
+                created_by: profile?.id
+            });
+        } else if (shouldUpdateCardId) {
+            await supabase.from('card_bank').update({ status: 'USED' }).eq('id', shouldUpdateCardId);
         }
 
         // Auto-fill cart customer info

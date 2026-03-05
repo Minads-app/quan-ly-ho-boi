@@ -6,7 +6,7 @@ TRUNCATE TABLE public.scan_logs CASCADE;
 TRUNCATE TABLE public.inventory_logs CASCADE;
 TRUNCATE TABLE public.inventory_audit_items CASCADE;
 TRUNCATE TABLE public.inventory_audits CASCADE;
-TRUNCATE TABLE public.cash_transactions CASCADE;
+TRUNCATE TABLE public.expenses CASCADE;
 
 -- 2. Xóa toàn bộ hóa đơn bán hàng và chi tiết
 TRUNCATE TABLE public.order_items CASCADE;

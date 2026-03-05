@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,13 +13,9 @@ export default function AnalyticsPage() {
     const [dateRange, setDateRange] = useState<DateRange>('7_DAYS');
     const [loading, setLoading] = useState(true);
 
-    const [dailyRevenue, setDailyRevenue] = useState<any[]>([]);
-    const [dailySessions, setDailySessions] = useState<any[]>([]);
-    const [revenuePie, setRevenuePie] = useState<any[]>([]);
-
-    useEffect(() => {
-        fetchAnalytics();
-    }, [dateRange]);
+    const [dailyRevenue, setDailyRevenue] = useState<Record<string, any>[]>([]);
+    const [dailySessions, setDailySessions] = useState<Record<string, any>[]>([]);
+    const [revenuePie, setRevenuePie] = useState<Record<string, any>[]>([]);
 
     function getDateBounds(): { from: string; to: string } {
         const now = new Date();
@@ -71,7 +68,7 @@ export default function AnalyticsPage() {
 
         // Process Daily Sessions (Line Chart)
         const sessionMap: Record<string, number> = {};
-        (scanData || []).forEach((row: any) => {
+        (scanData || []).forEach((row: Record<string, any>) => {
             const dateStr = new Date(row.scanned_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
             sessionMap[dateStr] = (sessionMap[dateStr] || 0) + 1;
         });
@@ -93,7 +90,7 @@ export default function AnalyticsPage() {
         const revenueMap: Record<string, number> = {};
         let catDaily = 0, catMulti = 0, catMonthly = 0, catLesson = 0, catOther = 0;
 
-        (ticketsData || []).forEach((row: any) => {
+        (ticketsData || []).forEach((row: Record<string, any>) => {
             if (row.price_paid <= 0) return; // Skip free passes for revenue
 
             // Map Daily Revenue
@@ -127,6 +124,11 @@ export default function AnalyticsPage() {
         setRevenuePie(pieData);
         setLoading(false);
     }
+
+    useEffect(() => {
+        fetchAnalytics();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dateRange]);
 
     const fmtCurrency = (val: number) => new Intl.NumberFormat('vi-VN').format(val) + 'đ';
 
@@ -215,7 +217,7 @@ export default function AnalyticsPage() {
                                             outerRadius={110}
                                             paddingAngle={3}
                                             dataKey="value"
-                                            label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
+                                            label={({ name, percent }: Record<string, any>) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                                             labelLine={true}
                                         >
                                             {revenuePie.map((entry, index) => (

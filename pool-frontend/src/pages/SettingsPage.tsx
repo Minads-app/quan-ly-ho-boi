@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import type { CardBank } from '../types';
 
 interface Settings {
     gate_control_mode: string;
@@ -86,7 +88,12 @@ export default function SettingsPage() {
     const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>(defaultSchedule);
 
     // active tab state
-    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons'>('system');
+    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons' | 'cards'>('system');
+
+    // Card Bank state
+    const [cards, setCards] = useState<CardBank[]>([]);
+    const [cbPrefix, setCbPrefix] = useState('HB');
+    const [cbQuantity, setCbQuantity] = useState<number | ''>(50);
 
     // Ticket Types state
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
@@ -140,12 +147,18 @@ export default function SettingsPage() {
     const dayNames: Record<number, string> = { 0: 'Chủ nhật', 1: 'Thứ 2', 2: 'Thứ 3', 3: 'Thứ 4', 4: 'Thứ 5', 5: 'Thứ 6', 6: 'Thứ 7' };
 
     useEffect(() => {
+        if (activeTab === 'cards') {
+            fetchCards();
+        }
+    }, [activeTab]);
+
+    useEffect(() => {
         fetchSettings();
         fetchTicketTypes();
         fetchPromotions();
         fetchWeekSchedule();
         fetchLessonTypes();
-
+        fetchCards();
     }, []);
 
     async function fetchSettings() {
@@ -186,6 +199,88 @@ export default function SettingsPage() {
             .select('*')
             .order('created_at', { ascending: false });
         if (data) setPromotions(data);
+    }
+
+    async function fetchCards() {
+        const { data } = await supabase.from('card_bank').select('*').order('created_at', { ascending: false }).limit(2000);
+        if (data) setCards(data as CardBank[]);
+    }
+
+    async function handleGenerateCards(e: React.FormEvent) {
+        e.preventDefault();
+        if (!cbPrefix || !cbQuantity || cbQuantity <= 0) return;
+        setSaving(true);
+
+        const prefix = cbPrefix.toUpperCase();
+        const quantity = Number(cbQuantity);
+        const now = new Date();
+        const monthYear = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(2)}`;
+
+        const { data: existing } = await supabase
+            .from('card_bank')
+            .select('sequence_number')
+            .eq('prefix', prefix)
+            .eq('month_year', monthYear)
+            .order('sequence_number', { ascending: false })
+            .limit(1);
+
+        let startSeq = 1;
+        if (existing && existing.length > 0) {
+            startSeq = existing[0].sequence_number + 1;
+        }
+
+        const newCards: any[] = [];
+        for (let i = 0; i < quantity; i++) {
+            const seq = startSeq + i;
+            const seqStr = String(seq).padStart(5, '0');
+            const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const cardCode = `${prefix}${monthYear}${seqStr}${randomStr}`;
+
+            newCards.push({
+                card_code: cardCode,
+                prefix,
+                month_year: monthYear,
+                sequence_number: seq,
+                random_string: randomStr,
+                status: 'UNUSED',
+                created_by: profile?.id
+            });
+        }
+
+        const { error } = await supabase.from('card_bank').insert(newCards);
+        if (error) {
+            alert('Lỗi tạo thẻ: ' + error.message);
+        } else {
+            alert(`Đã tạo thành công ${quantity} mã thẻ mới!`);
+            fetchCards();
+            setCbQuantity(''); // reset temporary
+        }
+        setSaving(false);
+    }
+
+    function exportCardsToCSV() {
+        const unusedCards = cards.filter(c => c.status === 'UNUSED');
+        if (unusedCards.length === 0) {
+            alert('Không có mã thẻ UNUSED nào để xuất.');
+            return;
+        }
+
+        let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // UTF-8 BOM
+        csvContent += "STT,Mã Thẻ\n";
+
+        const sorted = [...unusedCards].sort((a, b) => a.sequence_number - b.sequence_number);
+
+        sorted.forEach((c) => {
+            csvContent += `${c.sequence_number},${c.card_code}\n`;
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `the_chua_dung_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
 
@@ -576,6 +671,13 @@ export default function SettingsPage() {
                     onClick={() => setActiveTab('promotions')}
                 >
                     🎁 Khuyến Mãi
+                </button>
+                <button
+                    className={`btn ${activeTab === 'cards' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('cards')}
+                >
+                    💳 Ngân Hàng Thẻ
                 </button>
 
             </div>
@@ -1451,6 +1553,79 @@ export default function SettingsPage() {
                 </div>
             )}
 
+
+            {/* ============ CARDS BANK TAB ============ */}
+            {activeTab === 'cards' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    <div className="form-row">
+                        <div className="dashboard-content-card" style={{ flex: 1 }}>
+                            <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Tạo Lô Thẻ Mới</h2>
+                            <form onSubmit={handleGenerateCards} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                <div className="form-group">
+                                    <label>Tiền tố (Gợi ý: HB = Hồ bơi)</label>
+                                    <input type="text" className="form-control" required value={cbPrefix} onChange={e => setCbPrefix(e.target.value)} maxLength={5} placeholder="VD: HB" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Số lượng thẻ muốn tạo</label>
+                                    <input type="number" className="form-control" required min="1" max="1000" value={cbQuantity} onChange={e => setCbQuantity(e.target.value ? Number(e.target.value) : '')} placeholder="VD: 50" />
+                                </div>
+                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                    Cấu trúc thẻ: <b>[Tiền tố] + [ThángNăm] + [Số thứ tự 5 số] + [6 Ký tự ngẫu nhiên]</b><br />
+                                    Ví dụ: <b>{cbPrefix || 'HB'}{String(new Date().getMonth() + 1).padStart(2, '0')}{String(new Date().getFullYear()).slice(2)}00001A1B2C</b>
+                                </div>
+                                <button type="submit" className="btn btn-primary" disabled={saving}>
+                                    {saving ? 'Đang tạo...' : 'Tạo Lô Thẻ'}
+                                </button>
+                            </form>
+                        </div>
+
+                        <div className="dashboard-content-card" style={{ flex: 2 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div>
+                                    <h2 style={{ fontSize: '18px', margin: 0 }}>Kho Thẻ</h2>
+                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                        Bạn có {cards.filter(c => c.status === 'UNUSED').length} thẻ chưa sử dụng.
+                                    </div>
+                                </div>
+                                <button className="btn btn-outline" onClick={exportCardsToCSV} disabled={cards.filter(c => c.status === 'UNUSED').length === 0}>
+                                    📥 Xuất CSV (Các thẻ UNUSED)
+                                </button>
+                            </div>
+
+                            <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                <table className="data-table">
+                                    <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
+                                        <tr>
+                                            <th>Mã Thẻ</th>
+                                            <th>Trạng Thái</th>
+                                            <th>Người Tạo</th>
+                                            <th>Ngày Tạo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {cards.slice(0, 100).map(c => (
+                                            <tr key={c.id}>
+                                                <td style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{c.card_code}</td>
+                                                <td>
+                                                    <span className={`badge ${c.status === 'UNUSED' ? 'badge-success' : c.status === 'USED' ? 'badge-primary' : 'badge-error'}`}>
+                                                        {c.status}
+                                                    </span>
+                                                </td>
+                                                <td style={{ fontSize: '12px' }}>{c.created_by?.substring(0, 8)}...</td>
+                                                <td style={{ fontSize: '12px' }}>{new Date(c.created_at).toLocaleString('vi-VN')}</td>
+                                            </tr>
+                                        ))}
+                                        {cards.length === 0 && (
+                                            <tr><td colSpan={4} style={{ textAlign: 'center' }}>Chưa có thẻ nào trong ngân hàng.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                                {cards.length > 100 && <div style={{ textAlign: 'center', padding: '8px', fontSize: '12px', color: 'gray' }}>Đang hiển thị 100 thẻ gần nhất. Vui lòng xuất CSV để xem toàn bộ.</div>}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
     );

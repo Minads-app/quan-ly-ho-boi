@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,9 +28,7 @@ export default function CashPage() {
     const [reason, setReason] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        fetchCashData();
-    }, []);
+
 
     async function fetchCashData() {
         setLoading(true);
@@ -45,7 +44,7 @@ export default function CashPage() {
                 .order('created_at', { ascending: false });
 
             if (expData) {
-                setExpenses(expData as any);
+                setExpenses(expData as Expense[]);
                 setTotalChi(expData.reduce((sum, e) => sum + e.amount, 0));
             }
 
@@ -65,6 +64,10 @@ export default function CashPage() {
         }
         setLoading(false);
     }
+
+    useEffect(() => {
+        fetchCashData();
+    }, []);
 
     function openExpenseModal() {
         setAmount('');
