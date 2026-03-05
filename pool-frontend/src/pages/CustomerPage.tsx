@@ -34,6 +34,7 @@ interface PackageRow {
     promo_name: string | null;
     promo_type: string | null;
     promo_value: number | null;
+    validity_days: number | null;
 }
 
 interface CustomerSummary {
@@ -69,6 +70,8 @@ export default function CustomerPage() {
     // Expanded customer / detail modal
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [selectedPkg, setSelectedPkg] = useState<PackageRow | null>(null);
+    const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null);
+    const [editCustData, setEditCustData] = useState({ name: '', phone: '', email: '', birth_date: '', gender: 'OTHER' });
 
     // Card code editing
     const [editingCardPkgId, setEditingCardPkgId] = useState<string | null>(null);
@@ -114,7 +117,7 @@ export default function CustomerPage() {
                 valid_from, valid_until, remaining_sessions, total_sessions,
                 price_paid, sold_at, package_code,
                 customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
-                ticket_types!inner (name, category, price, session_count),
+                ticket_types!inner (name, category, price, session_count, validity_days),
                 profiles:sold_by (full_name),
                 promotions:promotion_id (name, type, value)
             `)
@@ -148,6 +151,7 @@ export default function CustomerPage() {
             promo_name: t.promotions?.name || null,
             promo_type: t.promotions?.type || null,
             promo_value: t.promotions?.value || null,
+            validity_days: t.ticket_types?.validity_days || null,
         }));
 
         setAllPackages(mapped);
@@ -318,11 +322,41 @@ export default function CustomerPage() {
         if (!selectedPkg) return;
         if (!confirm('Bạn có chắc chắn muốn lưu các thay đổi này?')) return;
 
+        const updatedRemaining = editSessions === '' ? null : Number(editSessions);
+        const updatedTotal = editTotalSessions === '' ? null : Number(editTotalSessions);
+
+        let finalStatus = selectedPkg.status;
+        let finalValidFrom = editValidFrom || null;
+        let finalValidUntil = editValidUntil || null;
+
+        // Tự động kích hoạt nếu gói chưa dùng và có sửa giảm lượt
+        if (
+            selectedPkg.status === 'UNUSED' &&
+            updatedRemaining !== null &&
+            selectedPkg.total_sessions !== null &&
+            updatedRemaining < selectedPkg.total_sessions
+        ) {
+            finalStatus = 'IN_USE';
+            // Nếu admin chưa điền ngày bắt đầu thì lấy hôm nay
+            if (!finalValidFrom) {
+                const now = new Date();
+                finalValidFrom = now.toLocaleDateString('en-CA');
+
+                // Tính toán ngày kết thúc = hôm nay + validity_days (nếu có và admin chưa nhập)
+                if (!finalValidUntil && selectedPkg.validity_days) {
+                    const exp = new Date(now);
+                    exp.setDate(exp.getDate() + selectedPkg.validity_days);
+                    finalValidUntil = exp.toLocaleDateString('en-CA');
+                }
+            }
+        }
+
         const updateData: any = {
-            remaining_sessions: editSessions === '' ? null : Number(editSessions),
-            total_sessions: editTotalSessions === '' ? null : Number(editTotalSessions),
-            valid_from: editValidFrom || null,
-            valid_until: editValidUntil || null,
+            status: finalStatus,
+            remaining_sessions: updatedRemaining,
+            total_sessions: updatedTotal,
+            valid_from: finalValidFrom,
+            valid_until: finalValidUntil,
             updated_at: new Date().toISOString()
         };
 
@@ -355,6 +389,39 @@ export default function CustomerPage() {
             alert('✅ Đã xóa gói thành công!');
             setSelectedPkg(null);
             fetchAllPackages();
+        }
+    }
+
+    // --- Edit Customer ---
+    function openEditCustomer(c: CustomerSummary) {
+        setEditingCustomer(c);
+        setEditCustData({
+            name: c.name || '',
+            phone: c.phone || '',
+            email: c.email || '',
+            birth_date: c.birth_date || '',
+            gender: c.gender || 'OTHER'
+        });
+    }
+
+    async function handleSaveCustomer() {
+        if (!editingCustomer) return;
+        if (!editCustData.name.trim()) { alert('Vui lòng nhập họ tên!'); return; }
+
+        const { error } = await supabase.from('customers').update({
+            full_name: editCustData.name.trim(),
+            phone: editCustData.phone.trim() || null,
+            email: editCustData.email.trim() || null,
+            birth_date: editCustData.birth_date || null,
+            gender: editCustData.gender
+        }).eq('id', editingCustomer.id);
+
+        if (error) {
+            alert('Lỗi cập nhật: ' + error.message);
+        } else {
+            alert('✅ Cập nhật khách hàng thành công!');
+            setEditingCustomer(null);
+            fetchAllData();
         }
     }
 
@@ -581,10 +648,11 @@ export default function CustomerPage() {
                                         {isExpanded && (
                                             <div style={{ borderTop: '1px solid var(--border-color)', padding: '16px 18px', background: 'var(--bg-hover)', animation: 'fadeIn 0.2s ease' }}>
                                                 {/* Customer Info */}
-                                                <div style={{ display: 'flex', gap: '24px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                                                <div style={{ display: 'flex', gap: '24px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
                                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Họ tên:</span> <strong>{c.name}</strong></div>
                                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>SĐT:</span> <strong>{c.phone}</strong></div>
                                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Gói đang dùng:</span> <strong>{c.activePackages}</strong></div>
+                                                    <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: '12px', marginLeft: 'auto' }} onClick={(e) => { e.stopPropagation(); openEditCustomer(c); }}>✏️ Sửa thông tin</button>
                                                 </div>
 
                                                 {/* Package list */}
@@ -830,6 +898,52 @@ export default function CustomerPage() {
                         ) : (
                             <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={() => setSelectedPkg(null)}>Đóng</button>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ===== EDIT CUSTOMER MODAL ===== */}
+            {editingCustomer && (
+                <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setEditingCustomer(null)}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '440px', width: '90%', boxShadow: 'var(--shadow-lg)' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h2 style={{ fontSize: '18px' }}>✏️ Sửa Thông Tin Khách Hàng</h2>
+                            <button onClick={() => setEditingCustomer(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div>
+                                <label style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Họ tên *</label>
+                                <input type="text" value={editCustData.name} onChange={e => setEditCustData({ ...editCustData, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-hover)' }} />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Số điện thoại</label>
+                                <input type="text" value={editCustData.phone} onChange={e => setEditCustData({ ...editCustData, phone: e.target.value })} style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-hover)' }} />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Email</label>
+                                <input type="email" value={editCustData.email} onChange={e => setEditCustData({ ...editCustData, email: e.target.value })} style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-hover)' }} />
+                            </div>
+                            <div style={{ display: 'flex', gap: '12px' }}>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Ngày sinh</label>
+                                    <input type="date" value={editCustData.birth_date} onChange={e => setEditCustData({ ...editCustData, birth_date: e.target.value })} style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-hover)' }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Giới tính</label>
+                                    <select value={editCustData.gender} onChange={e => setEditCustData({ ...editCustData, gender: e.target.value })} style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-hover)' }}>
+                                        <option value="MALE">Nam</option>
+                                        <option value="FEMALE">Nữ</option>
+                                        <option value="OTHER">Khác</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
+                            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveCustomer}>Lưu thay đổi</button>
+                            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditingCustomer(null)}>Hủy</button>
+                        </div>
                     </div>
                 </div>
             )}
