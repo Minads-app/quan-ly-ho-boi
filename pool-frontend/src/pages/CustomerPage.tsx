@@ -83,6 +83,8 @@ export default function CustomerPage() {
     const [editTotalSessions, setEditTotalSessions] = useState<number | ''>('');
     const [editValidFrom, setEditValidFrom] = useState('');
     const [editValidUntil, setEditValidUntil] = useState('');
+    const [editPricePaid, setEditPricePaid] = useState<number | ''>('');
+    const [editSoldAt, setEditSoldAt] = useState('');
 
     // Import legacy customers
     const [showImportModal, setShowImportModal] = useState(false);
@@ -360,6 +362,8 @@ export default function CustomerPage() {
             total_sessions: updatedTotal,
             valid_from: finalValidFrom,
             valid_until: finalValidUntil,
+            price_paid: editPricePaid === '' ? selectedPkg.price_paid : Number(editPricePaid),
+            sold_at: editSoldAt || selectedPkg.sold_at,
             updated_at: new Date().toISOString()
         };
 
@@ -909,8 +913,8 @@ export default function CustomerPage() {
                                 isEditingPkg ? { label: 'Tổng số lượt', value: <input type="number" min="0" value={editTotalSessions} onChange={e => setEditTotalSessions(e.target.value === '' ? '' : Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', textAlign: 'right' }} /> } : { label: 'Tổng số lượt', value: selectedPkg.total_sessions !== null ? selectedPkg.total_sessions : '∞' },
                                 isEditingPkg ? { label: 'Ngày bắt đầu', value: <input type="date" value={editValidFrom} onChange={e => setEditValidFrom(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }} /> } : { label: 'Ngày bắt đầu', value: fmtDate(selectedPkg.valid_from) },
                                 isEditingPkg ? { label: 'Ngày hết hạn', value: <input type="date" value={editValidUntil} onChange={e => setEditValidUntil(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }} /> } : { label: 'Ngày hết hạn', value: fmtDate(selectedPkg.valid_until) },
-                                { label: 'Giá bán', value: fmt(selectedPkg.price_paid) },
-                                { label: 'Ngày mua', value: fmtDate(selectedPkg.sold_at) },
+                                isEditingPkg ? { label: 'Giá bán', value: <input type="number" min="0" step="1000" value={editPricePaid} onChange={e => setEditPricePaid(e.target.value === '' ? '' : Number(e.target.value))} style={{ width: '120px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', textAlign: 'right' }} /> } : { label: 'Giá bán', value: fmt(selectedPkg.price_paid) },
+                                isEditingPkg ? { label: 'Ngày mua', value: <input type="date" value={editSoldAt} onChange={e => setEditSoldAt(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }} /> } : { label: 'Ngày mua', value: fmtDate(selectedPkg.sold_at) },
                                 { label: 'Người bán', value: selectedPkg.sold_by_name || '—' },
                             ].map(row => (
                                 <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border-color)', fontSize: '14px' }}>
@@ -967,6 +971,8 @@ export default function CustomerPage() {
                                         setEditTotalSessions(selectedPkg.total_sessions !== null ? selectedPkg.total_sessions : '');
                                         setEditValidFrom(selectedPkg.valid_from || '');
                                         setEditValidUntil(selectedPkg.valid_until || '');
+                                        setEditPricePaid(selectedPkg.price_paid);
+                                        setEditSoldAt(selectedPkg.sold_at ? selectedPkg.sold_at.split('T')[0] : '');
                                         setIsEditingPkg(true);
                                     }}>
                                     ✏️ Sửa gói
