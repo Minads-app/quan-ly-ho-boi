@@ -88,7 +88,7 @@ export default function CustomerPage() {
 
     // Import legacy customers
     const [showImportModal, setShowImportModal] = useState(false);
-    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; sessions: number }[]>([]);
+    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; pkg_name: string; total_sessions: number; remaining: number }[]>([]);
     const [importing, setImporting] = useState(false);
     const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
     const [importWarnings, setImportWarnings] = useState<{ row: number; field: string; message: string }[]>([]);
@@ -460,30 +460,32 @@ export default function CustomerPage() {
     // --- DOWNLOAD IMPORT TEMPLATE ---
     function downloadImportTemplate() {
         const templateData = [
-            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Số buổi': 10 },
-            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Số buổi': 15 },
+            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Tên gói/vé': 'VÉ 10 BUỔI', 'Tổng buổi ĐK': 13, 'Buổi còn lại': 10 },
+            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Tên gói/vé': 'HỌC BƠI 1:1', 'Tổng buổi ĐK': 15, 'Buổi còn lại': 12 },
         ];
         const ws = XLSX.utils.json_to_sheet(templateData);
-        // Set column widths
         ws['!cols'] = [
             { wch: 25 }, // Tên KH
             { wch: 15 }, // SĐT
             { wch: 22 }, // Mã thẻ
             { wch: 12 }, // Loại gói
-            { wch: 10 }, // Số buổi
+            { wch: 20 }, // Tên gói/vé
+            { wch: 14 }, // Tổng buổi ĐK
+            { wch: 14 }, // Buổi còn lại
         ];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Template');
-        // Add instruction sheet
         const instrData = [
             { 'Cột': 'Tên KH', 'Bắt buộc': '✅ Có', 'Mô tả': 'Họ tên đầy đủ khách hàng' },
             { 'Cột': 'SĐT', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số điện thoại (10 số, bắt đầu bằng 0)' },
             { 'Cột': 'Mã thẻ', 'Bắt buộc': '✅ Có', 'Mô tả': 'Mã thẻ duy nhất trên hệ thống (IN HOA tự động)' },
-            { 'Cột': 'Loại gói', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'MULTI = Vé nhiều buổi, LESSON = Học bơi. Mặc định: MULTI' },
-            { 'Cột': 'Số buổi', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số buổi còn lại của gói. Để trống hoặc 0 = không giới hạn' },
+            { 'Cột': 'Loại gói', 'Bắt buộc': '✅ Có', 'Mô tả': 'MULTI = Vé nhiều buổi, LESSON = Học bơi' },
+            { 'Cột': 'Tên gói/vé', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Tên loại gói/vé đã có trong hệ thống (để khớp tự động). Để trống = lấy gói đầu tiên cùng loại' },
+            { 'Cột': 'Tổng buổi ĐK', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Tổng số buổi đăng ký ban đầu. Để trống = không giới hạn' },
+            { 'Cột': 'Buổi còn lại', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số buổi còn lại hiện tại. Để trống = bằng tổng buổi ĐK' },
         ];
         const ws2 = XLSX.utils.json_to_sheet(instrData);
-        ws2['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 55 }];
+        ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, ws2, 'Hướng dẫn');
         XLSX.writeFile(wb, 'template_import_khach_hang.xlsx');
     }
@@ -520,18 +522,18 @@ export default function CustomerPage() {
                 const phone = String(r['SĐT'] || r['sdt'] || r['Số điện thoại'] || r['phone'] || r['SDT'] || '').trim();
                 const card = String(r['Mã thẻ'] || r['ma_the'] || r['card_code'] || r['Ma the'] || '').trim().toUpperCase();
                 const pkgType = String(r['Loại gói'] || r['loai_goi'] || r['package_type'] || r['Loai goi'] || 'MULTI').trim().toUpperCase();
-                const sessions = Number(r['Số buổi'] || r['so_buoi'] || r['sessions'] || r['So buoi'] || 0);
+                const pkgName = String(r['Tên gói/vé'] || r['Ten goi'] || r['pkg_name'] || r['Tên gói'] || '').trim();
+                const totalSessions = Number(r['Tổng buổi ĐK'] || r['Tong buoi DK'] || r['total_sessions'] || r['Số buổi'] || r['so_buoi'] || r['sessions'] || 0);
+                const remaining = Number(r['Buổi còn lại'] || r['Buoi con lai'] || r['remaining'] || 0) || totalSessions;
 
                 // Validate
                 if (!name) warnings.push({ row: rowNum, field: 'Tên KH', message: 'Thiếu tên khách hàng → dòng sẽ bị bỏ qua' });
                 if (!card) warnings.push({ row: rowNum, field: 'Mã thẻ', message: 'Thiếu mã thẻ → dòng sẽ bị bỏ qua' });
                 if (name && card && !phone) warnings.push({ row: rowNum, field: 'SĐT', message: 'Không có SĐT — nên bổ sung' });
-                if (name && card && sessions <= 0) warnings.push({ row: rowNum, field: 'Số buổi', message: 'Số buổi = 0 → sẽ không giới hạn lượt' });
-                if (name && card && !['MULTI', 'LESSON'].includes(pkgType.includes('LESSON') ? 'LESSON' : 'MULTI') === false && pkgType !== 'MULTI' && pkgType !== 'LESSON') {
-                    warnings.push({ row: rowNum, field: 'Loại gói', message: `"${pkgType}" không hợp lệ → mặc định MULTI` });
-                }
+                if (name && card && totalSessions <= 0) warnings.push({ row: rowNum, field: 'Tổng buổi', message: 'Tổng buổi = 0 → sẽ không giới hạn lượt' });
+                if (name && card && remaining > totalSessions && totalSessions > 0) warnings.push({ row: rowNum, field: 'Buổi còn lại', message: `Buổi còn lại (${remaining}) > Tổng buổi (${totalSessions})` });
 
-                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', sessions };
+                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', pkg_name: pkgName, total_sessions: totalSessions, remaining };
             }).filter(r => r.name && r.card_code);
 
             // Check for duplicate card codes in file
@@ -582,9 +584,12 @@ export default function CustomerPage() {
                     // Customer exists, still create ticket for them
                 }
 
-                // 2. Find matching ticket type
-                const matchType = ticketTypesForImport.find(t => t.category === row.package_type);
-                if (!matchType) { errors.push(`${row.card_code}: Không tìm thấy loại gói ${row.package_type}`); continue; }
+                // 2. Find matching ticket type (by name if provided, else by category)
+                let matchType = row.pkg_name
+                    ? ticketTypesForImport.find(t => t.name.toLowerCase() === row.pkg_name.toLowerCase() && t.category === row.package_type)
+                    : null;
+                if (!matchType) matchType = ticketTypesForImport.find(t => t.category === row.package_type);
+                if (!matchType) { errors.push(`${row.card_code}: Không tìm thấy loại gói ${row.pkg_name || row.package_type}`); continue; }
 
                 // 3. Create ticket with price_paid=0, source='IMPORT'
                 const { error: tickErr } = await supabase.from('tickets').insert({
@@ -594,8 +599,8 @@ export default function CustomerPage() {
                     customer_phone: row.phone || null,
                     card_code: row.card_code,
                     customer_id: customerId,
-                    remaining_sessions: row.sessions > 0 ? row.sessions : null,
-                    total_sessions: row.sessions > 0 ? row.sessions : null,
+                    remaining_sessions: row.remaining > 0 ? row.remaining : null,
+                    total_sessions: row.total_sessions > 0 ? row.total_sessions : null,
                     price_paid: 0,
                     source: 'IMPORT',
                     sold_by: profile?.id,
@@ -1072,8 +1077,10 @@ export default function CustomerPage() {
                                                 <th style={thS}>Tên KH</th>
                                                 <th style={thS}>SĐT</th>
                                                 <th style={thS}>Mã Thẻ</th>
-                                                <th style={thS}>Loại Gói</th>
-                                                <th style={thS}>Số Buổi</th>
+                                                <th style={thS}>Loại</th>
+                                                <th style={thS}>Tên gói</th>
+                                                <th style={thS}>Tổng</th>
+                                                <th style={thS}>Còn lại</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1087,11 +1094,13 @@ export default function CustomerPage() {
                                                         <td style={{ ...tdS, color: !r.phone ? '#dc2626' : '' }}>{r.phone || '⚠️ Trống'}</td>
                                                         <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold' }}>{r.card_code}</td>
                                                         <td style={tdS}>
-                                                            <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`}>
-                                                                {r.package_type === 'LESSON' ? 'Học bơi' : 'Bơi nhiều buổi'}
+                                                            <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`} style={{ fontSize: '10px' }}>
+                                                                {r.package_type === 'LESSON' ? 'Học bơi' : 'MULTI'}
                                                             </span>
                                                         </td>
-                                                        <td style={tdS}>{r.sessions || '∞'}</td>
+                                                        <td style={tdS}>{r.pkg_name || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>auto</span>}</td>
+                                                        <td style={tdS}>{r.total_sessions || '∞'}</td>
+                                                        <td style={tdS}>{r.remaining || '∞'}</td>
                                                     </tr>
                                                 );
                                             })}
