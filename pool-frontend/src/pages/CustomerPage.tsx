@@ -330,12 +330,13 @@ export default function CustomerPage() {
         let finalValidFrom = editValidFrom || null;
         let finalValidUntil = editValidUntil || null;
 
-        // Tự động kích hoạt nếu gói chưa dùng và có sửa giảm lượt
+        // Tự động kích hoạt nếu gói chưa dùng và có sửa giảm lượt HOẶC admin đã khai báo ngày bắt đầu/kết thúc
+        const isReducingSessions = updatedRemaining !== null && updatedTotal !== null && updatedRemaining < updatedTotal;
+        const hasStartOrEndDate = finalValidFrom !== null || finalValidUntil !== null;
+
         if (
             selectedPkg.status === 'UNUSED' &&
-            updatedRemaining !== null &&
-            selectedPkg.total_sessions !== null &&
-            updatedRemaining < selectedPkg.total_sessions
+            (isReducingSessions || hasStartOrEndDate)
         ) {
             finalStatus = 'IN_USE';
             // Nếu admin chưa điền ngày bắt đầu thì lấy hôm nay
