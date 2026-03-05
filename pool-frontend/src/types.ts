@@ -65,6 +65,7 @@ export interface Ticket {
     price_paid: number;
     last_scan_direction: 'IN' | 'OUT' | null;
     last_scan_at: string | null;
+    source?: 'POS' | 'IMPORT';
     created_at: string;
     updated_at: string;
 }
@@ -78,11 +79,12 @@ export interface SystemSetting {
 export interface CardBank {
     id: string;
     card_code: string;
-    prefix: string;
-    month_year: string;
-    sequence_number: number;
-    random_string: string;
+    prefix: string | null;
+    month_year: string | null;
+    sequence_number: number | null;
+    random_string: string | null;
     status: CardStatus;
+    source: 'SYSTEM' | 'MANUAL';
     created_at: string;
     created_by: string;
 }

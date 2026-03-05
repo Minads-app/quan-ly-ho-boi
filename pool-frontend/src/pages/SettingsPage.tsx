@@ -94,6 +94,7 @@ export default function SettingsPage() {
     const [cards, setCards] = useState<CardBank[]>([]);
     const [cbPrefix, setCbPrefix] = useState('HB');
     const [cbQuantity, setCbQuantity] = useState<number | ''>(50);
+    const [cardSubTab, setCardSubTab] = useState<'system' | 'manual'>('system');
 
     // Ticket Types state
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
@@ -268,7 +269,7 @@ export default function SettingsPage() {
         let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // UTF-8 BOM
         csvContent += "STT,Mã Thẻ\n";
 
-        const sorted = [...unusedCards].sort((a, b) => a.sequence_number - b.sequence_number);
+        const sorted = [...unusedCards].sort((a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0));
 
         sorted.forEach((c) => {
             csvContent += `${c.sequence_number},${c.card_code}\n`;
@@ -1557,53 +1558,117 @@ export default function SettingsPage() {
             {/* ============ CARDS BANK TAB ============ */}
             {activeTab === 'cards' && (
                 <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
-                    <div className="form-row">
-                        <div className="dashboard-content-card" style={{ flex: 1 }}>
-                            <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Tạo Lô Thẻ Mới</h2>
-                            <form onSubmit={handleGenerateCards} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                <div className="form-group">
-                                    <label>Tiền tố (Gợi ý: HB = Hồ bơi)</label>
-                                    <input type="text" className="form-control" required value={cbPrefix} onChange={e => setCbPrefix(e.target.value)} maxLength={5} placeholder="VD: HB" />
-                                </div>
-                                <div className="form-group">
-                                    <label>Số lượng thẻ muốn tạo</label>
-                                    <input type="number" className="form-control" required min="1" max="1000" value={cbQuantity} onChange={e => setCbQuantity(e.target.value ? Number(e.target.value) : '')} placeholder="VD: 50" />
-                                </div>
-                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                    Cấu trúc thẻ: <b>[Tiền tố] + [ThángNăm] + [Số thứ tự 5 số] + [6 Ký tự ngẫu nhiên]</b><br />
-                                    Ví dụ: <b>{cbPrefix || 'HB'}{String(new Date().getMonth() + 1).padStart(2, '0')}{String(new Date().getFullYear()).slice(2)}00001A1B2C</b>
-                                </div>
-                                <button type="submit" className="btn btn-primary" disabled={saving}>
-                                    {saving ? 'Đang tạo...' : 'Tạo Lô Thẻ'}
-                                </button>
-                            </form>
-                        </div>
+                    {/* Sub-tabs */}
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                        <button
+                            className={`btn ${cardSubTab === 'system' ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setCardSubTab('system')}
+                            style={{ padding: '8px 20px' }}
+                        >
+                            🏭 Thẻ Hệ Thống ({cards.filter(c => !c.source || c.source === 'SYSTEM').length})
+                        </button>
+                        <button
+                            className={`btn ${cardSubTab === 'manual' ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setCardSubTab('manual')}
+                            style={{ padding: '8px 20px' }}
+                        >
+                            ✏️ Thẻ Thủ Công ({cards.filter(c => c.source === 'MANUAL').length})
+                        </button>
+                    </div>
 
-                        <div className="dashboard-content-card" style={{ flex: 2 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                <div>
-                                    <h2 style={{ fontSize: '18px', margin: 0 }}>Kho Thẻ</h2>
-                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                        Bạn có {cards.filter(c => c.status === 'UNUSED').length} thẻ chưa sử dụng.
+                    {/* SUB-TAB: Thẻ Hệ Thống */}
+                    {cardSubTab === 'system' && (
+                        <div className="form-row">
+                            <div className="dashboard-content-card" style={{ flex: 1 }}>
+                                <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Tạo Lô Thẻ Mới</h2>
+                                <form onSubmit={handleGenerateCards} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                    <div className="form-group">
+                                        <label>Tiền tố (Gợi ý: HB = Hồ bơi)</label>
+                                        <input type="text" className="form-control" required value={cbPrefix} onChange={e => setCbPrefix(e.target.value)} maxLength={5} placeholder="VD: HB" />
                                     </div>
-                                </div>
-                                <button className="btn btn-outline" onClick={exportCardsToCSV} disabled={cards.filter(c => c.status === 'UNUSED').length === 0}>
-                                    📥 Xuất CSV (Các thẻ UNUSED)
-                                </button>
+                                    <div className="form-group">
+                                        <label>Số lượng thẻ muốn tạo</label>
+                                        <input type="number" className="form-control" required min="1" max="1000" value={cbQuantity} onChange={e => setCbQuantity(e.target.value ? Number(e.target.value) : '')} placeholder="VD: 50" />
+                                    </div>
+                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                        Cấu trúc thẻ: <b>[Tiền tố] + [ThángNăm] + [Số thứ tự 5 số] + [6 Ký tự ngẫu nhiên]</b><br />
+                                        Ví dụ: <b>{cbPrefix || 'HB'}{String(new Date().getMonth() + 1).padStart(2, '0')}{String(new Date().getFullYear()).slice(2)}00001A1B2C</b>
+                                    </div>
+                                    <button type="submit" className="btn btn-primary" disabled={saving}>
+                                        {saving ? 'Đang tạo...' : 'Tạo Lô Thẻ'}
+                                    </button>
+                                </form>
                             </div>
 
-                            <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                            <div className="dashboard-content-card" style={{ flex: 2 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                    <div>
+                                        <h2 style={{ fontSize: '18px', margin: 0 }}>Kho Thẻ Hệ Thống</h2>
+                                        <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                            Bạn có {cards.filter(c => (!c.source || c.source === 'SYSTEM') && c.status === 'UNUSED').length} thẻ chưa sử dụng.
+                                        </div>
+                                    </div>
+                                    <button className="btn btn-outline" onClick={exportCardsToCSV} disabled={cards.filter(c => (!c.source || c.source === 'SYSTEM') && c.status === 'UNUSED').length === 0}>
+                                        📥 Xuất CSV (Các thẻ UNUSED)
+                                    </button>
+                                </div>
+
+                                <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                    <table className="data-table">
+                                        <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
+                                            <tr>
+                                                <th>Mã Thẻ</th>
+                                                <th>Trạng Thái</th>
+                                                <th>Người Tạo</th>
+                                                <th>Ngày Tạo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {cards.filter(c => !c.source || c.source === 'SYSTEM').slice(0, 100).map(c => (
+                                                <tr key={c.id}>
+                                                    <td style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{c.card_code}</td>
+                                                    <td>
+                                                        <span className={`badge ${c.status === 'UNUSED' ? 'badge-success' : c.status === 'USED' ? 'badge-primary' : 'badge-error'}`}>
+                                                            {c.status}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ fontSize: '12px' }}>{c.created_by?.substring(0, 8)}...</td>
+                                                    <td style={{ fontSize: '12px' }}>{new Date(c.created_at).toLocaleString('vi-VN')}</td>
+                                                </tr>
+                                            ))}
+                                            {cards.filter(c => !c.source || c.source === 'SYSTEM').length === 0 && (
+                                                <tr><td colSpan={4} style={{ textAlign: 'center' }}>Chưa có thẻ hệ thống nào.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* SUB-TAB: Thẻ Thủ Công */}
+                    {cardSubTab === 'manual' && (
+                        <div className="dashboard-content-card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div>
+                                    <h2 style={{ fontSize: '18px', margin: 0 }}>Kho Thẻ Thủ Công</h2>
+                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                        Các mã thẻ được import từ hệ thống cũ hoặc nhập thủ công.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
                                 <table className="data-table">
                                     <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
                                         <tr>
                                             <th>Mã Thẻ</th>
                                             <th>Trạng Thái</th>
-                                            <th>Người Tạo</th>
                                             <th>Ngày Tạo</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {cards.slice(0, 100).map(c => (
+                                        {cards.filter(c => c.source === 'MANUAL').map(c => (
                                             <tr key={c.id}>
                                                 <td style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{c.card_code}</td>
                                                 <td>
@@ -1611,19 +1676,17 @@ export default function SettingsPage() {
                                                         {c.status}
                                                     </span>
                                                 </td>
-                                                <td style={{ fontSize: '12px' }}>{c.created_by?.substring(0, 8)}...</td>
                                                 <td style={{ fontSize: '12px' }}>{new Date(c.created_at).toLocaleString('vi-VN')}</td>
                                             </tr>
                                         ))}
-                                        {cards.length === 0 && (
-                                            <tr><td colSpan={4} style={{ textAlign: 'center' }}>Chưa có thẻ nào trong ngân hàng.</td></tr>
+                                        {cards.filter(c => c.source === 'MANUAL').length === 0 && (
+                                            <tr><td colSpan={3} style={{ textAlign: 'center' }}>Chưa có thẻ thủ công nào. Hãy import khách hàng cũ từ trang Khách hàng.</td></tr>
                                         )}
                                     </tbody>
                                 </table>
-                                {cards.length > 100 && <div style={{ textAlign: 'center', padding: '8px', fontSize: '12px', color: 'gray' }}>Đang hiển thị 100 thẻ gần nhất. Vui lòng xuất CSV để xem toàn bộ.</div>}
                             </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             )}
 

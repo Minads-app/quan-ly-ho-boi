@@ -13,6 +13,7 @@ import StaffPage from './pages/StaffPage';
 import CustomerPage from './pages/CustomerPage';
 import InventoryPage from './pages/InventoryPage';
 import CashPage from './pages/CashPage';
+import OrdersPage from './pages/OrdersPage';
 import './index.css';
 
 function AppRoutes() {
@@ -166,6 +167,13 @@ function AppRoutes() {
             </NavLink>
           )}
 
+          {profile.role === 'ADMIN' && (
+            <NavLink to="/orders" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">🧾</span>
+              <span>Hóa Đơn</span>
+            </NavLink>
+          )}
+
           {(profile.can_create_expense || profile.role === 'ADMIN') && (
             <NavLink to="/cash" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
               <span className="nav-icon">💵</span>
@@ -261,6 +269,9 @@ function AppRoutes() {
           } />
           <Route path="/cash" element={
             profile.can_create_expense || profile.role === 'ADMIN' ? <CashPage /> : <Navigate to="/pos" />
+          } />
+          <Route path="/orders" element={
+            profile.role === 'ADMIN' ? <OrdersPage /> : <Navigate to="/pos" />
           } />
 
           {/* Mặc định Redirect */}

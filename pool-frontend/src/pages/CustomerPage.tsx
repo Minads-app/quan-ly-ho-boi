@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/immutability, react-hooks/exhaustive-deps */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Customer } from '../types';
+import * as XLSX from 'xlsx';
 
 type SubTab = 'CUSTOMERS' | 'PACKAGES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
@@ -80,9 +81,20 @@ export default function CustomerPage() {
     const [editValidFrom, setEditValidFrom] = useState('');
     const [editValidUntil, setEditValidUntil] = useState('');
 
+    // Import legacy customers
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; sessions: number }[]>([]);
+    const [importing, setImporting] = useState(false);
+    const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
+    const [ticketTypesForImport, setTicketTypesForImport] = useState<{ id: string; name: string; category: string }[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
 
     useEffect(() => {
         fetchAllData();
+        // Fetch ticket types for import mapping
+        supabase.from('ticket_types').select('id, name, category').in('category', ['MULTI', 'LESSON']).eq('is_active', true)
+            .then(({ data }) => { if (data) setTicketTypesForImport(data); });
     }, []);
 
     async function fetchAllData() {
@@ -359,6 +371,108 @@ export default function CustomerPage() {
         }
     }
 
+    // --- IMPORT EXCEL ---
+    function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const data = evt.target?.result;
+            const wb = XLSX.read(data, { type: 'binary' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+            const parsed = rows.map((r: any) => {
+                // Try common column name variations
+                const name = r['Tên KH'] || r['ten_kh'] || r['Tên'] || r['name'] || r['Ho ten'] || '';
+                const phone = String(r['SĐT'] || r['sdt'] || r['Số điện thoại'] || r['phone'] || r['SDT'] || '').trim();
+                const card = String(r['Mã thẻ'] || r['ma_the'] || r['card_code'] || r['Ma the'] || '').trim().toUpperCase();
+                const pkgType = String(r['Loại gói'] || r['loai_goi'] || r['package_type'] || r['Loai goi'] || 'MULTI').trim().toUpperCase();
+                const sessions = Number(r['Số buổi'] || r['so_buoi'] || r['sessions'] || r['So buoi'] || 0);
+                return { name: String(name).trim(), phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', sessions };
+            }).filter(r => r.name && r.card_code);
+
+            setImportData(parsed);
+            setImportResult(null);
+            setShowImportModal(true);
+        };
+        reader.readAsBinaryString(file);
+        e.target.value = ''; // reset file input
+    }
+
+    async function handleConfirmImport() {
+        if (importData.length === 0) return;
+        setImporting(true);
+        let success = 0;
+        let skipped = 0;
+        const errors: string[] = [];
+
+        for (const row of importData) {
+            try {
+                // 1. Check if customer with this card_code already exists
+                const { data: existingCust } = await supabase.from('customers').select('id').eq('card_code', row.card_code).single();
+                let customerId = existingCust?.id;
+
+                if (!customerId) {
+                    // Create new customer
+                    const { data: newCust, error: custErr } = await supabase.from('customers').insert({
+                        card_code: row.card_code,
+                        full_name: row.name,
+                        phone: row.phone || '',
+                    }).select('id').single();
+                    if (custErr) { errors.push(`${row.card_code}: Lỗi tạo KH - ${custErr.message}`); skipped++; continue; }
+                    customerId = newCust.id;
+                } else {
+                    skipped++;
+                    // Customer exists, still create ticket for them
+                }
+
+                // 2. Find matching ticket type
+                const matchType = ticketTypesForImport.find(t => t.category === row.package_type);
+                if (!matchType) { errors.push(`${row.card_code}: Không tìm thấy loại gói ${row.package_type}`); continue; }
+
+                // 3. Create ticket with price_paid=0, source='IMPORT'
+                const { error: tickErr } = await supabase.from('tickets').insert({
+                    ticket_type_id: matchType.id,
+                    status: 'UNUSED',
+                    customer_name: row.name,
+                    customer_phone: row.phone || null,
+                    card_code: row.card_code,
+                    customer_id: customerId,
+                    remaining_sessions: row.sessions > 0 ? row.sessions : null,
+                    total_sessions: row.sessions > 0 ? row.sessions : null,
+                    price_paid: 0,
+                    source: 'IMPORT',
+                    sold_by: profile?.id,
+                });
+                if (tickErr) { errors.push(`${row.card_code}: Lỗi tạo vé - ${tickErr.message}`); continue; }
+
+                // 4. Add card to card_bank (source='MANUAL')
+                const { data: existingCard } = await supabase.from('card_bank').select('id').eq('card_code', row.card_code).single();
+                if (!existingCard) {
+                    await supabase.from('card_bank').insert({
+                        card_code: row.card_code,
+                        prefix: null,
+                        month_year: null,
+                        sequence_number: null,
+                        random_string: null,
+                        source: 'MANUAL',
+                        status: 'USED',
+                        created_by: profile?.id,
+                    });
+                }
+
+                success++;
+            } catch (err: any) {
+                errors.push(`${row.card_code}: ${err.message}`);
+            }
+        }
+
+        setImportResult({ success, skipped, errors });
+        setImporting(false);
+        if (success > 0) fetchAllData(); // Refresh
+    }
+
     if (loading) return <div className="page-loading">Đang tải...</div>;
 
     const customers = buildCustomerList();
@@ -384,14 +498,24 @@ export default function CustomerPage() {
                     <h1 style={{ fontSize: '24px', fontWeight: 700 }}>👥 Khách Hàng</h1>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Quản lý khách hàng và các gói thẻ bơi</p>
                 </div>
-                <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '10px' }}>
-                    {([['CUSTOMERS', '👤 Khách hàng'], ['PACKAGES', '📦 Gói thẻ']] as [SubTab, string][]).map(([key, label]) => (
-                        <button key={key} className={`btn ${subTab === key ? 'btn-primary' : 'btn-ghost'}`}
-                            style={{ padding: '8px 16px', fontSize: '13px', margin: 0 }}
-                            onClick={() => { setSubTab(key); setSearchTerm(''); setExpandedId(null); }}>
-                            {label}
-                        </button>
-                    ))}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    {isAdmin && (
+                        <>
+                            <input type="file" ref={fileInputRef} accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileSelect} />
+                            <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                                📥 Import Excel
+                            </button>
+                        </>
+                    )}
+                    <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '10px' }}>
+                        {([['CUSTOMERS', '👤 Khách hàng'], ['PACKAGES', '📦 Gói thẻ']] as [SubTab, string][]).map(([key, label]) => (
+                            <button key={key} className={`btn ${subTab === key ? 'btn-primary' : 'btn-ghost'}`}
+                                style={{ padding: '8px 16px', fontSize: '13px', margin: 0 }}
+                                onClick={() => { setSubTab(key); setSearchTerm(''); setExpandedId(null); }}>
+                                {label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -705,6 +829,84 @@ export default function CustomerPage() {
                             </div>
                         ) : (
                             <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={() => setSelectedPkg(null)}>Đóng</button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* ===== IMPORT MODAL ===== */}
+            {showImportModal && (
+                <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', maxWidth: '800px', width: '95%', maxHeight: '80vh', overflow: 'auto' }}>
+                        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>📥 Import Khách Hàng Cũ</h2>
+
+                        {!importResult ? (
+                            <>
+                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                                    Tìm thấy <b>{importData.length}</b> khách hàng hợp lệ từ file Excel. Xem lại trước khi import:
+                                </div>
+
+                                <div style={{ maxHeight: '400px', overflowY: 'auto', marginBottom: '16px' }}>
+                                    <table className="data-table" style={{ width: '100%' }}>
+                                        <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
+                                            <tr>
+                                                <th style={{ ...thS, width: '30px' }}>#</th>
+                                                <th style={thS}>Tên KH</th>
+                                                <th style={thS}>SĐT</th>
+                                                <th style={thS}>Mã Thẻ</th>
+                                                <th style={thS}>Loại Gói</th>
+                                                <th style={thS}>Số Buổi</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {importData.map((r, i) => (
+                                                <tr key={i}>
+                                                    <td style={tdS}>{i + 1}</td>
+                                                    <td style={tdS}>{r.name}</td>
+                                                    <td style={tdS}>{r.phone}</td>
+                                                    <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold' }}>{r.card_code}</td>
+                                                    <td style={tdS}>
+                                                        <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`}>
+                                                            {r.package_type === 'LESSON' ? 'Học bơi' : 'Bơi nhiều buổi'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={tdS}>{r.sessions || '—'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirmImport} disabled={importing || importData.length === 0}>
+                                        {importing ? '⏳ Đang import...' : `✅ Xác nhận Import ${importData.length} khách`}
+                                    </button>
+                                    <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowImportModal(false); setImportData([]); }} disabled={importing}>
+                                        Hủy
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div style={{ padding: '16px', background: '#f0fdf4', borderRadius: '8px', marginBottom: '16px' }}>
+                                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#166534', marginBottom: '8px' }}>
+                                        ✅ Import hoàn tất!
+                                    </div>
+                                    <div>Thành công: <b>{importResult.success}</b> khách</div>
+                                    {importResult.skipped > 0 && <div>KH đã tồn tại (vẫn tạo gói): <b>{importResult.skipped}</b></div>}
+                                    {importResult.errors.length > 0 && (
+                                        <div style={{ marginTop: '12px' }}>
+                                            <div style={{ color: '#991b1b', fontWeight: 600 }}>Lỗi ({importResult.errors.length}):</div>
+                                            <ul style={{ fontSize: '12px', color: '#991b1b', maxHeight: '150px', overflowY: 'auto', paddingLeft: '20px' }}>
+                                                {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => { setShowImportModal(false); setImportData([]); setImportResult(null); }}>
+                                    Đóng
+                                </button>
+                            </>
                         )}
                     </div>
                 </div>
