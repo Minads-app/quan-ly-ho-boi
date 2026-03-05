@@ -191,6 +191,7 @@ export default function SettingsPage() {
         const { data } = await supabase
             .from('ticket_types')
             .select('*')
+            .neq('category', 'LESSON')
             .order('created_at', { ascending: false });
 
         if (data) setTicketTypes(data);
