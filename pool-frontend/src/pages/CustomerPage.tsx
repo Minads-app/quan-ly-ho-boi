@@ -88,8 +88,7 @@ export default function CustomerPage() {
 
     // Import legacy customers
     const [showImportModal, setShowImportModal] = useState(false);
-    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; pkg_name: string; total_sessions: number; remaining: number }[]>([]);
-    const [importing, setImporting] = useState(false);
+    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; pkg_name: string; total_sessions: number; remaining: number; valid_from: string; valid_until: string }[]>([]); const [importing, setImporting] = useState(false);
     const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
     const [importWarnings, setImportWarnings] = useState<{ row: number; field: string; message: string }[]>([]);
     const [ticketTypesForImport, setTicketTypesForImport] = useState<{ id: string; name: string; category: string }[]>([]);
@@ -460,18 +459,13 @@ export default function CustomerPage() {
     // --- DOWNLOAD IMPORT TEMPLATE ---
     function downloadImportTemplate() {
         const templateData = [
-            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Tên gói/vé': 'VÉ 10 BUỔI', 'Tổng buổi ĐK': 13, 'Buổi còn lại': 10 },
-            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Tên gói/vé': 'HỌC BƠI 1:1', 'Tổng buổi ĐK': 15, 'Buổi còn lại': 12 },
+            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Tên gói/vé': 'VÉ 10 BUỔI', 'Tổng buổi ĐK': 13, 'Buổi còn lại': 10, 'Ngày bắt đầu': '2026-01-15', 'Ngày kết thúc': '2026-07-15' },
+            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Tên gói/vé': 'HỌC BƠI 1:1', 'Tổng buổi ĐK': 15, 'Buổi còn lại': 12, 'Ngày bắt đầu': '', 'Ngày kết thúc': '' },
         ];
         const ws = XLSX.utils.json_to_sheet(templateData);
         ws['!cols'] = [
-            { wch: 25 }, // Tên KH
-            { wch: 15 }, // SĐT
-            { wch: 22 }, // Mã thẻ
-            { wch: 12 }, // Loại gói
-            { wch: 20 }, // Tên gói/vé
-            { wch: 14 }, // Tổng buổi ĐK
-            { wch: 14 }, // Buổi còn lại
+            { wch: 25 }, { wch: 15 }, { wch: 22 }, { wch: 12 },
+            { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
         ];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Template');
@@ -483,9 +477,11 @@ export default function CustomerPage() {
             { 'Cột': 'Tên gói/vé', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Tên loại gói/vé đã có trong hệ thống (để khớp tự động). Để trống = lấy gói đầu tiên cùng loại' },
             { 'Cột': 'Tổng buổi ĐK', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Tổng số buổi đăng ký ban đầu. Để trống = không giới hạn' },
             { 'Cột': 'Buổi còn lại', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số buổi còn lại hiện tại. Để trống = bằng tổng buổi ĐK' },
+            { 'Cột': 'Ngày bắt đầu', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày bắt đầu hiệu lực gói. Định dạng: YYYY-MM-DD (VD: 2026-01-15). Để trống = chưa kích hoạt' },
+            { 'Cột': 'Ngày kết thúc', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày hết hạn gói. Định dạng: YYYY-MM-DD. Để trống = không giới hạn' },
         ];
         const ws2 = XLSX.utils.json_to_sheet(instrData);
-        ws2['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 60 }];
+        ws2['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 65 }];
         XLSX.utils.book_append_sheet(wb, ws2, 'Hướng dẫn');
         XLSX.writeFile(wb, 'template_import_khach_hang.xlsx');
     }
@@ -525,6 +521,8 @@ export default function CustomerPage() {
                 const pkgName = String(r['Tên gói/vé'] || r['Ten goi'] || r['pkg_name'] || r['Tên gói'] || '').trim();
                 const totalSessions = Number(r['Tổng buổi ĐK'] || r['Tong buoi DK'] || r['total_sessions'] || r['Số buổi'] || r['so_buoi'] || r['sessions'] || 0);
                 const remaining = Number(r['Buổi còn lại'] || r['Buoi con lai'] || r['remaining'] || 0) || totalSessions;
+                const validFrom = String(r['Ngày bắt đầu'] || r['Ngay bat dau'] || r['valid_from'] || '').trim();
+                const validUntil = String(r['Ngày kết thúc'] || r['Ngay ket thuc'] || r['valid_until'] || '').trim();
 
                 // Validate
                 if (!name) warnings.push({ row: rowNum, field: 'Tên KH', message: 'Thiếu tên khách hàng → dòng sẽ bị bỏ qua' });
@@ -532,8 +530,9 @@ export default function CustomerPage() {
                 if (name && card && !phone) warnings.push({ row: rowNum, field: 'SĐT', message: 'Không có SĐT — nên bổ sung' });
                 if (name && card && totalSessions <= 0) warnings.push({ row: rowNum, field: 'Tổng buổi', message: 'Tổng buổi = 0 → sẽ không giới hạn lượt' });
                 if (name && card && remaining > totalSessions && totalSessions > 0) warnings.push({ row: rowNum, field: 'Buổi còn lại', message: `Buổi còn lại (${remaining}) > Tổng buổi (${totalSessions})` });
+                if (validFrom && validUntil && validFrom > validUntil) warnings.push({ row: rowNum, field: 'Ngày', message: 'Ngày bắt đầu > Ngày kết thúc' });
 
-                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', pkg_name: pkgName, total_sessions: totalSessions, remaining };
+                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', pkg_name: pkgName, total_sessions: totalSessions, remaining, valid_from: validFrom, valid_until: validUntil };
             }).filter(r => r.name && r.card_code);
 
             // Check for duplicate card codes in file
@@ -592,15 +591,18 @@ export default function CustomerPage() {
                 if (!matchType) { errors.push(`${row.card_code}: Không tìm thấy loại gói ${row.pkg_name || row.package_type}`); continue; }
 
                 // 3. Create ticket with price_paid=0, source='IMPORT'
+                const ticketStatus = (row.valid_from && row.remaining < row.total_sessions && row.total_sessions > 0) ? 'IN_USE' : 'UNUSED';
                 const { error: tickErr } = await supabase.from('tickets').insert({
                     ticket_type_id: matchType.id,
-                    status: 'UNUSED',
+                    status: ticketStatus,
                     customer_name: row.name,
                     customer_phone: row.phone || null,
                     card_code: row.card_code,
                     customer_id: customerId,
                     remaining_sessions: row.remaining > 0 ? row.remaining : null,
                     total_sessions: row.total_sessions > 0 ? row.total_sessions : null,
+                    valid_from: row.valid_from || null,
+                    valid_until: row.valid_until || null,
                     price_paid: 0,
                     source: 'IMPORT',
                     sold_by: profile?.id,
@@ -1080,7 +1082,9 @@ export default function CustomerPage() {
                                                 <th style={thS}>Loại</th>
                                                 <th style={thS}>Tên gói</th>
                                                 <th style={thS}>Tổng</th>
-                                                <th style={thS}>Còn lại</th>
+                                                <th style={thS}>Còn</th>
+                                                <th style={thS}>Bắt đầu</th>
+                                                <th style={thS}>Kết thúc</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1091,16 +1095,18 @@ export default function CustomerPage() {
                                                     <tr key={i} style={{ background: hasWarn ? '#fffbeb' : '' }}>
                                                         <td style={tdS}>{i + 1}</td>
                                                         <td style={tdS}>{r.name}</td>
-                                                        <td style={{ ...tdS, color: !r.phone ? '#dc2626' : '' }}>{r.phone || '⚠️ Trống'}</td>
-                                                        <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold' }}>{r.card_code}</td>
+                                                        <td style={{ ...tdS, color: !r.phone ? '#dc2626' : '' }}>{r.phone || '⚠️'}</td>
+                                                        <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold', fontSize: '11px' }}>{r.card_code}</td>
                                                         <td style={tdS}>
                                                             <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`} style={{ fontSize: '10px' }}>
-                                                                {r.package_type === 'LESSON' ? 'Học bơi' : 'MULTI'}
+                                                                {r.package_type === 'LESSON' ? 'HB' : 'MT'}
                                                             </span>
                                                         </td>
-                                                        <td style={tdS}>{r.pkg_name || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>auto</span>}</td>
+                                                        <td style={{ ...tdS, fontSize: '11px' }}>{r.pkg_name || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>auto</span>}</td>
                                                         <td style={tdS}>{r.total_sessions || '∞'}</td>
                                                         <td style={tdS}>{r.remaining || '∞'}</td>
+                                                        <td style={{ ...tdS, fontSize: '11px' }}>{r.valid_from || '—'}</td>
+                                                        <td style={{ ...tdS, fontSize: '11px' }}>{r.valid_until || '—'}</td>
                                                     </tr>
                                                 );
                                             })}
