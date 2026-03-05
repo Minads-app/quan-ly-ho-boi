@@ -89,6 +89,7 @@ export default function CustomerPage() {
     const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; sessions: number }[]>([]);
     const [importing, setImporting] = useState(false);
     const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
+    const [importWarnings, setImportWarnings] = useState<{ row: number; field: string; message: string }[]>([]);
     const [ticketTypesForImport, setTicketTypesForImport] = useState<{ id: string; name: string; category: string }[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -452,6 +453,37 @@ export default function CustomerPage() {
         }
     }
 
+    // --- DOWNLOAD IMPORT TEMPLATE ---
+    function downloadImportTemplate() {
+        const templateData = [
+            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Số buổi': 10 },
+            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Số buổi': 15 },
+        ];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        // Set column widths
+        ws['!cols'] = [
+            { wch: 25 }, // Tên KH
+            { wch: 15 }, // SĐT
+            { wch: 22 }, // Mã thẻ
+            { wch: 12 }, // Loại gói
+            { wch: 10 }, // Số buổi
+        ];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Template');
+        // Add instruction sheet
+        const instrData = [
+            { 'Cột': 'Tên KH', 'Bắt buộc': '✅ Có', 'Mô tả': 'Họ tên đầy đủ khách hàng' },
+            { 'Cột': 'SĐT', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số điện thoại (10 số, bắt đầu bằng 0)' },
+            { 'Cột': 'Mã thẻ', 'Bắt buộc': '✅ Có', 'Mô tả': 'Mã thẻ duy nhất trên hệ thống (IN HOA tự động)' },
+            { 'Cột': 'Loại gói', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'MULTI = Vé nhiều buổi, LESSON = Học bơi. Mặc định: MULTI' },
+            { 'Cột': 'Số buổi', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số buổi còn lại của gói. Để trống hoặc 0 = không giới hạn' },
+        ];
+        const ws2 = XLSX.utils.json_to_sheet(instrData);
+        ws2['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 55 }];
+        XLSX.utils.book_append_sheet(wb, ws2, 'Hướng dẫn');
+        XLSX.writeFile(wb, 'template_import_khach_hang.xlsx');
+    }
+
     // --- IMPORT EXCEL ---
     function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0];
@@ -463,16 +495,54 @@ export default function CustomerPage() {
             const ws = wb.Sheets[wb.SheetNames[0]];
             const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
-            const parsed = rows.map((r: any) => {
-                // Try common column name variations
-                const name = r['Tên KH'] || r['ten_kh'] || r['Tên'] || r['name'] || r['Ho ten'] || '';
+            if (rows.length === 0) {
+                alert('❌ File Excel trống hoặc không có dữ liệu. Vui lòng kiểm tra lại.\n\nBấm "Tải Template" để lấy file mẫu.');
+                return;
+            }
+
+            // Check required columns exist
+            const firstRow = rows[0];
+            const hasNameCol = 'Tên KH' in firstRow || 'ten_kh' in firstRow || 'Tên' in firstRow || 'name' in firstRow || 'Ho ten' in firstRow;
+            const hasCardCol = 'Mã thẻ' in firstRow || 'ma_the' in firstRow || 'card_code' in firstRow || 'Ma the' in firstRow;
+            if (!hasNameCol || !hasCardCol) {
+                alert('❌ File Excel thiếu cột bắt buộc!\n\nCần có ít nhất 2 cột:\n• "Tên KH" — Họ tên khách hàng\n• "Mã thẻ" — Mã thẻ khách\n\nBấm "Tải Template" để lấy file mẫu đúng định dạng.');
+                return;
+            }
+
+            const warnings: { row: number; field: string; message: string }[] = [];
+            const parsed = rows.map((r: any, idx: number) => {
+                const rowNum = idx + 2; // Excel row (header=1)
+                const name = String(r['Tên KH'] || r['ten_kh'] || r['Tên'] || r['name'] || r['Ho ten'] || '').trim();
                 const phone = String(r['SĐT'] || r['sdt'] || r['Số điện thoại'] || r['phone'] || r['SDT'] || '').trim();
                 const card = String(r['Mã thẻ'] || r['ma_the'] || r['card_code'] || r['Ma the'] || '').trim().toUpperCase();
                 const pkgType = String(r['Loại gói'] || r['loai_goi'] || r['package_type'] || r['Loai goi'] || 'MULTI').trim().toUpperCase();
                 const sessions = Number(r['Số buổi'] || r['so_buoi'] || r['sessions'] || r['So buoi'] || 0);
-                return { name: String(name).trim(), phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', sessions };
+
+                // Validate
+                if (!name) warnings.push({ row: rowNum, field: 'Tên KH', message: 'Thiếu tên khách hàng → dòng sẽ bị bỏ qua' });
+                if (!card) warnings.push({ row: rowNum, field: 'Mã thẻ', message: 'Thiếu mã thẻ → dòng sẽ bị bỏ qua' });
+                if (name && card && !phone) warnings.push({ row: rowNum, field: 'SĐT', message: 'Không có SĐT — nên bổ sung' });
+                if (name && card && sessions <= 0) warnings.push({ row: rowNum, field: 'Số buổi', message: 'Số buổi = 0 → sẽ không giới hạn lượt' });
+                if (name && card && !['MULTI', 'LESSON'].includes(pkgType.includes('LESSON') ? 'LESSON' : 'MULTI') === false && pkgType !== 'MULTI' && pkgType !== 'LESSON') {
+                    warnings.push({ row: rowNum, field: 'Loại gói', message: `"${pkgType}" không hợp lệ → mặc định MULTI` });
+                }
+
+                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', sessions };
             }).filter(r => r.name && r.card_code);
 
+            // Check for duplicate card codes in file
+            const cardCounts = new Map<string, number>();
+            parsed.forEach(r => cardCounts.set(r.card_code, (cardCounts.get(r.card_code) || 0) + 1));
+            cardCounts.forEach((count, code) => {
+                if (count > 1) warnings.push({ row: 0, field: 'Mã thẻ', message: `Mã thẻ "${code}" bị trùng ${count} lần trong file` });
+            });
+
+            if (parsed.length === 0) {
+                alert('❌ Không tìm thấy dòng dữ liệu hợp lệ nào!\n\nMỗi dòng cần có ít nhất "Tên KH" và "Mã thẻ".\nBấm "Tải Template" để lấy file mẫu.');
+                return;
+            }
+
+            setImportWarnings(warnings);
             setImportData(parsed);
             setImportResult(null);
             setShowImportModal(true);
@@ -583,6 +653,9 @@ export default function CustomerPage() {
                     {isAdmin && (
                         <>
                             <input type="file" ref={fileInputRef} accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileSelect} />
+                            <button className="btn btn-ghost" onClick={downloadImportTemplate} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                                📋 Tải Template
+                            </button>
                             <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} style={{ padding: '8px 16px', fontSize: '13px' }}>
                                 📥 Import Excel
                             </button>
@@ -974,7 +1047,18 @@ export default function CustomerPage() {
                                     Tìm thấy <b>{importData.length}</b> khách hàng hợp lệ từ file Excel. Xem lại trước khi import:
                                 </div>
 
-                                <div style={{ maxHeight: '400px', overflowY: 'auto', marginBottom: '16px' }}>
+                                {importWarnings.length > 0 && (
+                                    <div style={{ padding: '12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', marginBottom: '12px' }}>
+                                        <div style={{ fontWeight: 700, color: '#92400e', fontSize: '13px', marginBottom: '6px' }}>⚠️ Cảnh báo ({importWarnings.length}):</div>
+                                        <ul style={{ fontSize: '12px', color: '#92400e', paddingLeft: '20px', margin: 0, maxHeight: '120px', overflowY: 'auto' }}>
+                                            {importWarnings.map((w, i) => (
+                                                <li key={i}>{w.row > 0 ? `Dòng ${w.row}` : 'File'} — <b>{w.field}</b>: {w.message}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                <div style={{ maxHeight: '350px', overflowY: 'auto', marginBottom: '16px' }}>
                                     <table className="data-table" style={{ width: '100%' }}>
                                         <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
                                             <tr>
@@ -987,20 +1071,24 @@ export default function CustomerPage() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {importData.map((r, i) => (
-                                                <tr key={i}>
-                                                    <td style={tdS}>{i + 1}</td>
-                                                    <td style={tdS}>{r.name}</td>
-                                                    <td style={tdS}>{r.phone}</td>
-                                                    <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold' }}>{r.card_code}</td>
-                                                    <td style={tdS}>
-                                                        <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`}>
-                                                            {r.package_type === 'LESSON' ? 'Học bơi' : 'Bơi nhiều buổi'}
-                                                        </span>
-                                                    </td>
-                                                    <td style={tdS}>{r.sessions || '—'}</td>
-                                                </tr>
-                                            ))}
+                                            {importData.map((r, i) => {
+                                                const rowWarnings = importWarnings.filter(w => w.row === i + 2);
+                                                const hasWarn = rowWarnings.length > 0;
+                                                return (
+                                                    <tr key={i} style={{ background: hasWarn ? '#fffbeb' : '' }}>
+                                                        <td style={tdS}>{i + 1}</td>
+                                                        <td style={tdS}>{r.name}</td>
+                                                        <td style={{ ...tdS, color: !r.phone ? '#dc2626' : '' }}>{r.phone || '⚠️ Trống'}</td>
+                                                        <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold' }}>{r.card_code}</td>
+                                                        <td style={tdS}>
+                                                            <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`}>
+                                                                {r.package_type === 'LESSON' ? 'Học bơi' : 'Bơi nhiều buổi'}
+                                                            </span>
+                                                        </td>
+                                                        <td style={tdS}>{r.sessions || '∞'}</td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -1009,7 +1097,10 @@ export default function CustomerPage() {
                                     <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirmImport} disabled={importing || importData.length === 0}>
                                         {importing ? '⏳ Đang import...' : `✅ Xác nhận Import ${importData.length} khách`}
                                     </button>
-                                    <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowImportModal(false); setImportData([]); }} disabled={importing}>
+                                    <button className="btn btn-ghost" onClick={downloadImportTemplate} disabled={importing} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                                        📋 Tải Template
+                                    </button>
+                                    <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowImportModal(false); setImportData([]); setImportWarnings([]); }} disabled={importing}>
                                         Hủy
                                     </button>
                                 </div>
