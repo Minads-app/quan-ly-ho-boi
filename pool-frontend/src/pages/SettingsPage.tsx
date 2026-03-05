@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import * as XLSX from 'xlsx';
 import type { CardBank } from '../types';
 
 interface Settings {
@@ -94,7 +95,9 @@ export default function SettingsPage() {
     const [cards, setCards] = useState<CardBank[]>([]);
     const [cbPrefix, setCbPrefix] = useState('HB');
     const [cbQuantity, setCbQuantity] = useState<number | ''>(50);
+    const [cbBatchNote, setCbBatchNote] = useState('');
     const [cardSubTab, setCardSubTab] = useState<'system' | 'manual'>('system');
+    const [filterBatch, setFilterBatch] = useState<number | 'ALL'>('ALL');
 
     // Ticket Types state
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
@@ -217,6 +220,20 @@ export default function SettingsPage() {
         const now = new Date();
         const monthYear = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(2)}`;
 
+        // Get max batch_number
+        const { data: maxBatchData } = await supabase
+            .from('card_bank')
+            .select('batch_number')
+            .eq('source', 'SYSTEM')
+            .order('batch_number', { ascending: false })
+            .limit(1);
+
+        let newBatchNumber = 1;
+        if (maxBatchData && maxBatchData.length > 0 && maxBatchData[0].batch_number) {
+            newBatchNumber = maxBatchData[0].batch_number + 1;
+        }
+
+        // Get max sequence number to continue incrementing
         const { data: existing } = await supabase
             .from('card_bank')
             .select('sequence_number')
@@ -244,6 +261,9 @@ export default function SettingsPage() {
                 sequence_number: seq,
                 random_string: randomStr,
                 status: 'UNUSED',
+                source: 'SYSTEM',
+                batch_number: newBatchNumber,
+                batch_note: cbBatchNote.trim() || null,
                 created_by: profile?.id
             });
         }
@@ -252,36 +272,43 @@ export default function SettingsPage() {
         if (error) {
             alert('Lỗi tạo thẻ: ' + error.message);
         } else {
-            alert(`Đã tạo thành công ${quantity} mã thẻ mới!`);
+            alert(`Đã tạo thành công ${quantity} mã thẻ mới ở Lô ${newBatchNumber}!`);
             fetchCards();
-            setCbQuantity(''); // reset temporary
+            setCbQuantity('');
+            setCbBatchNote('');
         }
         setSaving(false);
     }
 
-    function exportCardsToCSV() {
-        const unusedCards = cards.filter(c => c.status === 'UNUSED');
-        if (unusedCards.length === 0) {
-            alert('Không có mã thẻ UNUSED nào để xuất.');
+    function exportCardsToExcel() {
+        let exportCards = cards.filter(c => c.status === 'UNUSED' && c.source === 'SYSTEM');
+        if (filterBatch !== 'ALL') {
+            exportCards = exportCards.filter(c => c.batch_number === filterBatch);
+        }
+
+        if (exportCards.length === 0) {
+            alert('Không có mã thẻ UNUSED nào để xuất trong lô này.');
             return;
         }
 
-        let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // UTF-8 BOM
-        csvContent += "STT,Mã Thẻ\n";
+        const sorted = [...exportCards].sort((a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0));
 
-        const sorted = [...unusedCards].sort((a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0));
+        const wsData = sorted.map((c, idx) => ({
+            'STT': idx + 1,
+            'Số Lô': c.batch_number || 'N/A',
+            'Ghi chú lô': c.batch_note || '',
+            'Mã Thẻ': c.card_code
+        }));
 
-        sorted.forEach((c) => {
-            csvContent += `${c.sequence_number},${c.card_code}\n`;
-        });
+        const ws = XLSX.utils.json_to_sheet(wsData);
+        // Tự động căn chỉnh độ rộng cột
+        ws['!cols'] = [{ wch: 5 }, { wch: 10 }, { wch: 30 }, { wch: 25 }];
 
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `the_chua_dung_${new Date().toISOString().slice(0, 10)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'TheChuaDung');
+
+        const fileName = filterBatch === 'ALL' ? `the_chua_dung_tatca_${new Date().toISOString().slice(0, 10)}.xlsx` : `the_lô_${filterBatch}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        XLSX.writeFile(wb, fileName);
     }
 
 
@@ -1590,6 +1617,10 @@ export default function SettingsPage() {
                                         <label>Số lượng thẻ muốn tạo</label>
                                         <input type="number" className="form-control" required min="1" max="1000" value={cbQuantity} onChange={e => setCbQuantity(e.target.value ? Number(e.target.value) : '')} placeholder="VD: 50" />
                                     </div>
+                                    <div className="form-group">
+                                        <label>Ghi chú Lô thẻ (Tùy chọn)</label>
+                                        <input type="text" className="form-control" value={cbBatchNote} onChange={e => setCbBatchNote(e.target.value)} placeholder="VD: Khai trương chi nhánh mới" />
+                                    </div>
                                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                                         Cấu trúc thẻ: <b>[Tiền tố] + [ThángNăm] + [Số thứ tự 5 số] + [6 Ký tự ngẫu nhiên]</b><br />
                                         Ví dụ: <b>{cbPrefix || 'HB'}{String(new Date().getMonth() + 1).padStart(2, '0')}{String(new Date().getFullYear()).slice(2)}00001A1B2C</b>
@@ -1601,16 +1632,38 @@ export default function SettingsPage() {
                             </div>
 
                             <div className="dashboard-content-card" style={{ flex: 2 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
                                     <div>
-                                        <h2 style={{ fontSize: '18px', margin: 0 }}>Kho Thẻ Hệ Thống</h2>
+                                        <h2 style={{ fontSize: '18px', margin: 0, marginBottom: '8px' }}>Kho Thẻ Hệ Thống</h2>
                                         <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                                             Bạn có {cards.filter(c => (!c.source || c.source === 'SYSTEM') && c.status === 'UNUSED').length} thẻ chưa sử dụng.
                                         </div>
                                     </div>
-                                    <button className="btn btn-outline" onClick={exportCardsToCSV} disabled={cards.filter(c => (!c.source || c.source === 'SYSTEM') && c.status === 'UNUSED').length === 0}>
-                                        📥 Xuất CSV (Các thẻ UNUSED)
-                                    </button>
+                                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                        <select
+                                            className="form-control"
+                                            value={filterBatch}
+                                            onChange={(e) => setFilterBatch(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                                            style={{ minWidth: '150px' }}
+                                        >
+                                            <option value="ALL">Tất cả lô thẻ</option>
+                                            {Array.from(new Set(cards.filter(c => (!c.source || c.source === 'SYSTEM') && c.batch_number).map(c => c.batch_number as number)))
+                                                .sort((a, b) => b - a)
+                                                .map(batch => (
+                                                    <option key={batch} value={batch}>Lô {batch}</option>
+                                                ))
+                                            }
+                                        </select>
+                                        <button
+                                            className="btn btn-outline"
+                                            onClick={exportCardsToExcel}
+                                            disabled={
+                                                cards.filter(c => (!c.source || c.source === 'SYSTEM') && c.status === 'UNUSED' && (filterBatch === 'ALL' || c.batch_number === filterBatch)).length === 0
+                                            }
+                                        >
+                                            📥 Xuất Excel (.xlsx)
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
@@ -1618,26 +1671,31 @@ export default function SettingsPage() {
                                         <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
                                             <tr>
                                                 <th>Mã Thẻ</th>
+                                                <th>Số Lô</th>
+                                                <th>Ghi chú</th>
                                                 <th>Trạng Thái</th>
                                                 <th>Người Tạo</th>
                                                 <th>Ngày Tạo</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {cards.filter(c => !c.source || c.source === 'SYSTEM').slice(0, 100).map(c => (
-                                                <tr key={c.id}>
-                                                    <td style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{c.card_code}</td>
-                                                    <td>
-                                                        <span className={`badge ${c.status === 'UNUSED' ? 'badge-success' : c.status === 'USED' ? 'badge-primary' : 'badge-error'}`}>
-                                                            {c.status}
-                                                        </span>
-                                                    </td>
-                                                    <td style={{ fontSize: '12px' }}>{c.created_by?.substring(0, 8)}...</td>
-                                                    <td style={{ fontSize: '12px' }}>{new Date(c.created_at).toLocaleString('vi-VN')}</td>
-                                                </tr>
-                                            ))}
-                                            {cards.filter(c => !c.source || c.source === 'SYSTEM').length === 0 && (
-                                                <tr><td colSpan={4} style={{ textAlign: 'center' }}>Chưa có thẻ hệ thống nào.</td></tr>
+                                            {cards.filter(c => (!c.source || c.source === 'SYSTEM') && (filterBatch === 'ALL' || c.batch_number === filterBatch))
+                                                .slice(0, 100).map(c => (
+                                                    <tr key={c.id}>
+                                                        <td style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{c.card_code}</td>
+                                                        <td>{c.batch_number ? `Lô ${c.batch_number}` : '—'}</td>
+                                                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{c.batch_note || '—'}</td>
+                                                        <td>
+                                                            <span className={`badge ${c.status === 'UNUSED' ? 'badge-success' : c.status === 'USED' ? 'badge-primary' : 'badge-error'}`}>
+                                                                {c.status}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ fontSize: '12px' }}>{c.created_by?.substring(0, 8)}...</td>
+                                                        <td style={{ fontSize: '12px' }}>{new Date(c.created_at).toLocaleString('vi-VN')}</td>
+                                                    </tr>
+                                                ))}
+                                            {cards.filter(c => (!c.source || c.source === 'SYSTEM') && (filterBatch === 'ALL' || c.batch_number === filterBatch)).length === 0 && (
+                                                <tr><td colSpan={6} style={{ textAlign: 'center' }}>Chưa có thẻ hệ thống nào hoặc không khớp bộ lọc.</td></tr>
                                             )}
                                         </tbody>
                                     </table>

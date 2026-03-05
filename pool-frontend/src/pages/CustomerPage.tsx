@@ -71,7 +71,7 @@ export default function CustomerPage() {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [selectedPkg, setSelectedPkg] = useState<PackageRow | null>(null);
     const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null);
-    const [editCustData, setEditCustData] = useState({ name: '', phone: '', email: '', birth_date: '', gender: 'OTHER' });
+    const [editCustData, setEditCustData] = useState({ name: '', phone: '', email: '', birth_date: '', gender: 'Khác' });
 
     // Card code editing
     const [editingCardPkgId, setEditingCardPkgId] = useState<string | null>(null);
@@ -288,15 +288,16 @@ export default function CustomerPage() {
 
         // --- 4. Update card bank ---
         if (shouldInsertCard) {
-            const now = new Date();
-            const monthYear = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(2)}`;
             await supabase.from('card_bank').insert({
                 card_code: inputCardCode,
-                prefix: 'MANUAL',
-                month_year: monthYear,
-                sequence_number: 0,
-                random_string: 'MANUAL',
+                prefix: null,
+                month_year: null,
+                sequence_number: null,
+                random_string: null,
                 status: 'USED',
+                source: 'MANUAL',
+                batch_number: null,
+                batch_note: null,
                 created_by: profile?.id
             });
         } else if (shouldUpdateCardId) {
@@ -400,7 +401,7 @@ export default function CustomerPage() {
             phone: c.phone || '',
             email: c.email || '',
             birth_date: c.birth_date || '',
-            gender: c.gender || 'OTHER'
+            gender: c.gender || 'Khác'
         });
     }
 
@@ -408,13 +409,19 @@ export default function CustomerPage() {
         if (!editingCustomer) return;
         if (!editCustData.name.trim()) { alert('Vui lòng nhập họ tên!'); return; }
 
-        const { error } = await supabase.from('customers').update({
+        const updatePayload: any = {
             full_name: editCustData.name.trim(),
             phone: editCustData.phone.trim() || null,
             email: editCustData.email.trim() || null,
-            birth_date: editCustData.birth_date || null,
             gender: editCustData.gender
-        }).eq('id', editingCustomer.id);
+        };
+        if (editCustData.birth_date) {
+            updatePayload.birth_date = editCustData.birth_date;
+        } else {
+            updatePayload.birth_date = null;
+        }
+
+        const { error } = await supabase.from('customers').update(updatePayload).eq('id', editingCustomer.id);
 
         if (error) {
             alert('Lỗi cập nhật: ' + error.message);
@@ -932,9 +939,9 @@ export default function CustomerPage() {
                                 <div style={{ flex: 1 }}>
                                     <label style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>Giới tính</label>
                                     <select value={editCustData.gender} onChange={e => setEditCustData({ ...editCustData, gender: e.target.value })} style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-hover)' }}>
-                                        <option value="MALE">Nam</option>
-                                        <option value="FEMALE">Nữ</option>
-                                        <option value="OTHER">Khác</option>
+                                        <option value="Nam">Nam</option>
+                                        <option value="Nữ">Nữ</option>
+                                        <option value="Khác">Khác</option>
                                     </select>
                                 </div>
                             </div>

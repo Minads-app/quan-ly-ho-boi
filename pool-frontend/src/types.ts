@@ -85,6 +85,8 @@ export interface CardBank {
     random_string: string | null;
     status: CardStatus;
     source: 'SYSTEM' | 'MANUAL';
+    batch_number?: number | null;
+    batch_note?: string | null;
     created_at: string;
     created_by: string;
 }
