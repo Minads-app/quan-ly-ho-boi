@@ -636,7 +636,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Tabs Navigation */}
-            <div style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--border-color)', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', borderBottom: '1px solid var(--border-color)', marginBottom: '24px' }}>
                 <button
                     className={`btn ${activeTab === 'system' ? 'btn-primary' : 'btn-ghost'}`}
                     style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
