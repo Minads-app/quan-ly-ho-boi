@@ -169,7 +169,7 @@ export default function CustomerPage() {
         }
         if (t.remaining_sessions !== null && t.remaining_sessions <= 3 && t.remaining_sessions > 0) return 'EXPIRING';
         if (t.remaining_sessions !== null && t.total_sessions !== null && t.remaining_sessions < t.total_sessions) return 'IN_USE';
-        if (t.status === 'IN' || t.status === 'OUT') return 'IN_USE';
+        if (t.status === 'IN' || t.status === 'OUT' || t.status === 'IN_USE') return 'IN_USE';
         return 'UNUSED';
     }
 
@@ -362,10 +362,16 @@ export default function CustomerPage() {
             updated_at: new Date().toISOString()
         };
 
-        const { error } = await supabase.from('tickets').update(updateData).eq('id', selectedPkg.id);
+        console.log('[DEBUG] handleUpdatePackage → updateData:', updateData, '→ id:', selectedPkg.id);
+
+        const { error, data: updatedRows, count } = await supabase.from('tickets').update(updateData).eq('id', selectedPkg.id).select();
+
+        console.log('[DEBUG] Supabase response → error:', error, '→ updatedRows:', updatedRows, '→ count:', count);
 
         if (error) {
             alert('Lỗi cập nhật gói: ' + error.message);
+        } else if (!updatedRows || updatedRows.length === 0) {
+            alert('⚠️ Supabase không cập nhật được dòng nào. Có thể do RLS chặn. Vui lòng kiểm tra RLS policy trên bảng tickets.');
         } else {
             alert('✅ Cập nhật thành công!');
             setIsEditingPkg(false);
