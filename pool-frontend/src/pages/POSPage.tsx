@@ -567,13 +567,18 @@ export default function POSPage() {
         // Build receipt object before clearing cart
         const receipt = {
             order_id: data.order_id,
-            items: cart.map(c => ({
-                name: c.item.name,
-                quantity: c.quantity,
-                unitPrice: c.unitPrice,
-                subtotal: c.subtotal,
-                isLesson: c.type === 'TICKET' && c.item.category === 'LESSON'
-            })),
+            items: cart.map(c => {
+                const promo = c.promoId ? promotions.find(p => p.id === c.promoId) : null;
+                return {
+                    name: c.item.name,
+                    quantity: c.quantity,
+                    unitPrice: c.unitPrice,
+                    subtotal: c.subtotal,
+                    isLesson: c.type === 'TICKET' && c.item.category === 'LESSON',
+                    promoName: promo ? promo.name : null,
+                    promoLabel: promo ? (promo.type === 'AMOUNT' ? `−${promo.value.toLocaleString('vi-VN')}đ` : promo.type === 'PERCENT' ? `−${promo.value}%` : `+${promo.value} buổi`) : null
+                };
+            }),
             totalPrice: total_amount_raw,
             customerName,
             customerPhone,
@@ -1151,7 +1156,14 @@ export default function POSPage() {
                             <tbody>
                                 {checkoutReceipt.items.map((it: any, i: number) => (
                                     <tr key={i}>
-                                        <td>{it.name}</td>
+                                        <td>
+                                            {it.name}
+                                            {it.promoName && (
+                                                <div style={{ fontSize: '10px', color: '#059669', fontWeight: 600, marginTop: '2px' }}>
+                                                    🎁 {it.promoName} ({it.promoLabel})
+                                                </div>
+                                            )}
+                                        </td>
                                         <td>{it.quantity}</td>
                                         <td>{it.unitPrice.toLocaleString('vi-VN')}</td>
                                         <td>{it.subtotal.toLocaleString('vi-VN')}</td>
@@ -1529,10 +1541,20 @@ export default function POSPage() {
                                                 <button onClick={() => setCart(prev => prev.filter(x => x.cart_id !== c.cart_id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0 4px' }}>&times;</button>
                                             </div>
                                             {(c.customerName || c.customerName2) && (
-                                                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>
+                                                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>
                                                     👤 {c.customerName} {c.customerName2 ? `& ${c.customerName2}` : ''}
                                                 </div>
                                             )}
+                                            {c.promoId && (() => {
+                                                const promo = promotions.find(p => p.id === c.promoId);
+                                                if (!promo) return null;
+                                                const label = promo.type === 'AMOUNT' ? `−${promo.value.toLocaleString('vi-VN')}đ` : promo.type === 'PERCENT' ? `−${promo.value}%` : `+${promo.value} buổi`;
+                                                return (
+                                                    <div style={{ fontSize: '11px', color: '#059669', fontWeight: 600, marginBottom: '4px' }}>
+                                                        🎁 {promo.name} ({label})
+                                                    </div>
+                                                );
+                                            })()}
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
                                                 <div style={{ color: 'var(--accent-blue)', fontWeight: 700, fontSize: '14px' }}>{c.unitPrice.toLocaleString('vi-VN')}đ</div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '2px' }}>
