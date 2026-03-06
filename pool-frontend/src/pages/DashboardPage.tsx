@@ -63,6 +63,129 @@ interface ScanLogRow {
     } | null;
 }
 
+const fmt = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
+const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+const fmtDateTime = (d: string) => { const dt = new Date(d); return dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + dt.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }); };
+
+const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap' };
+const tdS: React.CSSProperties = { padding: '8px 10px', fontSize: '13px', whiteSpace: 'nowrap' };
+const dateInputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' };
+
+function TicketTable({ data, title }: { data: TicketRow[], title?: string }) {
+    const [page, setPage] = useState(1);
+    useEffect(() => setPage(1), [data]);
+
+    const limit = 50;
+    const totalPages = Math.max(1, Math.ceil(data.length / limit));
+    const paginated = data.slice((page - 1) * limit, page * limit);
+
+    return (
+        <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
+            {title && <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🎟️ {title} ({data.length} vé)</h3>}
+            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                    <tr>
+                        <th style={thS}>#</th><th style={thS}>Loại vé</th><th style={thS}>Khách</th><th style={thS}>Mã thẻ</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Thời gian</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {data.length === 0 ? (
+                        <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có dữ liệu.</td></tr>
+                    ) : paginated.map((t, i) => {
+                        const actualIdx = (page - 1) * limit + i + 1;
+                        return (
+                            <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={tdS}>{actualIdx}</td>
+                                <td style={tdS}>
+                                    <span style={{ background: t.category === 'DAILY' ? '#dcfce7' : t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#fce7f3' : '#fef3c7', color: t.category === 'DAILY' ? '#166534' : t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#be185d' : '#92400e', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
+                                        {t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.type_name}
+                                    </span>
+                                </td>
+                                <td style={tdS}>{t.customer_name || 'Khách lẻ'}</td>
+                                <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code}</code> : '—'}</td>
+                                <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
+                                <td style={tdS}>{t.sold_by_name}</td>
+                                <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
+                            </tr>
+                        );
+                    })}
+                    {data.length > 0 && (
+                        <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
+                            <td colSpan={5} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({data.length} vé)</td>
+                            <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, t) => s + t.price_paid, 0))}</td>
+                            <td colSpan={2} style={tdS}></td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+            {totalPages > 1 && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center', marginTop: '16px', padding: '12px' }}>
+                    <button className="btn btn-outline btn-sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Trước</button>
+                    <span style={{ fontSize: '13px', fontWeight: 600 }}>Trang {page} / {totalPages}</span>
+                    <button className="btn btn-outline btn-sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Sau</button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function RetailTable({ data }: { data: RetailRow[] }) {
+    const [page, setPage] = useState(1);
+    useEffect(() => setPage(1), [data]);
+
+    const limit = 50;
+    const totalPages = Math.max(1, Math.ceil(data.length / limit));
+    const paginated = data.slice((page - 1) * limit, page * limit);
+    const totalQty = data.reduce((s, r) => s + r.quantity, 0);
+
+    return (
+        <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
+            <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🛒 Sản Phẩm Bán Lẻ Đã Bán ({totalQty} món)</h3>
+            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                    <tr>
+                        <th style={thS}>#</th><th style={thS}>Sản phẩm</th><th style={thS}>Số lượng</th><th style={thS}>Thanh toán</th><th style={thS}>Thành tiền</th><th style={thS}>Người bán</th><th style={thS}>Thời gian</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {data.length === 0 ? (
+                        <tr><td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có giao dịch bán lẻ.</td></tr>
+                    ) : paginated.map((r, i) => {
+                        const actualIdx = (page - 1) * limit + i + 1;
+                        return (
+                            <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={tdS}>{actualIdx}</td>
+                                <td style={tdS}><span style={{ fontWeight: 500 }}>{r.product_name}</span></td>
+                                <td style={{ ...tdS, textAlign: 'center', fontWeight: 600 }}>{r.quantity}</td>
+                                <td style={tdS}>{r.payment_method === 'CASH' ? '💵 TM' : r.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(r.subtotal)}</td>
+                                <td style={tdS}>{r.sold_by_name}</td>
+                                <td style={tdS}>{fmtDateTime(r.sold_at)}</td>
+                            </tr>
+                        );
+                    })}
+                    {data.length > 0 && (
+                        <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
+                            <td colSpan={3} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({totalQty} món)</td>
+                            <td></td>
+                            <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, r) => s + r.subtotal, 0))}</td>
+                            <td colSpan={2} style={tdS}></td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+            {totalPages > 1 && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center', marginTop: '16px', padding: '12px' }}>
+                    <button className="btn btn-outline btn-sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Trước</button>
+                    <span style={{ fontSize: '13px', fontWeight: 600 }}>Trang {page} / {totalPages}</span>
+                    <button className="btn btn-outline btn-sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Sau</button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function DashboardPage() {
     const { profile } = useAuth();
     const isAdmin = profile?.role === 'ADMIN';
@@ -267,13 +390,14 @@ export default function DashboardPage() {
         const { data, error } = await supabase
             .from('scan_logs')
             .select(`
-                id, scanned_at, status, ticket_id,
+                id, scanned_at, direction, success, ticket_id,
                 tickets (
                     customer_name, customer_phone, card_code, price_paid,
                     ticket_types (name, category)
                 )
             `)
-            .eq('status', 'IN') // Only count successful check-ins
+            .eq('direction', 'IN')
+            .eq('success', true)
             .gte('scanned_at', from + 'T00:00:00+07:00')
             .lte('scanned_at', to + 'T23:59:59+07:00')
             .order('scanned_at', { ascending: false });
@@ -286,7 +410,7 @@ export default function DashboardPage() {
             const mapped = (data || []).map((row: any) => ({
                 id: row.id,
                 scanned_at: row.scanned_at,
-                status: row.status,
+                status: row.direction,
                 ticket_id: row.ticket_id,
                 ticket: row.tickets ? {
                     customer_name: row.tickets.customer_name,
@@ -379,11 +503,6 @@ export default function DashboardPage() {
     const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CASH').reduce((s, r) => s + r.subtotal, 0);
     const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER').reduce((s, r) => s + r.subtotal, 0);
     const revCard = tickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CARD').reduce((s, r) => s + r.subtotal, 0);
-
-    // --- FORMAT ---
-    const fmt = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
-    const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
-    const fmtDateTime = (d: string) => { const dt = new Date(d); return dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + dt.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }); };
 
     // --- PRINT A4 Landscape ---
     function handlePrintReport(title: string, tableHtml: string) {
@@ -576,10 +695,10 @@ export default function DashboardPage() {
                         })
                     )}>📊 Xuất Excel</button>
                 </div>
-                {renderTicketTable(tickets, 'Danh sách Vé đã Bán')}
+                <TicketTable data={tickets} title="Danh sách Vé đã Bán" />
                 {retailItems.length > 0 && (
                     <div style={{ marginTop: '32px' }}>
-                        {renderRetailTable(retailItems)}
+                        <RetailTable data={retailItems} />
                     </div>
                 )}
                 {expenses.length > 0 && (
@@ -905,90 +1024,8 @@ export default function DashboardPage() {
                         })
                     )}>📊 Xuất Excel</button>
                 </div>
-                {renderTicketTable(mySalesTickets)}
+                <TicketTable data={mySalesTickets} />
             </>
-        );
-    }
-
-    function renderTicketTable(data: TicketRow[], title?: string) {
-        return (
-            <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
-                {title && <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🎟️ {title} ({data.length} vé)</h3>}
-                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr>
-                            <th style={thS}>#</th><th style={thS}>Loại vé</th><th style={thS}>Khách</th><th style={thS}>Mã thẻ</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Thời gian</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.length === 0 ? (
-                            <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có dữ liệu.</td></tr>
-                        ) : data.map((t, i) => (
-                            <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                <td style={tdS}>{i + 1}</td>
-                                <td style={tdS}>
-                                    <span style={{ background: t.category === 'DAILY' ? '#dcfce7' : t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#fce7f3' : '#fef3c7', color: t.category === 'DAILY' ? '#166534' : t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#be185d' : '#92400e', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
-                                        {t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.type_name}
-                                    </span>
-                                </td>
-                                <td style={tdS}>{t.customer_name || 'Khách lẻ'}</td>
-                                <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code}</code> : '—'}</td>
-                                <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
-                                <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
-                                <td style={tdS}>{t.sold_by_name}</td>
-                                <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
-                            </tr>
-                        ))}
-                        {data.length > 0 && (
-                            <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
-                                <td colSpan={4} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({data.length} vé)</td>
-                                <td></td>
-                                <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, t) => s + t.price_paid, 0))}</td>
-                                <td colSpan={2} style={tdS}></td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        );
-    }
-
-    function renderRetailTable(data: RetailRow[]) {
-        const totalQty = data.reduce((s, r) => s + r.quantity, 0);
-        return (
-            <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🛒 Sản Phẩm Bán Lẻ Đã Bán ({totalQty} món)</h3>
-                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr>
-                            <th style={thS}>#</th><th style={thS}>Sản phẩm</th><th style={thS}>Số lượng</th><th style={thS}>Thanh toán</th><th style={thS}>Thành tiền</th><th style={thS}>Người bán</th><th style={thS}>Thời gian</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.length === 0 ? (
-                            <tr><td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có giao dịch bán lẻ.</td></tr>
-                        ) : data.map((r, i) => (
-                            <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                <td style={tdS}>{i + 1}</td>
-                                <td style={tdS}><span style={{ fontWeight: 500 }}>{r.product_name}</span></td>
-                                <td style={{ ...tdS, textAlign: 'center', fontWeight: 600 }}>{r.quantity}</td>
-                                <td style={tdS}>{r.payment_method === 'CASH' ? '💵 TM' : r.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
-                                <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(r.subtotal)}</td>
-                                <td style={tdS}>{r.sold_by_name}</td>
-                                <td style={tdS}>{fmtDateTime(r.sold_at)}</td>
-                            </tr>
-                        ))}
-                        {data.length > 0 && (
-                            <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
-                                <td colSpan={3} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({totalQty} món)</td>
-                                <td></td>
-                                <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, r) => s + r.subtotal, 0))}</td>
-                                <td colSpan={2} style={tdS}></td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
         );
     }
 
@@ -1137,6 +1174,3 @@ export default function DashboardPage() {
     );
 }
 
-const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap' };
-const tdS: React.CSSProperties = { padding: '8px 10px', fontSize: '13px', whiteSpace: 'nowrap' };
-const dateInputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' };
