@@ -91,6 +91,15 @@ export interface CardBank {
     created_by: string;
 }
 
+export interface CardBatchView {
+    batch_number: number;
+    batch_note: string | null;
+    created_at: string;
+    total_cards: number;
+    unused_cards: number;
+    used_cards: number;
+}
+
 export interface CheckQrResult {
     success: boolean;
     error?: string;

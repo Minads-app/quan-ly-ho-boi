@@ -1,0 +1,62 @@
+Implementation Plan: Chống Gian Lận Bằng PIN & Kiosk Tự Động
+Mục Tiêu
+Ngăn chặn hoàn toàn việc nhân viên sử dụng thẻ vé gói (nhiều buổi) của khách hàng để tự quẹt và thu tiền mặt của khách lẻ, đồng thời khắc phục các tình huống khách hàng đi cùng nhóm/gia đình (cần quẹt nhiều lần/ngày) hoặc bảo mật dữ liệu sinh trắc học cá nhân.
+
+Các Giải Pháp Tối Ưu
+Dưới đây là 3 phương án khả thi nhất, đi từ miễn phí đến có tính phí, được tinh chỉnh dựa trên phản hồi của bạn.
+
+1. Giải Pháp Mã PIN Cấp 2 (Tương tự thẻ ATM) - Khuyên dùng
+Thay vì chỉ cần quét mã QR/Mã thẻ là xong, khi khách hàng quét thẻ gói, hệ thống sẽ yêu cầu nhập thêm Mã PIN 4 số (do khách tự đặt lúc mua vé).
+
+Cách hoạt động:
+
+Khách hàng tới quầy (hoặc đưa thẻ cho người thân). Nhân viên tít mã thẻ.
+Màn hình máy POS của nhân viên hiện lên giao diện: "Vui lòng nhập mã PIN của thẻ".
+Khách hàng (hoặc người thân) tự tay bấm 4 số trên một bàn phím số nhỏ (Numpad) đặt trên quầy hướng về phía khách, hoặc đọc cho nhân viên bấm nếu tin tưởng.
+Đúng PIN => Trừ 1 lượt & mở cổng / in vé. Sai PIN => Báo lỗi.
+Ưu điểm:
+
+Nhân viên có lấy trộm được thẻ/mã vạch cũng không biết PIN để quẹt.
+Khách đi cùng gia đình vẫn dùng được bình thường, chỉ cần nhập PIN 1 lần hoặc người nhà biết PIN để tự nhập.
+Không cần sinh trắc học (vân tay/khuôn mặt).
+Chi phí phát sinh: Mua 1 bàn phím số mini (Numpad cắm cổng USB) đặt ngoài quầy cho khách tiện bấm (khoảng 100k - 200k VNĐ).
+
+Kỹ thuật: Cần thêm cột pin_code vào bảng tickets, và làm thêm tính năng đặt mã PIN lúc bán vé + form nhập PIN lúc check-in.
+
+2. Giải Pháp Kiosk Tự Phục Vụ (Self-Check-in)
+Chuyển hẳn việc check-in ra khỏi tay nhân viên. Trang bị một màn hình cảm ứng đặt trước cửa bơi.
+
+Cách hoạt động:
+Khách mua thẻ có mã vạch/QR.
+Khách tự cầm thẻ ra máy Kiosk, đưa mã vào khe quét.
+Màn hình hiện lên số lượt còn lại & yêu cầu nhập mã PIN.
+Khách bấm PIN trên màn hình cảm ứng Kiosk -> Kiosk nhả (in) ra 1 vé QR giấy phụ (hoặc Kiosk tự động mở cổng luôn nếu nối dây barrier).
+Ưu điểm:
+Khách tự làm 100%, nhân viên không can thiệp.
+Đẳng cấp, chuyên nghiệp.
+Chi phí phát sinh:
+Cần mua 1 máy Kiosk màn hình cảm ứng tích hợp đầu đọc QR & máy in bill (Giá máy chuyên dụng dao động 10 - 20 triệu VNĐ tùy hãng).
+Nếu muốn tiết kiệm: Chỉ cần 1 máy tính bảng (iPad/Android) + 1 chân đế đứng + 1 máy đọc mã vạch Bluetooth (tổng khoảng 4 - 6 triệu VNĐ).
+Độ khó thiết lập phần mềm (Web app): Không khó. Chỉ cần làm thêm một trang UI mới (ví dụ KioskPage.tsx) giao diện to, trực quan, không có thanh menu hay nút điều hướng, chỉ để hiển thị nút hướng dẫn quét và bàn phím số ảo.
+3. Giải Pháp Gửi Tin Nhắn Tự Động (Zalo ZNS / SMS)
+Như đã thảo luận, hệ thống sẽ báo ngay về điện thoại khi vé bị trừ. Phù hợp làm phương án kết hợp cùng Mã PIN.
+
+Chi phí phát sinh (Ước tính):
+Zalo ZNS (Zalo Notification Service): Cần đăng ký Zalo OA doanh nghiệp. Giá mỗi tin nhắn báo biến động số dư khoảng 200 VNĐ - 300 VNĐ / tin.
+SMS Brandname: Phải đăng ký tên thương hiệu nhà mạng (HBA_POOL). Giá khoảng 400 VNĐ - 850 VNĐ / tin.
+Độ khó thiết lập phần mềm: Khá phức tạp. Cần tích hợp API của bên thứ ba (như Zalo, eSMS, VietGuys...). Đòi hỏi có thời gian duyệt hồ sơ doanh nghiệp với nhà mạng.
+🚀 Đề Xuất Lộ Trình Triển Khai (Phase 2)
+Dựa trên ưu nhược điểm, lộ trình tối ưu nhất cho bạn lúc này là:
+
+Bước 1 (Ngay lập tức, chi phí 0đ): Triển khai hệ thống Mã PIN.
+
+Cập nhật database: Thêm cột pin_code.
+Cập nhật POSPage: Lúc bán gói yêu cầu khách nhập PIN.
+Cập nhật check-in (Cửa sổ soát vé): Quét QR xong hiện bảng yêu cầu gõ mã PIN.
+Giải quyết 100% rủi ro ăn cắp mã để quẹt lén. Gia đình đi chung xài thoải mái.
+Bước 2 (Sau 1 tháng, nếu cần tự động hóa): Xây dựng giao diện Kiosk KioskPage.
+
+Cắt hẳn 1 máy tính bảng hoặc Kiosk chuyên dụng đặt ở sảnh. URL ghim thẳng vào /kiosk. Khách tự quẹt, tự bấm PIN trên màn hình cảm ứng, tự nhận vé in.
+Lưu ý: Bạn chọn phương án in mã vạch dán cứng lên thẻ nhựa là rất chuẩn xác, thẻ vật lý có mã tĩnh + mã PIN động là combo bảo mật rất cao.
+
+Bạn muốn bắt đầu code Bước 1 (Thêm hệ thống Mã PIN) ngay bây giờ chứ? Mọi thứ liên quan đều làm trực tiếp trên Web platform hiện tại rất dễ.

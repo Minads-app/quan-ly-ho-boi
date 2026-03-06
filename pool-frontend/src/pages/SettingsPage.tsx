@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
-import type { CardBank } from '../types';
+import type { CardBank, CardBatchView } from '../types';
 
 interface Settings {
     gate_control_mode: string;
@@ -93,10 +93,14 @@ export default function SettingsPage() {
 
     // Card Bank state
     const [cards, setCards] = useState<CardBank[]>([]);
+    const [cardBatches, setCardBatches] = useState<CardBatchView[]>([]);
+    const [showBatchModal, setShowBatchModal] = useState(false);
+    const [batchTxtFile, setBatchTxtFile] = useState<File | null>(null);
+
     const [cbPrefix, setCbPrefix] = useState('HB');
     const [cbQuantity, setCbQuantity] = useState<number | ''>(50);
     const [cbBatchNote, setCbBatchNote] = useState('');
-    const [cardSubTab, setCardSubTab] = useState<'system' | 'manual'>('system');
+    const [cardSubTab, setCardSubTab] = useState<'system' | 'manual' | 'batches'>('system');
     const [filterBatch, setFilterBatch] = useState<number | 'ALL'>('ALL');
 
     // Ticket Types state
@@ -153,6 +157,7 @@ export default function SettingsPage() {
     useEffect(() => {
         if (activeTab === 'cards') {
             fetchCards();
+            fetchCardBatches();
         }
     }, [activeTab]);
 
@@ -163,6 +168,7 @@ export default function SettingsPage() {
         fetchWeekSchedule();
         fetchLessonTypes();
         fetchCards();
+        fetchCardBatches();
     }, []);
 
     async function fetchSettings() {
@@ -209,6 +215,11 @@ export default function SettingsPage() {
     async function fetchCards() {
         const { data } = await supabase.from('card_bank').select('*').order('created_at', { ascending: false }).limit(2000);
         if (data) setCards(data as CardBank[]);
+    }
+
+    async function fetchCardBatches() {
+        const { data } = await supabase.from('card_batches_view').select('*').order('batch_number', { ascending: false });
+        if (data) setCardBatches(data as CardBatchView[]);
     }
 
     async function handleGenerateCards(e: React.FormEvent) {
@@ -279,6 +290,91 @@ export default function SettingsPage() {
             setCbBatchNote('');
         }
         setSaving(false);
+    }
+
+    async function handleImportBatch(e: React.FormEvent) {
+        e.preventDefault();
+        if (!batchTxtFile) {
+            alert('Vui lòng chọn file .txt chứa mã thẻ!');
+            return;
+        }
+        setSaving(true);
+
+        try {
+            const text = await batchTxtFile.text();
+            // Tách theo dòng, trim từng dòng và lọc dòng rỗng
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+            // Loại bỏ trùng mã trong chính file tải lên
+            const uniqueCodes = Array.from(new Set(lines));
+
+            if (uniqueCodes.length === 0) {
+                alert('File không chứa mã thẻ hợp lệ.');
+                setSaving(false); return;
+            }
+
+            // Get max batch_number
+            const { data: maxBatchData } = await supabase
+                .from('card_bank')
+                .select('batch_number')
+                .order('batch_number', { ascending: false })
+                .limit(1);
+
+            let newBatchNumber = 1;
+            if (maxBatchData && maxBatchData.length > 0 && maxBatchData[0].batch_number) {
+                newBatchNumber = maxBatchData[0].batch_number + 1;
+            }
+
+            const newCards = uniqueCodes.map(code => ({
+                card_code: code,
+                status: 'UNUSED',
+                source: 'MANUAL',
+                batch_number: newBatchNumber,
+                batch_note: cbBatchNote.trim() || null,
+                created_by: profile?.id
+            }));
+
+            // Nếu mã nào đã tồn tại trong csdl thì ignor, chỉ insert những mã chừa có
+            const { error } = await supabase.from('card_bank').upsert(newCards, { onConflict: 'card_code', ignoreDuplicates: true });
+
+            if (error) {
+                throw error;
+            }
+
+            alert(`Đã tạo thành công Lô thẻ số ${newBatchNumber} gồm ${uniqueCodes.length} thẻ.`);
+            setShowBatchModal(false);
+            setBatchTxtFile(null);
+            setCbBatchNote('');
+            fetchCards();
+            fetchCardBatches();
+
+        } catch (error: any) {
+            alert('Lỗi import lô thẻ. Chi tiết: ' + error.message);
+        }
+        setSaving(false);
+    }
+
+    async function handleDeleteBatch(batchNumber: number) {
+        if (!window.confirm(`XÓA LÔ THẺ SỐ ${batchNumber}?\nTất cả mã thẻ trong lô này chưa gắn với khách hàng đều sẽ bị xóa mất vĩnh viễn!\n\nLưu ý: Bạn không thể xóa lô nếu đã có thẻ được sử dụng.`)) {
+            return;
+        }
+
+        // Cảnh báo nếu có mã thẻ đã USED
+        const checkUsed = await supabase.from('card_bank').select('id', { count: 'exact', head: true }).eq('batch_number', batchNumber).neq('status', 'UNUSED');
+        if (checkUsed.count && checkUsed.count > 0) {
+            alert(`Lô thẻ này đã có ${checkUsed.count} thẻ được kích hoạt sử dụng (USED). Bạn KHÔNG THỂ xóa toàn bộ lô này.\n\nHãy thu hồi hoặc ẩn từng thẻ.`);
+            return;
+        }
+
+        const { error } = await supabase.from('card_bank').delete().eq('batch_number', batchNumber);
+
+        if (error) {
+            alert('Lỗi khi xóa lô thẻ: ' + error.message);
+        } else {
+            fetchCards();
+            fetchCardBatches();
+            if (filterBatch === batchNumber) setFilterBatch('ALL');
+        }
     }
 
     function exportCardsToExcel() {
@@ -1602,6 +1698,13 @@ export default function SettingsPage() {
                         >
                             ✏️ Thẻ Thủ Công ({cards.filter(c => c.source === 'MANUAL').length})
                         </button>
+                        <button
+                            className={`btn ${cardSubTab === 'batches' ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setCardSubTab('batches')}
+                            style={{ padding: '8px 20px' }}
+                        >
+                            📦 Quản lý Lô Thẻ ({cardBatches.length})
+                        </button>
                     </div>
 
                     {/* SUB-TAB: Thẻ Hệ Thống */}
@@ -1746,6 +1849,101 @@ export default function SettingsPage() {
                             </div>
                         </div>
                     )}
+
+                    {/* SUB-TAB: Lô Thẻ */}
+                    {cardSubTab === 'batches' && (
+                        <div className="dashboard-content-card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div>
+                                    <h2 style={{ fontSize: '18px', margin: 0 }}>Quản lý Lô Thẻ</h2>
+                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                        Danh sách các lô thẻ được tạo tự động bởi hệ thống và Import từ file .txt
+                                    </div>
+                                </div>
+                                <button className="btn btn-primary btn-sm" onClick={() => { setCbBatchNote(''); setBatchTxtFile(null); setShowBatchModal(true); }}>
+                                    📥 Import Lô Thẻ (TXT)
+                                </button>
+                            </div>
+
+                            <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                                <table className="data-table">
+                                    <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
+                                        <tr>
+                                            <th>Số Lô</th>
+                                            <th>Ghi Chú</th>
+                                            <th style={{ textAlign: 'right' }}>Tổng Số Thẻ</th>
+                                            <th style={{ textAlign: 'right' }}>Chưa Dùng</th>
+                                            <th style={{ textAlign: 'right' }}>Đã Dùng</th>
+                                            <th>Ngày Tạo</th>
+                                            <th>Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {cardBatches.map(b => (
+                                            <tr key={b.batch_number}>
+                                                <td style={{ fontWeight: 'bold' }}>Lô {b.batch_number}</td>
+                                                <td>{b.batch_note || '—'}</td>
+                                                <td style={{ textAlign: 'right', fontWeight: 'bold' }}>{b.total_cards}</td>
+                                                <td style={{ textAlign: 'right', color: 'var(--accent-green)' }}>{b.unused_cards}</td>
+                                                <td style={{ textAlign: 'right', color: 'var(--alert-red)' }}>{b.used_cards}</td>
+                                                <td style={{ fontSize: '12px' }}>{new Date(b.created_at).toLocaleString('vi-VN')}</td>
+                                                <td>
+                                                    <button
+                                                        className="btn btn-ghost btn-sm"
+                                                        style={{ color: 'var(--alert-red)' }}
+                                                        onClick={() => handleDeleteBatch(b.batch_number)}
+                                                        disabled={b.used_cards > 0}
+                                                        title={b.used_cards > 0 ? "Không thể xóa lô đã có thẻ đang sử dụng" : "Xóa vĩnh viễn toàn bộ lô thẻ"}
+                                                    >
+                                                        🗑️ Xóa Lô
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {cardBatches.length === 0 && (
+                                            <tr><td colSpan={7} style={{ textAlign: 'center' }}>Chưa có lô thẻ nào được tạo.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Batch Import Modal */}
+            {showBatchModal && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '500px' }}>
+                        <h2>Import Lô Thẻ Mới</h2>
+                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                            Hệ thống sẽ tạo lô thẻ mới từ file .txt của bạn (Mỗi dòng một mã thẻ). Các thẻ trùng lặp nội bộ file hoặc đã tồn tại trên hệ thống sẽ bị bỏ qua.
+                        </p>
+                        <form onSubmit={handleImportBatch}>
+                            <div className="form-group">
+                                <label>Ghi chú Lô thẻ mới (Tùy chọn)</label>
+                                <input type="text" className="form-control" value={cbBatchNote} onChange={e => setCbBatchNote(e.target.value)} placeholder="VD: Lô thẻ nhập từ xưởng tháng 10" />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Đính kèm File (.txt) <span style={{ color: 'red' }}>*</span></label>
+                                <input
+                                    type="file"
+                                    accept=".txt"
+                                    className="form-control"
+                                    style={{ padding: '8px' }}
+                                    onChange={e => setBatchTxtFile(e.target.files && e.target.files.length > 0 ? e.target.files[0] : null)}
+                                    required
+                                />
+                                {batchTxtFile && <div style={{ fontSize: '13px', color: 'var(--accent-green)', marginTop: '4px' }}>Đã chọn: {batchTxtFile.name}</div>}
+                            </div>
+
+                            <div className="modal-actions" style={{ marginTop: '24px' }}>
+                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowBatchModal(false)} disabled={saving}>Hủy</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang tải lên...' : 'Bắt đầu Import'}</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
 
