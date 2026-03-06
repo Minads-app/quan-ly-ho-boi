@@ -544,7 +544,7 @@ export default function CustomerPage() {
                 const rowNum = idx + 2; // Excel row (header=1)
                 const name = String(r['Tên KH'] || r['ten_kh'] || r['Tên'] || r['name'] || r['Ho ten'] || '').trim();
                 const phone = String(r['SĐT'] || r['sdt'] || r['Số điện thoại'] || r['phone'] || r['SDT'] || '').trim();
-                const card = String(r['Mã thẻ'] || r['ma_the'] || r['card_code'] || r['Ma the'] || '').trim().toUpperCase();
+                const card = String(r['Mã thẻ'] || r['ma_the'] || r['card_code'] || r['Ma the'] || '').trim();
                 const pkgType = String(r['Loại gói'] || r['loai_goi'] || r['package_type'] || r['Loai goi'] || 'MULTI').trim().toUpperCase();
                 const pkgName = String(r['Tên gói/vé'] || r['Ten goi'] || r['pkg_name'] || r['Tên gói'] || '').trim();
                 const totalSessions = Number(r['Tổng buổi ĐK'] || r['Tong buoi DK'] || r['total_sessions'] || r['Số buổi'] || r['so_buoi'] || r['sessions'] || 0);
