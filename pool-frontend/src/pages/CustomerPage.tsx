@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Customer } from '../types';
 import * as XLSX from 'xlsx';
+import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
 
 type SubTab = 'CUSTOMERS' | 'PACKAGES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
@@ -95,8 +96,15 @@ export default function CustomerPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
 
+    // Print functionality
+    const [printTicket, setPrintTicket] = useState<PrintTicketData | null>(null);
+    const [bizInfo, setBizInfo] = useState<{ name: string; address: string; phone: string; logo: string; pool_close_time?: string }>({
+        name: 'Hệ Thống Vé Bơi', address: '', phone: '', logo: ''
+    });
+
     useEffect(() => {
         fetchAllData();
+        fetchBusinessInfo();
         // Fetch ticket types for import mapping
         supabase.from('ticket_types').select('id, name, category').in('category', ['MULTI', 'LESSON']).eq('is_active', true)
             .then(({ data }) => { if (data) setTicketTypesForImport(data); });
@@ -109,6 +117,26 @@ export default function CustomerPage() {
             .order('full_name');
         setAllCustomers((custData || []) as Customer[]);
         await fetchAllPackages();
+    }
+
+    async function fetchBusinessInfo() {
+        const { data } = await supabase.from('system_settings').select('key, value');
+        if (data) {
+            const info: Record<string, string> = {};
+            data.forEach(r => {
+                let val = r.value;
+                try { val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, ''); }
+                catch { val = typeof val === 'string' ? val : String(val); }
+                info[r.key] = val;
+            });
+            setBizInfo({
+                name: info.business_name || 'Hệ Thống Vé Bơi',
+                address: info.business_address || '',
+                phone: info.business_phone || '',
+                logo: info.business_logo || '',
+                pool_close_time: info.pool_close_time || ''
+            });
+        }
     }
 
     async function fetchAllPackages() {
@@ -972,6 +1000,10 @@ export default function CustomerPage() {
                         {/* Admin Action Buttons */}
                         {isAdmin && !isEditingPkg && (
                             <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
+                                <button className="btn btn-outline" style={{ flex: 1, color: '#475569', background: '#f8fafc', border: '1px solid #cbd5e1' }}
+                                    onClick={() => setPrintTicket(selectedPkg as any)}>
+                                    🖨️ In thẻ QR
+                                </button>
                                 <button className="btn btn-ghost" style={{ flex: 1, color: '#0369a1', background: '#e0f2fe' }}
                                     onClick={() => {
                                         setEditSessions(selectedPkg.remaining_sessions !== null ? selectedPkg.remaining_sessions : '');
@@ -1150,6 +1182,15 @@ export default function CustomerPage() {
                         )}
                     </div>
                 </div>
+            )}
+
+            {printTicket && (
+                <PrintTicketModal
+                    isOpen={true}
+                    onClose={() => setPrintTicket(null)}
+                    ticket={printTicket}
+                    bizInfo={bizInfo}
+                />
             )}
         </div>
     );

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
+import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
 
 type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
@@ -71,8 +72,9 @@ const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontS
 const tdS: React.CSSProperties = { padding: '8px 10px', fontSize: '13px', whiteSpace: 'nowrap' };
 const dateInputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' };
 
-function TicketTable({ data, title }: { data: TicketRow[], title?: string }) {
+function TicketTable({ data, title, isAdmin, bizInfo }: { data: TicketRow[], title?: string, isAdmin?: boolean, bizInfo?: any }) {
     const [page, setPage] = useState(1);
+    const [printTicket, setPrintTicket] = useState<PrintTicketData | null>(null);
     useEffect(() => setPage(1), [data]);
 
     const limit = 50;
@@ -86,11 +88,12 @@ function TicketTable({ data, title }: { data: TicketRow[], title?: string }) {
                 <thead>
                     <tr>
                         <th style={thS}>#</th><th style={thS}>Loại vé</th><th style={thS}>Khách</th><th style={thS}>Mã thẻ</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Thời gian</th>
+                        {isAdmin && <th style={thS}>Thao tác</th>}
                     </tr>
                 </thead>
                 <tbody>
                     {data.length === 0 ? (
-                        <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có dữ liệu.</td></tr>
+                        <tr><td colSpan={isAdmin ? 9 : 8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có dữ liệu.</td></tr>
                     ) : paginated.map((t, i) => {
                         const actualIdx = (page - 1) * limit + i + 1;
                         return (
@@ -107,6 +110,11 @@ function TicketTable({ data, title }: { data: TicketRow[], title?: string }) {
                                 <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
                                 <td style={tdS}>{t.sold_by_name}</td>
                                 <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
+                                {isAdmin && (
+                                    <td style={tdS}>
+                                        <button className="btn btn-outline btn-sm" onClick={() => setPrintTicket(t as any)}>🖨️ In Lại</button>
+                                    </td>
+                                )}
                             </tr>
                         );
                     })}
@@ -114,7 +122,7 @@ function TicketTable({ data, title }: { data: TicketRow[], title?: string }) {
                         <tr style={{ background: 'var(--bg-hover)', fontWeight: 700 }}>
                             <td colSpan={5} style={{ ...tdS, textAlign: 'right' }}>TỔNG CỘNG ({data.length} vé)</td>
                             <td style={{ ...tdS, textAlign: 'right', color: '#10b981', fontSize: '15px' }}>{fmt(data.reduce((s, t) => s + t.price_paid, 0))}</td>
-                            <td colSpan={2} style={tdS}></td>
+                            <td colSpan={isAdmin ? 3 : 2} style={tdS}></td>
                         </tr>
                     )}
                 </tbody>
@@ -125,6 +133,14 @@ function TicketTable({ data, title }: { data: TicketRow[], title?: string }) {
                     <span style={{ fontSize: '13px', fontWeight: 600 }}>Trang {page} / {totalPages}</span>
                     <button className="btn btn-outline btn-sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Sau</button>
                 </div>
+            )}
+            {printTicket && (
+                <PrintTicketModal
+                    isOpen={true}
+                    onClose={() => setPrintTicket(null)}
+                    ticket={printTicket}
+                    bizInfo={bizInfo}
+                />
             )}
         </div>
     );
@@ -695,7 +711,7 @@ export default function DashboardPage() {
                         })
                     )}>📊 Xuất Excel</button>
                 </div>
-                <TicketTable data={tickets} title="Danh sách Vé đã Bán" />
+                <TicketTable data={tickets} title="Danh sách Vé đã Bán" isAdmin={isAdmin} bizInfo={bizInfo} />
                 {retailItems.length > 0 && (
                     <div style={{ marginTop: '32px' }}>
                         <RetailTable data={retailItems} />
@@ -1024,7 +1040,7 @@ export default function DashboardPage() {
                         })
                     )}>📊 Xuất Excel</button>
                 </div>
-                <TicketTable data={mySalesTickets} />
+                <TicketTable data={mySalesTickets} isAdmin={isAdmin} bizInfo={bizInfo} />
             </>
         );
     }
