@@ -550,8 +550,23 @@ export default function DashboardPage() {
                     <div style="height:60px;"></div>
             </div>`;
 
-        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
-        if (!win) return;
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = 'none';
+
+        document.body.appendChild(iframe);
+        const win = iframe.contentWindow;
+        if (!win) {
+            document.body.removeChild(iframe);
+            alert('Không thể khởi tạo trình in bộ nhớ tạm.');
+            return;
+        }
+
+        win.document.open();
         win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
         <style>
             @page { size: A4 landscape; margin: 10mm; }
@@ -589,9 +604,16 @@ export default function DashboardPage() {
             ${signatureFooter}
             <p class="footer">${bizInfo.name} — Phầm mềm quản lý bán vé tự động</p>
             <div style="text-align: center; margin-top: 32px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>
-            <script>setTimeout(function(){ window.print(); }, 500);<\/script>
         </body></html>`);
         win.document.close();
+        
+        setTimeout(() => {
+            win.focus();
+            win.print();
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+            }, 500);
+        }, 300);
     }
 
     // --- EXCEL EXPORT (.xlsx) ---

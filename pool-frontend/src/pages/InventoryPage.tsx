@@ -106,8 +106,22 @@ export default function InventoryPage() {
 
     const printInventorySlip = (mode: 'IMPORT' | 'EXPORT', items: SlipItem[], note: string) => {
         const isA5 = bizInfo.print_format === 'A5';
-        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
-        if (!win) return;
+
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = 'none';
+
+        document.body.appendChild(iframe);
+        const win = iframe.contentWindow;
+        if (!win) {
+            document.body.removeChild(iframe);
+            alert('Không thể khởi tạo trình in bộ nhớ tạm.');
+            return;
+        }
 
         const slipId = (mode === 'IMPORT' ? 'NK-' : 'XK-') + Date.now().toString().slice(-6);
         const slipTitle = mode === 'IMPORT' ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO';
@@ -138,7 +152,7 @@ export default function InventoryPage() {
             '.mb-2 { margin-bottom: 8px; }',
             '.mb-4 { margin-bottom: ' + (isA5 ? '20px' : '12px') + '; }',
             'h1 { font-size: ' + (isA5 ? '22px' : '18px') + '; text-transform: uppercase; margin-bottom: 4px; }',
-            'h2 { font-size: ' + (isA5 ? '18px' : '16px') + '; text-transform: uppercase; margin-top: 10px; margin-bottom: 16px; border-bottom: 2px ' + (isA5 ? 'solid' : 'dashed') + ' #000; padding-bottom: 8px; display: inline-block; }',
+            'h2 { font-size: ' + (isA5 ? '18px' : '16px') + '; text-transform: uppercase; margin-top: 10px; margin-bottom: 16px; border-bottom: 2px ' + (isA5 ? 'solid' : 'dashed') + '#000; padding-bottom: 8px; display: inline-block; }',
             '.header-container { text-align: center; margin-bottom: 20px; }',
             '.info-container { display: flex; flex-wrap: wrap; margin-bottom: 12px; justify-content: space-between; gap: 8px; font-size: ' + (isA5 ? '14px' : '12px') + '; }',
             '.info-item { width: ' + (isA5 ? '48%' : '100%') + '; }',
@@ -171,12 +185,20 @@ export default function InventoryPage() {
             '<div><p>Người lập phiếu</p><br><br><br><p>' + (profile?.full_name || 'Admin') + '</p></div>',
             '</div>',
             '<div style="text-align: center; margin-top: 32px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
-            '<script>setTimeout(function(){window.print();},500);</' + 'script>',
             '</body>',
             '</html>'
         ];
+        win.document.open();
         win.document.write(htmlParts.join(''));
         win.document.close();
+        
+        setTimeout(() => {
+            win.focus();
+            win.print();
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+            }, 500);
+        }, 300);
     };
 
     const fetchAuditDetails = async (auditId: string) => {
@@ -195,8 +217,21 @@ export default function InventoryPage() {
         const items = await fetchAuditDetails(auditId);
         if (!items) return;
 
-        const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
-        if (!win) return;
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = 'none';
+
+        document.body.appendChild(iframe);
+        const win = iframe.contentWindow;
+        if (!win) {
+            document.body.removeChild(iframe);
+            alert('Không thể khởi tạo trình in bộ nhớ tạm.');
+            return;
+        }
 
         const slipTitle = 'PHIẾU KIỂM KHO';
         const currentDate = new Date().toLocaleString('vi-VN');
@@ -265,12 +300,20 @@ export default function InventoryPage() {
             '<div><p>Người lập phiếu</p><br><br><br><br><p>' + (profile?.full_name || 'Admin') + '</p></div>',
             '</div>',
             '<div style="text-align: center; margin-top: 40px; font-size: 11px; color: #666; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
-            '<script>setTimeout(function(){window.print();},500);</' + 'script>',
             '</body>',
             '</html>'
         ];
+        win.document.open();
         win.document.write(htmlParts.join(''));
         win.document.close();
+        
+        setTimeout(() => {
+            win.focus();
+            win.print();
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+            }, 500);
+        }, 300);
     };
 
     const exportAuditToExcel = async (auditId: string, note: string | null) => {
