@@ -1098,139 +1098,10 @@ export default function POSPage() {
         { key: 'PRODUCT', label: 'Sản Phẩm', icon: '🥤', count: products.length },
     ];
 
-    function printReceipt() {
-        if (!checkoutReceipt) return;
-
-        const isA5 = bizInfo.print_format === 'A5';
-        
-        const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = 'none';
-
-        // Add iframe to body so it gets a contentWindow
-        document.body.appendChild(iframe);
-        const win = iframe.contentWindow;
-        if (!win) {
-            document.body.removeChild(iframe);
-            alert('Không thể khởi tạo trình in bộ nhớ tạm.');
-            return;
-        }
-
-        win.document.open();
-        win.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Hóa Đơn</title>
-            <style>
-                @media print {
-                    @page { 
-                        size: ${isA5 ? 'A5 portrait' : 'auto'}; 
-                        margin: 0; 
-                    }
-                    body { 
-                      width: 100% !important; 
-                      margin: 0 !important; 
-                      padding: ${isA5 ? '10mm' : '4mm'} !important; 
-                    }
-                }
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body {
-                    font-family: 'Times New Roman', Times, serif;
-                    width: 100%;
-                    max-width: ${isA5 ? '148mm' : '320px'};
-                    margin: 0 auto;
-                    padding: ${isA5 ? '20px' : '16px'};
-                    font-size: ${isA5 ? '18px' : '15px'};
-                    color: #000;
-                    background: #fff;
-                }
-                .text-center { text-align: center; }
-                .font-bold { font-weight: bold; }
-                .mb-2 { margin-bottom: 8px; }
-                .mb-4 { margin-bottom: 16px; }
-                .title { font-size: ${isA5 ? '24px' : '20px'}; text-transform: uppercase; }
-                .line-items { border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 12px 0; margin: 16px 0; }
-                .item-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
-                .total-row { display: flex; justify-content: space-between; font-size: ${isA5 ? '22px' : '18px'}; font-weight: bold; }
-                .info-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: ${isA5 ? '15px' : '13px'}; }
-                .footer { text-align: center; font-size: ${isA5 ? '14px' : '12px'}; margin-top: 24px; color: #444; }
-            </style>
-        </head>
-        <body>
-            <div class="text-center mb-4">
-                ${bizInfo.business_logo ? `<img src="${bizInfo.business_logo}" style="max-height: 48px; margin-bottom: 8px;">` : ''}
-                <div class="font-bold" style="font-size: 16px;">${bizInfo.business_name || 'Hệ Thống Vé Bơi'}</div>
-                <div style="font-size: 13px; color: #444; margin-top: 4px;">${bizInfo.business_address || ''}</div>
-            </div>
-
-            <h1 class="text-center title mb-4">HÓA ĐƠN BÁN HÀNG</h1>
-            
-            <div class="mb-2">
-                <div class="info-row"><span>Mã HĐ:</span> <strong>${checkoutReceipt.order_id.substring(0, 8).toUpperCase()}</strong></div>
-                <div class="info-row"><span>Ngày:</span> <strong>${formatTime(checkoutReceipt.createdAt)}</strong></div>
-                <div class="info-row"><span>Thu ngân:</span> <strong>${profile?.full_name || 'Admin'}</strong></div>
-                ${checkoutReceipt.customerName ? `<div class="info-row"><span>Khách hàng:</span> <strong>${checkoutReceipt.customerName}</strong></div>` : ''}
-                ${checkoutReceipt.customerPhone ? `<div class="info-row"><span>SĐT:</span> <strong>${checkoutReceipt.customerPhone}</strong></div>` : ''}
-            </div>
-
-            <div class="line-items">
-                <div class="item-row font-bold" style="margin-bottom: 12px; font-size: ${isA5 ? '15px' : '13px'}; border-bottom: 1px solid #000; padding-bottom: 4px;">
-                    <span style="flex: 2">Sản phẩm</span>
-                    <span style="flex: 1; text-align: center;">SL</span>
-                    <span style="flex: 1; text-align: right;">T.Tiền</span>
-                </div>
-                ${checkoutReceipt.items.map((it: any) => `
-                    <div class="item-row" style="align-items: flex-start;">
-                        <div style="flex: 2; padding-right: 8px;">
-                            <div>${it.name} ${it.isLesson ? '(Khóa học)' : ''}</div>
-                            ${it.promoName ? `<div style="font-size: 11px; margin-top: 2px;">🎁 ${it.promoName} (${it.promoLabel})</div>` : ''}
-                        </div>
-                        <span style="flex: 1; text-align: center;">${it.quantity}</span>
-                        <span style="flex: 1; text-align: right; font-weight: bold;">${it.subtotal.toLocaleString('vi-VN')}đ</span>
-                    </div>
-                `).join('')}
-            </div>
-
-            <div class="total-row mb-2">
-                <span>Tổng CỘNG:</span>
-                <span>${checkoutReceipt.totalPrice.toLocaleString('vi-VN')}đ</span>
-            </div>
-            
-            <div class="info-row mb-4">
-                <span>Thanh toán:</span>
-                <strong>${checkoutReceipt.paymentMethod === 'BANK_TRANSFER' ? 'Chuyển khoản' : checkoutReceipt.paymentMethod === 'CARD' ? 'Quẹt thẻ' : 'Tiền mặt'}</strong>
-            </div>
-
-            <div class="footer">
-                <p class="font-bold mb-2">CẢM ƠN QUÝ KHÁCH & HẸN GẶP LẠI!</p>
-                <p style="font-size: 11px; font-style: italic;">Quý khách vui lòng kiểm tra lại vé và hóa đơn trước khi rời quầy.</p>
-            </div>
-        </body>
-        </html>
-        `);
-        win.document.close();
-        
-        setTimeout(() => {
-            win.focus();
-            win.print();
-            setTimeout(() => {
-                document.body.removeChild(iframe);
-            }, 500);
-        }, 300);
-    }             
     // Show Master Receipt 
     if (checkoutReceipt) {
         const isA5 = bizInfo.print_format === 'A5';
         const printReceipt = () => {
-            const win = window.open('', '_blank', 'width=1024,height=768,scrollbars=yes,resizable=no');
-            if (!win) return;
-
             const content = document.querySelector('.checkout-receipt-card')?.innerHTML || '';
             const htmlParts = [
                 '<!DOCTYPE html>',
@@ -1262,21 +1133,43 @@ export default function POSPage() {
                 '<div>Cảm ơn quý khách và hẹn gặp lại!</div>',
                 '<div style="margin-top: 8px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
                 '</div>',
-                '<script>setTimeout(function(){window.print();},500);</' + 'script>',
                 '</body>',
                 '</html>'
             ];
+
+            const iframe = document.createElement('iframe');
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = 'none';
+
+            document.body.appendChild(iframe);
+            const win = iframe.contentWindow;
+            if (!win) {
+                document.body.removeChild(iframe);
+                alert('Không thể khởi tạo trình in bộ nhớ tạm.');
+                return;
+            }
+
+            win.document.open();
             win.document.write(htmlParts.join('\n'));
             win.document.close();
 
             // Transition to ticket popups after invoice
             setTimeout(() => {
-                setCheckoutReceipt(null);
-                if (pendingTickets.length > 0) {
-                    setSoldTickets(pendingTickets);
-                    setPendingTickets([]);
-                }
-            }, 500);
+                win.focus();
+                win.print();
+                setTimeout(() => {
+                    document.body.removeChild(iframe);
+                    setCheckoutReceipt(null);
+                    if (pendingTickets.length > 0) {
+                        setSoldTickets(pendingTickets);
+                        setPendingTickets([]);
+                    }
+                }, 500);
+            }, 300);
         };
 
         return (
