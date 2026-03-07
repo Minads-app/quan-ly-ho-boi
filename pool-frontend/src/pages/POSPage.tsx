@@ -947,14 +947,14 @@ export default function POSPage() {
         if (!checkinCode.trim()) return;
 
         setCheckingIn(true);
-        await doCheckin(checkinCode.trim());
+        await doCheckin(checkinCode.trim().toUpperCase());
         setCheckingIn(false);
     }
 
     async function handleSelectPackage(ticketId: string) {
         setShowPackageSelectModal(false);
         setCheckingIn(true);
-        await doCheckin(pendingCheckinCode, false, ticketId);
+        await doCheckin(pendingCheckinCode.trim().toUpperCase(), false, ticketId);
         setCheckingIn(false);
     }
 
@@ -1606,7 +1606,7 @@ export default function POSPage() {
                                 className="input"
                                 placeholder="Quét mã QR Thẻ vào đây..."
                                 value={checkinCode}
-                                onChange={e => setCheckinCode(e.target.value)}
+                                onChange={e => setCheckinCode(e.target.value.toUpperCase())}
                                 style={{ textAlign: 'center', fontSize: '18px', padding: '16px', marginBottom: '16px' }}
                                 autoFocus
                             />
