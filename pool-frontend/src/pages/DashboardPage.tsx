@@ -72,6 +72,14 @@ const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontS
 const tdS: React.CSSProperties = { padding: '8px 10px', fontSize: '13px', whiteSpace: 'nowrap' };
 const dateInputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' };
 
+function maskCardCode(code: string | null, isAdmin: boolean): string | null {
+    if (!code) return null;
+    if (isAdmin) return code;
+    if (code.length <= 6) return '***';
+    // Show first 5 and last 4, middle masked
+    return `${code.substring(0, 5)}***${code.substring(code.length - 4)}`;
+}
+
 function TicketTable({ data, title, isAdmin, bizInfo }: { data: TicketRow[], title?: string, isAdmin?: boolean, bizInfo?: any }) {
     const [page, setPage] = useState(1);
     const [printTicket, setPrintTicket] = useState<PrintTicketData | null>(null);
@@ -105,7 +113,7 @@ function TicketTable({ data, title, isAdmin, bizInfo }: { data: TicketRow[], tit
                                     </span>
                                 </td>
                                 <td style={tdS}>{t.customer_name || 'Khách lẻ'}</td>
-                                <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code}</code> : '—'}</td>
+                                <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{maskCardCode(t.card_code, isAdmin || false)}</code> : '—'}</td>
                                 <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
                                 <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
                                 <td style={tdS}>{t.sold_by_name}</td>
@@ -640,7 +648,7 @@ export default function DashboardPage() {
             ${tickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
-            return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
+            return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
             <tr class="total-row"><td colspan="6">TỔNG CỘNG VÉ (${tickets.length} vé)</td><td style="text-align:right">${fmt(totalTicketRevenue)}</td><td colspan="2"></td></tr>
             </tbody></table>
@@ -704,7 +712,7 @@ export default function DashboardPage() {
                         tickets.map((t, i) => {
                             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
                             return [
-                                String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.customer_phone || '', t.card_code || '',
+                                String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.customer_phone || '', maskCardCode(t.card_code, isAdmin || false) || '',
                                 t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
                                 String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at)
                             ]
@@ -770,7 +778,7 @@ export default function DashboardPage() {
 
         const allTableHtml = sections.map(s => `<h3 style="margin:16px 0 4px">${s.title} (${s.data.length} lượt)</h3>` +
             `<table><thead><tr><th>STT</th><th>Khách</th><th>Loại vé</th><th>Mã thẻ</th><th>Thời gian vào cổng</th></tr></thead><tbody>` +
-            s.data.map((t, i) => `<tr><td>${i + 1}</td><td>${t.ticket?.customer_name || 'Khách lẻ'}</td><td>${t.ticket?.type_name || ''}</td><td>${t.ticket?.card_code || ''}</td><td>${fmtDateTime(t.scanned_at)}</td></tr>`).join('') +
+            s.data.map((t, i) => `<tr><td>${i + 1}</td><td>${t.ticket?.customer_name || 'Khách lẻ'}</td><td>${t.ticket?.type_name || ''}</td><td>${maskCardCode(t.ticket?.card_code || null, isAdmin || false) || ''}</td><td>${fmtDateTime(t.scanned_at)}</td></tr>`).join('') +
             `</tbody></table>`
         ).join('');
 
@@ -791,7 +799,7 @@ export default function DashboardPage() {
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport(`Báo cáo Lượt Khách Qua Cổng (${from} → ${to})`, allTableHtml)}>🖨️ In A4</button>
                     <button className="btn btn-secondary" onClick={() => exportExcel(`luot_khach_qua_cong_${from}_${to}`, ['STT', 'Loại', 'Khách', 'Loại vé', 'Mã thẻ', 'Thời gian vào'],
-                        scanLogs.map((s, i) => [String(i + 1), s.ticket?.category || '', s.ticket?.customer_name || 'Khách lẻ', s.ticket?.type_name || '', s.ticket?.card_code || '', fmtDateTime(s.scanned_at)])
+                        scanLogs.map((s, i) => [String(i + 1), s.ticket?.category || '', s.ticket?.customer_name || 'Khách lẻ', s.ticket?.type_name || '', maskCardCode(s.ticket?.card_code || null, isAdmin || false) || '', fmtDateTime(s.scanned_at)])
                     )}>📊 Xuất Excel</button>
                 </div>
                 {sections.map(s => (
@@ -815,7 +823,7 @@ export default function DashboardPage() {
                                                     </span>
                                                 </td>
                                                 <td style={tdS}>{l.ticket?.customer_name || 'Khách lẻ'}</td>
-                                                <td style={tdS}>{l.ticket?.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{l.ticket.card_code}</code> : '—'}</td>
+                                                <td style={tdS}>{l.ticket?.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{maskCardCode(l.ticket.card_code, isAdmin || false)}</code> : '—'}</td>
                                                 <td style={{ ...tdS, fontWeight: 600, color: '#059669' }}>{fmtDateTime(l.scanned_at)}</td>
                                             </tr>
                                         ))}
@@ -835,7 +843,7 @@ export default function DashboardPage() {
                 const warns: string[] = [];
                 if (t.remaining_sessions !== null && t.remaining_sessions <= 3) warns.push(`Còn ${t.remaining_sessions} lượt`);
                 if (t.valid_until && new Date(t.valid_until) <= new Date(Date.now() + 7 * 86400000)) warns.push('Sắp hết hạn');
-                return `<tr><td>${i + 1}</td><td>${t.customer_name || '—'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${t.type_name}</td><td>${t.remaining_sessions ?? '∞'}</td><td>${fmtDate(t.valid_until)}</td><td style="color:red;font-weight:700">${warns.join(', ')}</td></tr>`;
+                return `<tr><td>${i + 1}</td><td>${t.customer_name || '—'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${t.type_name}</td><td>${t.remaining_sessions ?? '∞'}</td><td>${fmtDate(t.valid_until)}</td><td style="color:red;font-weight:700">${warns.join(', ')}</td></tr>`;
             }).join('') + `</tbody></table>`;
 
         return (
@@ -843,7 +851,7 @@ export default function DashboardPage() {
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport('Cảnh báo Khách sắp hết hạn / hết lượt', tableHtml)}>🖨️ In A4</button>
                     <button className="btn btn-secondary" onClick={() => exportExcel('canh_bao_khach', ['STT', 'Khách', 'SĐT', 'Mã thẻ', 'Loại', 'Lượt còn', 'Hết hạn'],
-                        warningTickets.map((t, i) => [String(i + 1), t.customer_name || '—', t.customer_phone || '', t.card_code || '', t.type_name, String(t.remaining_sessions ?? '∞'), fmtDate(t.valid_until)])
+                        warningTickets.map((t, i) => [String(i + 1), t.customer_name || '—', t.customer_phone || '', maskCardCode(t.card_code, isAdmin || false) || '', t.type_name, String(t.remaining_sessions ?? '∞'), fmtDate(t.valid_until)])
                     )}>📊 Xuất Excel</button>
                 </div>
                 <div style={{ marginBottom: '12px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e', fontSize: '13px' }}>
@@ -868,7 +876,7 @@ export default function DashboardPage() {
                                         <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                             <td style={tdS}><strong>{t.customer_name || '—'}</strong></td>
                                             <td style={tdS}>{t.customer_phone || '—'}</td>
-                                            <td style={tdS}><code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code || '—'}</code></td>
+                                            <td style={tdS}><code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{maskCardCode(t.card_code, isAdmin || false) || '—'}</code></td>
                                             <td style={tdS}>{t.type_name}</td>
                                             <td style={{ ...tdS, textAlign: 'center', color: (t.remaining_sessions !== null && t.remaining_sessions <= 3) ? '#ef4444' : '', fontWeight: 700 }}>
                                                 {t.remaining_sessions ?? '∞'}
@@ -1010,7 +1018,7 @@ export default function DashboardPage() {
             ${mySalesTickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
-            return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.card_code || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
+            return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
             <tr class="total-row"><td colspan="5">TỔNG CỘNG (${mySalesTickets.length} vé)</td><td style="text-align:right">${fmt(myRevenue)}</td><td></td></tr></tbody></table>`;
 
@@ -1033,7 +1041,7 @@ export default function DashboardPage() {
                         mySalesTickets.map((t, i) => {
                             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
                             return [
-                                String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.card_code || '',
+                                String(i + 1), displayType, t.customer_name || 'Khách lẻ', maskCardCode(t.card_code, isAdmin || false) || '',
                                 t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
                                 String(t.price_paid), fmtDateTime(t.sold_at)
                             ]
@@ -1061,7 +1069,7 @@ export default function DashboardPage() {
 
         const classLabel = (ct: string | null) => ct === 'GROUP' ? '👥 Nhóm' : ct === 'ONE_ON_ONE' ? '🧑‍🏫 1:1' : ct === 'ONE_ON_TWO' ? '🧑‍🏫 1:2' : '—';
 
-        const tableRef = `<table id="lesson-table"><thead><tr><th>#</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>Gói</th><th>Loại lớp</th><th>Buổi còn</th><th>Hiệu lực</th><th>Giá</th><th>Trạng thái</th><th>Ngày ĐK</th></tr></thead><tbody>${lessonTickets.map((t, i) => { const st = getLessonStatus(t); return `<tr><td>${i + 1}</td><td>${t.customer_name || 'N/A'}</td><td>${t.customer_phone || ''}</td><td>${t.card_code || ''}</td><td>${t.type_name}</td><td>${t.lesson_class_type === 'GROUP' ? 'Nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}</td><td>${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}</td><td>${t.valid_from ? fmtDate(t.valid_from) + ' → ' + fmtDate(t.valid_until) : 'Chưa KH'}</td><td>${fmt(t.price_paid)}</td><td>${st.label}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`; }).join('')}</tbody></table>`;
+        const tableRef = `<table id="lesson-table"><thead><tr><th>#</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>Gói</th><th>Loại lớp</th><th>Buổi còn</th><th>Hiệu lực</th><th>Giá</th><th>Trạng thái</th><th>Ngày ĐK</th></tr></thead><tbody>${lessonTickets.map((t, i) => { const st = getLessonStatus(t); return `<tr><td>${i + 1}</td><td>${t.customer_name || 'N/A'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${t.type_name}</td><td>${t.lesson_class_type === 'GROUP' ? 'Nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}</td><td>${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}</td><td>${t.valid_from ? fmtDate(t.valid_from) + ' → ' + fmtDate(t.valid_until) : 'Chưa KH'}</td><td>${fmt(t.price_paid)}</td><td>${st.label}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`; }).join('')}</tbody></table>`;
 
         return (
             <div style={{ animation: 'fadeIn 0.3s ease' }}>
@@ -1077,7 +1085,7 @@ export default function DashboardPage() {
                                 lessonTickets.map((t, i) => {
                                     const st = getLessonStatus(t);
                                     return [
-                                        String(i + 1), t.customer_name || '', t.customer_phone || '', t.card_code || '',
+                                        String(i + 1), t.customer_name || '', t.customer_phone || '', maskCardCode(t.card_code, isAdmin || false) || '',
                                         t.type_name, classLabel(t.lesson_class_type),
                                         `${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}`,
                                         t.valid_from ? `${fmtDate(t.valid_from)} → ${fmtDate(t.valid_until)}` : 'Chưa KH',

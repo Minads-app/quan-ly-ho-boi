@@ -17,7 +17,7 @@ function parseDateDDMMYYYY(val: any): string {
     if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
     const parts = str.split(/[/.-]/);
     if (parts.length === 3) {
-        let [d, m, y] = parts;
+        const d = parts[0], m = parts[1]; let y = parts[2];
         if (d.length === 4) return `${d}-${m.padStart(2, '0')}-${y.padStart(2, '0')}`;
         if (y.length === 2) y = '20' + y;
         return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
@@ -220,6 +220,15 @@ export default function CustomerPage() {
         if (t.remaining_sessions !== null && t.total_sessions !== null && t.remaining_sessions < t.total_sessions) return 'IN_USE';
         if (t.status === 'IN' || t.status === 'OUT' || t.status === 'IN_USE') return 'IN_USE';
         return 'UNUSED';
+    }
+
+    // Helper: Mask card code for non-admins
+    function maskCardCode(code: string | null): string | null {
+        if (!code) return null;
+        if (profile?.role === 'ADMIN') return code;
+        if (code.length <= 6) return '***';
+        // Show first 5 and last 4, middle masked
+        return `${code.substring(0, 5)}***${code.substring(code.length - 4)}`;
     }
 
     // --- Build customer summaries from customers table ---
@@ -781,7 +790,7 @@ export default function CustomerPage() {
                                                 <div>
                                                     <div style={{ fontWeight: 600, fontSize: '15px' }}>{c.name}</div>
                                                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                                        🏷️ {c.card_code} · 📞 {c.phone}
+                                                        🏷️ {maskCardCode(c.card_code)} · 📞 {c.phone}
                                                         {c.email && <span> · ✉️ {c.email}</span>}
                                                         {allCustomers.find(x => x.id === c.id)?.hotkey && <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {allCustomers.find(x => x.id === c.id)!.hotkey}</span>}
                                                     </div>
@@ -813,6 +822,10 @@ export default function CustomerPage() {
                                                         return (
                                                             <div key={p.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '200px' }}>
+                                                                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{p.customer_name}</div>
+                                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                                                        Mã thẻ: {maskCardCode(p.card_code || '—')} {p.customer_phone ? `· SĐT: ${p.customer_phone}` : ''}
+                                                                    </div>
                                                                     <span style={{ background: p.category === 'MONTHLY' ? '#dbeafe' : p.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: p.category === 'MONTHLY' ? '#1d4ed8' : p.category === 'LESSON' ? '#166534' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{p.type_name}</span>
                                                                     <span style={{ background: pst.bg, color: pst.color, padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{pst.text}</span>
                                                                     {p.remaining_sessions !== null && (

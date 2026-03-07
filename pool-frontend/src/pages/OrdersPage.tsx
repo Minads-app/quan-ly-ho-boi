@@ -63,6 +63,15 @@ export default function OrdersPage() {
 
     const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null);
 
+    // Helper: Mask card code for non-admins
+    function maskCardCode(code: string | null): string | null {
+        if (!code) return null;
+        if (profile?.role === 'ADMIN') return code;
+        if (code.length <= 6) return '***';
+        // Show first 5 and last 4, middle masked
+        return `${code.substring(0, 5)}***${code.substring(code.length - 4)}`;
+    }
+
     // Edit Customer Info Modal
     const [isEditingCustomer, setIsEditingCustomer] = useState(false);
     const [editCustName, setEditCustName] = useState('');
@@ -481,7 +490,7 @@ export default function OrdersPage() {
                                                 <td style={{ padding: '12px 16px' }}>
                                                     <div style={{ fontWeight: 600 }}>🎫 {t.type_name}</div>
                                                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                                                        {t.card_code ? `Thẻ: ${t.card_code} • ` : ''}
+                                                        {t.card_code ? `Thẻ: ${maskCardCode(t.card_code)} • ` : ''}
                                                         {fmtDate(t.valid_from)} - {fmtDate(t.valid_until)}
                                                     </div>
                                                 </td>

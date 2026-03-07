@@ -63,6 +63,15 @@ interface BusinessInfo {
 }
 
 export default function POSPage() {
+    // Helper: Mask card code for non-admins
+    function maskCardCode(code: string | null): string | null {
+        if (!code) return null;
+        if (profile?.role === 'ADMIN') return code;
+        if (code.length <= 6) return '***';
+        // Show first 5 and last 4, middle masked
+        return `${code.substring(0, 5)}***${code.substring(code.length - 4)}`;
+    }
+
     const { profile } = useAuth();
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
     const [loading, setLoading] = useState(true);
@@ -1499,7 +1508,7 @@ export default function POSPage() {
                                             onMouseLeave={e => (e.currentTarget.style.background = '')}>
                                             <strong>{c.full_name || 'N/A'}</strong>
                                             <span style={{ marginLeft: '8px', color: '#64748b' }}>📞 {c.phone || '—'}</span>
-                                            <span style={{ marginLeft: '8px', color: '#94a3b8', fontSize: '11px' }}>🏷️ {c.card_code || '—'}</span>
+                                            <span style={{ marginLeft: '8px', color: '#94a3b8', fontSize: '11px' }}>🏷️ {maskCardCode(c.card_code) || '—'}</span>
                                             {c.hotkey && <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {c.hotkey}</span>}
                                         </div>
                                     ))}
@@ -1513,7 +1522,7 @@ export default function POSPage() {
                                     <div style={{ fontSize: '12px' }}>
                                         <div style={{ fontWeight: 600, color: '#166534' }}>👤 {customerName || 'Chưa có tên'}</div>
                                         <div style={{ color: '#64748b', marginTop: '2px' }}>
-                                            {cardCode && <span>🏷️ {cardCode}</span>}
+                                            {cardCode && <span>🏷️ {maskCardCode(cardCode)}</span>}
                                             {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
                                             {(() => { const hk = hotkeyCustomers.find(c => c.id === selectedCustomerId); return hk?.hotkey ? <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {hk.hotkey}</span> : null; })()}
                                         </div>
@@ -1916,7 +1925,7 @@ export default function POSPage() {
                                             <div style={{ fontSize: '13px', fontWeight: 600, color: '#166534', marginBottom: '4px' }}>👤 Thông tin cấp thẻ</div>
                                             <div style={{ fontSize: '14px', fontWeight: 600 }}>{customerName || 'Chưa có tên'}</div>
                                             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                                                {cardCode && <span>🏷️ {cardCode}</span>}
+                                                {cardCode && <span>🏷️ {maskCardCode(cardCode)}</span>}
                                                 {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
                                             </div>
                                         </div>
