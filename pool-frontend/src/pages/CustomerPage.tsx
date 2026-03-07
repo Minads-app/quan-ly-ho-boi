@@ -6,6 +6,25 @@ import type { Customer } from '../types';
 import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
 
+// Helper to parse dates from Excel (DD/MM/YYYY or YYYY-MM-DD or Excel serial)
+function parseDateDDMMYYYY(val: any): string {
+    if (!val) return '';
+    if (typeof val === 'number') {
+        const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+        return date.toISOString().split('T')[0];
+    }
+    const str = String(val).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const parts = str.split(/[/.-]/);
+    if (parts.length === 3) {
+        let [d, m, y] = parts;
+        if (d.length === 4) return `${d}-${m.padStart(2, '0')}-${y.padStart(2, '0')}`;
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    return str;
+}
+
 type SubTab = 'CUSTOMERS' | 'PACKAGES';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
@@ -89,7 +108,7 @@ export default function CustomerPage() {
 
     // Import legacy customers
     const [showImportModal, setShowImportModal] = useState(false);
-    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; pkg_name: string; total_sessions: number; remaining: number; valid_from: string; valid_until: string }[]>([]); const [importing, setImporting] = useState(false);
+    const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; pkg_name: string; total_sessions: number; remaining: number; valid_from: string; valid_until: string; sold_at: string }[]>([]); const [importing, setImporting] = useState(false);
     const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
     const [importWarnings, setImportWarnings] = useState<{ row: number; field: string; message: string }[]>([]);
     const [ticketTypesForImport, setTicketTypesForImport] = useState<{ id: string; name: string; category: string }[]>([]);
@@ -274,7 +293,7 @@ export default function CustomerPage() {
             .from('card_bank')
             .select('*')
             .eq('card_code', inputCardCode)
-            .single();
+            .maybeSingle();
 
         let shouldInsertCard = false;
         let shouldUpdateCardId = null;
@@ -336,7 +355,7 @@ export default function CustomerPage() {
 
         // --- 5. Revoke old card ---
         if (oldCode && oldCode !== inputCardCode) {
-            const { data: oldCard } = await supabase.from('card_bank').select('id').eq('card_code', oldCode).single();
+            const { data: oldCard } = await supabase.from('card_bank').select('id').eq('card_code', oldCode).maybeSingle();
             if (oldCard) {
                 await supabase.from('card_bank').update({ status: 'REVOKED' }).eq('id', oldCard.id);
             }
@@ -357,6 +376,8 @@ export default function CustomerPage() {
         const updatedTotal = editTotalSessions === '' ? null : Number(editTotalSessions);
 
         let finalStatus = selectedPkg.status;
+        if (finalStatus === 'EXPIRING') finalStatus = 'IN_USE'; // EXPIRING is a frontend display status
+        
         let finalValidFrom = editValidFrom || null;
         let finalValidUntil = editValidUntil || null;
 
@@ -487,13 +508,13 @@ export default function CustomerPage() {
     // --- DOWNLOAD IMPORT TEMPLATE ---
     function downloadImportTemplate() {
         const templateData = [
-            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Tên gói/vé': 'VÉ 10 BUỔI', 'Tổng buổi ĐK': 13, 'Buổi còn lại': 10, 'Ngày bắt đầu': '2026-01-15', 'Ngày kết thúc': '2026-07-15' },
-            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Tên gói/vé': 'HỌC BƠI 1:1', 'Tổng buổi ĐK': 15, 'Buổi còn lại': 12, 'Ngày bắt đầu': '', 'Ngày kết thúc': '' },
+            { 'Tên KH': 'NGUYỄN VĂN A', 'SĐT': '0901234567', 'Mã thẻ': 'HB032600001ABC123', 'Loại gói': 'MULTI', 'Tên gói/vé': 'VÉ 10 BUỔI', 'Tổng buổi ĐK': 13, 'Buổi còn lại': 10, 'Ngày mua': '10/01/2026', 'Ngày bắt đầu': '15/01/2026', 'Ngày kết thúc': '15/07/2026' },
+            { 'Tên KH': 'TRẦN THỊ B', 'SĐT': '0912345678', 'Mã thẻ': 'HB032600002DEF456', 'Loại gói': 'LESSON', 'Tên gói/vé': 'HỌC BƠI 1:1', 'Tổng buổi ĐK': 15, 'Buổi còn lại': 12, 'Ngày mua': '', 'Ngày bắt đầu': '', 'Ngày kết thúc': '' },
         ];
         const ws = XLSX.utils.json_to_sheet(templateData);
         ws['!cols'] = [
             { wch: 25 }, { wch: 15 }, { wch: 22 }, { wch: 12 },
-            { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+            { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
         ];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Template');
@@ -505,8 +526,9 @@ export default function CustomerPage() {
             { 'Cột': 'Tên gói/vé', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Tên loại gói/vé đã có trong hệ thống (để khớp tự động). Để trống = lấy gói đầu tiên cùng loại' },
             { 'Cột': 'Tổng buổi ĐK', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Tổng số buổi đăng ký ban đầu. Để trống = không giới hạn' },
             { 'Cột': 'Buổi còn lại', 'Bắt buộc': '⚠️ Nên có', 'Mô tả': 'Số buổi còn lại hiện tại. Để trống = bằng tổng buổi ĐK' },
-            { 'Cột': 'Ngày bắt đầu', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày bắt đầu hiệu lực gói. Định dạng: YYYY-MM-DD (VD: 2026-01-15). Để trống = chưa kích hoạt' },
-            { 'Cột': 'Ngày kết thúc', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày hết hạn gói. Định dạng: YYYY-MM-DD. Để trống = không giới hạn' },
+            { 'Cột': 'Ngày mua', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày mua gói. Định dạng: DD/MM/YYYY (VD: 10/01/2026). Để trống = ngày import' },
+            { 'Cột': 'Ngày bắt đầu', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày bắt đầu hiệu lực gói. Định dạng: DD/MM/YYYY (VD: 15/01/2026). Để trống = chưa kích hoạt' },
+            { 'Cột': 'Ngày kết thúc', 'Bắt buộc': '⚠️ Tùy chọn', 'Mô tả': 'Ngày hết hạn gói. Định dạng: DD/MM/YYYY. Để trống = không giới hạn' },
         ];
         const ws2 = XLSX.utils.json_to_sheet(instrData);
         ws2['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 65 }];
@@ -549,8 +571,9 @@ export default function CustomerPage() {
                 const pkgName = String(r['Tên gói/vé'] || r['Ten goi'] || r['pkg_name'] || r['Tên gói'] || '').trim();
                 const totalSessions = Number(r['Tổng buổi ĐK'] || r['Tong buoi DK'] || r['total_sessions'] || r['Số buổi'] || r['so_buoi'] || r['sessions'] || 0);
                 const remaining = Number(r['Buổi còn lại'] || r['Buoi con lai'] || r['remaining'] || 0) || totalSessions;
-                const validFrom = String(r['Ngày bắt đầu'] || r['Ngay bat dau'] || r['valid_from'] || '').trim();
-                const validUntil = String(r['Ngày kết thúc'] || r['Ngay ket thuc'] || r['valid_until'] || '').trim();
+                const soldAtStr = parseDateDDMMYYYY(r['Ngày mua'] || r['Ngay mua'] || r['sold_at'] || '');
+                const validFrom = parseDateDDMMYYYY(r['Ngày bắt đầu'] || r['Ngay bat dau'] || r['valid_from'] || '');
+                const validUntil = parseDateDDMMYYYY(r['Ngày kết thúc'] || r['Ngay ket thuc'] || r['valid_until'] || '');
 
                 // Validate
                 if (!name) warnings.push({ row: rowNum, field: 'Tên KH', message: 'Thiếu tên khách hàng → dòng sẽ bị bỏ qua' });
@@ -560,7 +583,7 @@ export default function CustomerPage() {
                 if (name && card && remaining > totalSessions && totalSessions > 0) warnings.push({ row: rowNum, field: 'Buổi còn lại', message: `Buổi còn lại (${remaining}) > Tổng buổi (${totalSessions})` });
                 if (validFrom && validUntil && validFrom > validUntil) warnings.push({ row: rowNum, field: 'Ngày', message: 'Ngày bắt đầu > Ngày kết thúc' });
 
-                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', pkg_name: pkgName, total_sessions: totalSessions, remaining, valid_from: validFrom, valid_until: validUntil };
+                return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', pkg_name: pkgName, total_sessions: totalSessions, remaining, valid_from: validFrom, valid_until: validUntil, sold_at: soldAtStr };
             }).filter(r => r.name && r.card_code);
 
             // Check for duplicate card codes in file
@@ -594,7 +617,7 @@ export default function CustomerPage() {
         for (const row of importData) {
             try {
                 // 1. Check if customer with this card_code already exists
-                const { data: existingCust } = await supabase.from('customers').select('id').eq('card_code', row.card_code).single();
+                const { data: existingCust } = await supabase.from('customers').select('id').eq('card_code', row.card_code).maybeSingle();
                 let customerId = existingCust?.id;
 
                 if (!customerId) {
@@ -634,11 +657,12 @@ export default function CustomerPage() {
                     price_paid: 0,
                     source: 'IMPORT',
                     sold_by: profile?.id,
+                    sold_at: row.sold_at ? new Date(row.sold_at + 'T00:00:00').toISOString() : new Date().toISOString(),
                 });
                 if (tickErr) { errors.push(`${row.card_code}: Lỗi tạo vé - ${tickErr.message}`); continue; }
 
                 // 4. Add card to card_bank (source='MANUAL')
-                const { data: existingCard } = await supabase.from('card_bank').select('id').eq('card_code', row.card_code).single();
+                const { data: existingCard } = await supabase.from('card_bank').select('id').eq('card_code', row.card_code).maybeSingle();
                 if (!existingCard) {
                     await supabase.from('card_bank').insert({
                         card_code: row.card_code,
