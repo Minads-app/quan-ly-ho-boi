@@ -501,6 +501,27 @@ export default function CustomerPage() {
         }
     }
 
+    async function handleDeleteCustomer(c: CustomerSummary) {
+        if (!isAdmin) return;
+        
+        if (c.totalPackages > 0) {
+            alert(`⚠️ Không thể xóa khách hàng này!\n\nKhách hàng đang có ${c.totalPackages} gói thẻ. Theo chính sách an toàn dữ liệu, bạn cần phải xóa các gói thẻ này trước khi xóa hồ sơ khách hàng.`);
+            return;
+        }
+
+        if (!confirm(`⚠️ CẢNH BÁO: Xóa hồ sơ khách hàng "${c.name}"?\nHành động này không thể hoàn tác.`)) return;
+
+        const { error } = await supabase.from('customers').delete().eq('id', c.id);
+
+        if (error) {
+            alert('Lỗi xóa khách hàng: ' + error.message);
+        } else {
+            alert('✅ Đã xóa khách hàng thành công!');
+            setExpandedId(null);
+            fetchAllData();
+        }
+    }
+
     // --- Helpers ---
     const fmt = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
     const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('vi-VN') : '—';
@@ -811,7 +832,12 @@ export default function CustomerPage() {
                                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Họ tên:</span> <strong>{c.name}</strong></div>
                                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>SĐT:</span> <strong>{c.phone}</strong></div>
                                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Gói đang dùng:</span> <strong>{c.activePackages}</strong></div>
-                                                    <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: '12px', marginLeft: 'auto' }} onClick={(e) => { e.stopPropagation(); openEditCustomer(c); }}>✏️ Sửa thông tin</button>
+                                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                                                        <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); openEditCustomer(c); }}>✏️ Sửa thông tin</button>
+                                                        {isAdmin && (
+                                                            <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: '12px', color: '#ef4444' }} onClick={(e) => { e.stopPropagation(); handleDeleteCustomer(c); }}>🗑️ Xóa</button>
+                                                        )}
+                                                    </div>
                                                 </div>
 
                                                 {/* Package list */}
