@@ -172,6 +172,7 @@ export default function CustomerPage() {
                 promotions:promotion_id (name, type, value)
             `)
             .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+            .neq('source', 'CHECKIN')
             .order('sold_at', { ascending: false });
 
         if (error) { console.error(error); setLoading(false); return; }
