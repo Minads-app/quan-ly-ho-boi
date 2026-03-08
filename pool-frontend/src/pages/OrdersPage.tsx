@@ -155,7 +155,8 @@ export default function OrdersPage() {
                     id, order_id, ticket_type_id, customer_name, customer_phone, card_code,
                     customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
                     remaining_sessions, total_sessions, valid_from, valid_until, price_paid, status, sold_at,
-                    ticket_types(name, category)
+                    ticket_types(name, category),
+                    customers:customer_id(full_name)
                 `)
                 .in('order_id', orderIds);
 
@@ -180,7 +181,7 @@ export default function OrdersPage() {
                             ticket_type_id: t.ticket_type_id,
                             type_name: (t as any).ticket_types?.name || 'Vé',
                             category: (t as any).ticket_types?.category || 'DAILY',
-                            customer_name: t.customer_name,
+                            customer_name: (t as any).customers?.full_name || t.customer_name,
                             customer_phone: t.customer_phone,
                             customer_name_2: t.customer_name_2,
                             customer_birth_year_2: t.customer_birth_year_2,

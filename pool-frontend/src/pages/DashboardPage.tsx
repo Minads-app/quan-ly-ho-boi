@@ -285,7 +285,8 @@ export default function DashboardPage() {
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
                 valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by,
                 ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
-                profiles:sold_by (full_name)
+                profiles:sold_by (full_name),
+                customers:customer_id (full_name)
             `)
             .gte('sold_at', from + 'T00:00:00+07:00')
             .lte('sold_at', to + 'T23:59:59+07:00')
@@ -310,7 +311,7 @@ export default function DashboardPage() {
 
                 return {
                     id: t.id,
-                    customer_name: t.customer_name,
+                    customer_name: t.customers?.full_name || t.customer_name,
                     customer_phone: t.customer_phone,
                     card_code: t.card_code,
                     price_paid: t.price_paid,
@@ -417,7 +418,8 @@ export default function DashboardPage() {
                 id, scanned_at, direction, success, ticket_id,
                 tickets (
                     customer_name, customer_phone, card_code, price_paid,
-                    ticket_types (name, category)
+                    ticket_types (name, category),
+                    customers:customer_id (full_name)
                 )
             `)
             .eq('direction', 'IN')
@@ -437,7 +439,7 @@ export default function DashboardPage() {
                 status: row.direction,
                 ticket_id: row.ticket_id,
                 ticket: row.tickets ? {
-                    customer_name: row.tickets.customer_name,
+                    customer_name: row.tickets.customers?.full_name || row.tickets.customer_name,
                     customer_phone: row.tickets.customer_phone,
                     card_code: row.tickets.card_code,
                     price_paid: row.tickets.price_paid,
@@ -461,7 +463,8 @@ export default function DashboardPage() {
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
                 valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by,
                 ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
-                profiles:sold_by (full_name)
+                profiles:sold_by (full_name),
+                customers:customer_id (full_name)
             `)
             .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .neq('status', 'EXPIRED')
@@ -470,7 +473,7 @@ export default function DashboardPage() {
 
         const mapped = (data || []).map((t: any) => ({
             id: t.id,
-            customer_name: t.customer_name,
+            customer_name: t.customers?.full_name || t.customer_name,
             customer_phone: t.customer_phone,
             card_code: t.card_code,
             price_paid: t.price_paid,
