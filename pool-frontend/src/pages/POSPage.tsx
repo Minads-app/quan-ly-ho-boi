@@ -536,14 +536,14 @@ export default function POSPage() {
             return {
                 type: 'TICKET', id: c.item.id, quantity: c.quantity, unit_price: c.quantity > 1 ? c.unitPrice : finalPrice, subtotal: c.subtotal,
                 ticket_metadata: {
-                    customer_name: c.customerName || null,
-                    customer_phone: c.customerPhone || null,
+                    customer_name: c.customerName || customerName || null,
+                    customer_phone: c.customerPhone || customerPhone || null,
                     valid_from: validFrom,
                     valid_until: validUntil,
                     remaining_sessions: finalSessions,
                     total_sessions: finalSessions,
                     promotion_id: c.promoId || null,
-                    card_code: c.cardCode || null,
+                    card_code: c.cardCode || cardCode || null,
                     customer_birth_year: c.privateBirthYear || null,
                     customer_name_2: c.customerName2 || null,
                     customer_birth_year_2: c.privateBirthYear2 || null,

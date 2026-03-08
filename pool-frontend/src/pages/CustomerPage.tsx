@@ -235,9 +235,10 @@ export default function CustomerPage() {
 
     // --- Build customer summaries from customers table ---
     function buildCustomerList(): CustomerSummary[] {
-        // Build maps: card_code -> packages AND customer_id -> packages
+        // Build maps: card_code -> packages, customer_id -> packages, customer_phone -> packages
         const pkgByCard = new Map<string, PackageRow[]>();
         const pkgByCustId = new Map<string, PackageRow[]>();
+        const pkgByPhone = new Map<string, PackageRow[]>();
         allPackages.forEach(p => {
             if (p.card_code) {
                 if (!pkgByCard.has(p.card_code)) pkgByCard.set(p.card_code, []);
@@ -247,16 +248,22 @@ export default function CustomerPage() {
                 if (!pkgByCustId.has(p.customer_id)) pkgByCustId.set(p.customer_id, []);
                 pkgByCustId.get(p.customer_id)!.push(p);
             }
+            if (p.customer_phone) {
+                if (!pkgByPhone.has(p.customer_phone)) pkgByPhone.set(p.customer_phone, []);
+                pkgByPhone.get(p.customer_phone)!.push(p);
+            }
         });
 
         return allCustomers.map(c => {
-            // Match by card_code first, then merge any additional by customer_id
+            // Match by card_code first, then by customer_id, then by phone
             const byCard = pkgByCard.get(c.card_code) || [];
             const byCustId = pkgByCustId.get(c.id) || [];
+            const byPhone = c.phone ? (pkgByPhone.get(c.phone) || []) : [];
             // Merge & deduplicate by id
             const seenIds = new Set(byCard.map(p => p.id));
             const packages = [...byCard];
             byCustId.forEach(p => { if (!seenIds.has(p.id)) { packages.push(p); seenIds.add(p.id); } });
+            byPhone.forEach(p => { if (!seenIds.has(p.id)) { packages.push(p); seenIds.add(p.id); } });
             const activeOrExpiring = packages.filter(p => p.status === 'IN_USE' || p.status === 'UNUSED' || p.status === 'EXPIRING');
             let overallStatus = 'EXPIRED';
             if (packages.length === 0) overallStatus = 'NONE';
