@@ -441,7 +441,9 @@ export default function CustomerPage() {
             valid_from: finalValidFrom,
             valid_until: finalValidUntil,
             price_paid: editPricePaid === '' ? selectedPkg.price_paid : Number(editPricePaid),
-            sold_at: editSoldAt ? new Date(editSoldAt + 'T00:00:00').toISOString() : selectedPkg.sold_at,
+            sold_at: editSoldAt && editSoldAt !== (selectedPkg.sold_at || '').substring(0, 10)
+                ? new Date(editSoldAt + 'T12:00:00+07:00').toISOString()
+                : selectedPkg.sold_at,
             updated_at: new Date().toISOString()
         };
 
