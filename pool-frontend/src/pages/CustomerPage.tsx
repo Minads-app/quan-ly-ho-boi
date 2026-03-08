@@ -40,6 +40,7 @@ interface PackageRow {
     guardian_name?: string | null;
     guardian_phone?: string | null;
     card_code: string | null;
+    customer_id: string | null;
     status: string;
     valid_from: string | null;
     valid_until: string | null;
@@ -162,7 +163,7 @@ export default function CustomerPage() {
         const { data, error } = await supabase
             .from('tickets')
             .select(`
-                id, customer_name, customer_phone, card_code, status,
+                id, customer_name, customer_phone, card_code, customer_id, status,
                 valid_from, valid_until, remaining_sessions, total_sessions,
                 price_paid, sold_at, package_code,
                 customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
@@ -187,6 +188,7 @@ export default function CustomerPage() {
             guardian_name: t.guardian_name,
             guardian_phone: t.guardian_phone,
             card_code: t.card_code,
+            customer_id: t.customer_id || null,
             status: computeStatus(t),
             valid_from: t.valid_from,
             valid_until: t.valid_until,
@@ -233,17 +235,28 @@ export default function CustomerPage() {
 
     // --- Build customer summaries from customers table ---
     function buildCustomerList(): CustomerSummary[] {
-        // Build a map of card_code -> packages
+        // Build maps: card_code -> packages AND customer_id -> packages
         const pkgByCard = new Map<string, PackageRow[]>();
+        const pkgByCustId = new Map<string, PackageRow[]>();
         allPackages.forEach(p => {
-            const key = p.card_code || p.customer_phone || '';
-            if (!key) return;
-            if (!pkgByCard.has(key)) pkgByCard.set(key, []);
-            pkgByCard.get(key)!.push(p);
+            if (p.card_code) {
+                if (!pkgByCard.has(p.card_code)) pkgByCard.set(p.card_code, []);
+                pkgByCard.get(p.card_code)!.push(p);
+            }
+            if (p.customer_id) {
+                if (!pkgByCustId.has(p.customer_id)) pkgByCustId.set(p.customer_id, []);
+                pkgByCustId.get(p.customer_id)!.push(p);
+            }
         });
 
         return allCustomers.map(c => {
-            const packages = pkgByCard.get(c.card_code) || [];
+            // Match by card_code first, then merge any additional by customer_id
+            const byCard = pkgByCard.get(c.card_code) || [];
+            const byCustId = pkgByCustId.get(c.id) || [];
+            // Merge & deduplicate by id
+            const seenIds = new Set(byCard.map(p => p.id));
+            const packages = [...byCard];
+            byCustId.forEach(p => { if (!seenIds.has(p.id)) { packages.push(p); seenIds.add(p.id); } });
             const activeOrExpiring = packages.filter(p => p.status === 'IN_USE' || p.status === 'UNUSED' || p.status === 'EXPIRING');
             let overallStatus = 'EXPIRED';
             if (packages.length === 0) overallStatus = 'NONE';
