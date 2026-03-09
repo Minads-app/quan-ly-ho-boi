@@ -407,7 +407,7 @@ export default function CustomerPage() {
 
         let finalStatus = selectedPkg.status;
         if (finalStatus === 'EXPIRING') finalStatus = 'IN_USE'; // EXPIRING is a frontend display status
-        
+
         let finalValidFrom = editValidFrom || null;
         let finalValidUntil = editValidUntil || null;
 
@@ -526,7 +526,7 @@ export default function CustomerPage() {
 
     async function handleDeleteCustomer(c: CustomerSummary) {
         if (!isAdmin) return;
-        
+
         if (c.totalPackages > 0) {
             alert(`⚠️ Không thể xóa khách hàng này!\n\nKhách hàng đang có ${c.totalPackages} gói thẻ. Theo chính sách an toàn dữ liệu, bạn cần phải xóa các gói thẻ này trước khi xóa hồ sơ khách hàng.`);
             return;
