@@ -27,6 +27,7 @@ interface TicketRow {
     sold_by_id: string | null;
     payment_method: string;
     lesson_class_type: string | null;
+    source?: string | null;
     lesson_schedule_type: string | null;
 }
 
@@ -317,7 +318,7 @@ export default function DashboardPage() {
             .from('tickets')
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
-                valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by,
+                valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by, source,
                 ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
                 profiles:sold_by (full_name),
                 customers:customer_id (full_name)
@@ -362,7 +363,8 @@ export default function DashboardPage() {
                     sold_by_id: t.sold_by,
                     payment_method: t.payment_method || 'CASH',
                     lesson_class_type: t.ticket_types?.lesson_class_type || null,
-                    lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null
+                    lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null,
+                    source: t.source
                 };
             });
             setTickets(mapped);
@@ -1049,7 +1051,7 @@ export default function DashboardPage() {
                                     <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
                                     {isAdmin && (
                                         <td style={tdS}>
-                                            {t.status !== 'CANCELLED' && t.price_paid === 0 && t.type_name === 'Vé Lượt (Từ Thẻ)' && (
+                                            {t.status !== 'CANCELLED' && t.price_paid === 0 && (t.source === 'CHECKIN' || t.type_name === 'Vé Lượt (Từ Thẻ)' || t.type_name === 'Vé Lượt Trả Trước' || t.type_name?.includes('Lượt') || t.type_name?.includes('Học Bơi')) && (
                                                 <button
                                                     className="btn btn-outline btn-sm"
                                                     style={{ color: '#ef4444', borderColor: '#fca5a5' }}
