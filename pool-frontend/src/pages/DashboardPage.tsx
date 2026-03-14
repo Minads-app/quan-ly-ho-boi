@@ -1064,7 +1064,6 @@ export default function DashboardPage() {
                                                 </button>
                                             )}
                                         </td>
-                                        </td>
                                     )}
                                 </tr>
                             ))}
