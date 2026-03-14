@@ -1050,8 +1050,7 @@ export default function DashboardPage() {
                                     <td style={tdS}>{t.sold_by_name}</td>
                                     <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
                                     {isAdmin && (
-                                        <td style={tdS}>
-                                            {t.status !== 'CANCELLED' && t.price_paid === 0 && (t.source === 'CHECKIN' || t.type_name === 'Vé Lượt (Từ Thẻ)' || t.type_name === 'Vé Lượt Trả Trước' || t.type_name?.includes('Lượt') || t.type_name?.includes('Học Bơi')) && (
+                                            {t.status !== 'CANCELLED' && t.price_paid === 0 && (t.source === 'CHECKIN' || t.type_name === 'Vé Lượt (Từ Thẻ)' || t.type_name === 'Vé Lượt Trả Trước' || (t.type_name && t.type_name.includes('Lượt')) || (t.type_name && t.type_name.includes('Học Bơi')) || (t.type_name && t.type_name.includes('VÃNG LAI'))) && (
                                                 <button
                                                     className="btn btn-outline btn-sm"
                                                     style={{ color: '#ef4444', borderColor: '#fca5a5' }}
