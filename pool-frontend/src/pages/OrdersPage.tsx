@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { normalizeScannerInput } from '../utils/scannerUtils';
 
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
@@ -548,7 +549,7 @@ export default function OrdersPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             <div>
                                 <label style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Mã thẻ từ</label>
-                                <input type="text" value={editCardCode} onChange={e => setEditCardCode(e.target.value)} placeholder="Nhập mã thẻ..." style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', fontWeight: 600 }} />
+                                <input type="text" value={editCardCode} onChange={e => setEditCardCode(normalizeScannerInput(e.target.value))} placeholder="Nhập mã thẻ..." style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', fontWeight: 600 }} />
                                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>*Để trống nếu không dùng thẻ từ</div>
                             </div>
                             <div style={{ display: 'flex', gap: '12px' }}>

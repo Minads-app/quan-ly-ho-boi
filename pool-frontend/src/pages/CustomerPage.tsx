@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { normalizeScannerInput } from '../utils/scannerUtils';
 import type { Customer } from '../types';
 import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
@@ -791,7 +792,7 @@ export default function CustomerPage() {
 
             {/* Search */}
             <input type="text" placeholder={subTab === 'CUSTOMERS' ? '🔍 Tìm theo tên, SĐT...' : '🔍 Tìm theo tên, SĐT, mã thẻ, mã gói...'}
-                value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                value={searchTerm} onChange={e => setSearchTerm(normalizeScannerInput(e.target.value))}
                 style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', marginBottom: '16px' }}
             />
 
@@ -899,7 +900,7 @@ export default function CustomerPage() {
                                                         {editingCardPkgId && c.packages.some(p => p.id === editingCardPkgId) ? (
                                                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                                                 <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Mã thẻ mới:</span>
-                                                                <input type="text" value={newCardCode} onChange={e => setNewCardCode(e.target.value)}
+                                                                <input type="text" value={newCardCode} onChange={e => setNewCardCode(normalizeScannerInput(e.target.value))}
                                                                     placeholder="Quét hoặc nhập mã thẻ mới" autoFocus
                                                                     style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '14px', fontWeight: 700, flex: 1 }} />
                                                                 <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); handleUpdateCardCode(editingCardPkgId); }}>Lưu</button>

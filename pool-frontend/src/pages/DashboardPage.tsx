@@ -222,6 +222,40 @@ export default function DashboardPage() {
     const [retailItems, setRetailItems] = useState<RetailRow[]>([]);
     const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
     const [scanLogs, setScanLogs] = useState<ScanLogRow[]>([]);
+
+    // --- CANCELLATION STATE ---
+    const [ticketToCancel, setTicketToCancel] = useState<TicketRow | null>(null);
+    const [cancelReason, setCancelReason] = useState('');
+    const [cancelling, setCancelling] = useState(false);
+
+    async function handleCancelTicket(e: React.FormEvent) {
+        e.preventDefault();
+        if (!ticketToCancel || !profile) return;
+        if (!cancelReason.trim()) {
+            alert('Vui lòng nhập lý do hủy vé!');
+            return;
+        }
+
+        setCancelling(true);
+        const { data, error } = await supabase.rpc('cancel_ticket', {
+            p_ticket_id: ticketToCancel.id,
+            p_reason: cancelReason.trim(),
+            p_cancelled_by: profile.id
+        });
+
+        setCancelling(false);
+
+        if (error || !data?.success) {
+            alert('Lỗi hủy vé: ' + (error?.message || data?.message || 'Có lỗi xảy ra'));
+            return;
+        }
+
+        alert('✅ ' + data.message);
+        setTicketToCancel(null);
+        setCancelReason('');
+        fetchTickets(); // Refresh table
+    }
+
     const [loading, setLoading] = useState(false);
 
     // Business Info for Printing
@@ -989,6 +1023,7 @@ export default function DashboardPage() {
                         <thead>
                             <tr>
                                 <th style={thS}>#</th><th style={thS}>Mã vé</th><th style={thS}>Loại vé</th><th style={thS}>Trạng thái</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Giờ bán</th>
+                                {isAdmin && <th style={thS}>Thao tác</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -1001,17 +1036,33 @@ export default function DashboardPage() {
                                     <td style={tdS}>{t.type_name}</td>
                                     <td style={tdS}>
                                         <span style={{
-                                            background: t.status === 'UNUSED' ? 'rgba(239, 68, 68, 0.1)' : t.status === 'EXPIRED' ? '#f1f5f9' : 'rgba(16, 185, 129, 0.1)',
-                                            color: t.status === 'UNUSED' ? '#ef4444' : t.status === 'EXPIRED' ? '#64748b' : '#10b981',
+                                            background: t.status === 'UNUSED' ? 'rgba(239, 68, 68, 0.1)' : t.status === 'EXPIRED' ? '#f1f5f9' : t.status === 'CANCELLED' ? '#fee2e2' : 'rgba(16, 185, 129, 0.1)',
+                                            color: t.status === 'UNUSED' ? '#ef4444' : t.status === 'EXPIRED' ? '#64748b' : t.status === 'CANCELLED' ? '#b91c1c' : '#10b981',
                                             padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600
                                         }}>
-                                            {t.status === 'UNUSED' ? '🔴 Chưa dùng' : t.status === 'EXPIRED' ? '⚫ Hết hạn' : '🟢 Đã quét cổng'}
+                                            {t.status === 'UNUSED' ? '🔴 Chưa dùng' : t.status === 'EXPIRED' ? '⚫ Hết hạn' : t.status === 'CANCELLED' ? '🚫 Đã hủy' : '🟢 Đã quét cổng'}
                                         </span>
                                     </td>
                                     <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
                                     <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
                                     <td style={tdS}>{t.sold_by_name}</td>
                                     <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
+                                    {isAdmin && (
+                                        <td style={tdS}>
+                                            {t.status !== 'CANCELLED' && t.price_paid === 0 && t.type_name === 'Vé Lượt (Từ Thẻ)' && (
+                                                <button
+                                                    className="btn btn-outline btn-sm"
+                                                    style={{ color: '#ef4444', borderColor: '#fca5a5' }}
+                                                    onClick={() => {
+                                                        setTicketToCancel(t);
+                                                        setCancelReason('');
+                                                    }}
+                                                >
+                                                    🚫 Hủy
+                                                </button>
+                                            )}
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
@@ -1219,6 +1270,49 @@ export default function DashboardPage() {
             {!loading && activeTab === 'LESSON_PACKAGES' && renderLessonPackagesTab()}
             {!loading && activeTab === 'WARNINGS' && renderWarningsTab()}
             {!loading && activeTab === 'MY_SALES' && renderMySalesTab()}
+
+            {/* MODAL HỦY VÉ */}
+            {ticketToCancel && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+                    onClick={() => setTicketToCancel(null)}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '400px', width: '90%', boxShadow: 'var(--shadow-lg)' }}
+                        onClick={e => e.stopPropagation()}>
+                        <h2 style={{ fontSize: '18px', marginBottom: '8px', color: '#ef4444' }}>⚠️ Xác nhận Hủy Vé</h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '14px' }}>
+                            Thao tác này sẽ hủy vé lượt hiện tại và <strong>cộng trả lại 1 buổi</strong> cho gói bơi gốc của vị khách này (nếu có).
+                        </p>
+
+                        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', border: '1px solid #e2e8f0' }}>
+                            <div style={{ marginBottom: '4px' }}><strong>Mã vé:</strong> <code style={{ background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>{ticketToCancel.id.substring(0, 8).toUpperCase()}</code></div>
+                            <div style={{ marginBottom: '4px' }}><strong>Khách:</strong> {ticketToCancel.customer_name || 'Khách lẻ'}</div>
+                            <div><strong>Bán lúc:</strong> {fmtDateTime(ticketToCancel.sold_at)}</div>
+                        </div>
+
+                        <form onSubmit={handleCancelTicket}>
+                            <div className="form-group" style={{ marginBottom: '24px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>Lý do hủy (bắt buộc) <span style={{ color: 'red' }}>*</span></label>
+                                <textarea
+                                    className="input"
+                                    required
+                                    rows={3}
+                                    placeholder="Điền nguyên nhân hủy vé..."
+                                    value={cancelReason}
+                                    onChange={e => setCancelReason(e.target.value)}
+                                    style={{ width: '100%', resize: 'none' }}
+                                    autoFocus
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '12px' }}>
+                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setTicketToCancel(null)}>Đóng</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1, background: '#ef4444' }} disabled={cancelling}>
+                                    {cancelling ? 'Đang xử lý...' : 'Xác nhận Hủy'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

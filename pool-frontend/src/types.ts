@@ -1,6 +1,6 @@
 export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER';
 export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
-export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED';
+export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED' | 'CANCELLED';
 export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO';
 export type CardStatus = 'UNUSED' | 'USED' | 'REVOKED';
 

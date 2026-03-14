@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/immutability, react-hooks/exhaustive-deps, prefer-const */
 import { useEffect, useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { normalizeScannerInput } from '../utils/scannerUtils';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { TicketType, Ticket, RetailProduct, Customer } from '../types';
@@ -1657,7 +1658,7 @@ export default function POSPage() {
                                 className="input"
                                 placeholder="Quét mã QR Thẻ vào đây..."
                                 value={checkinCode}
-                                onChange={e => setCheckinCode(e.target.value.toUpperCase())}
+                                onChange={e => setCheckinCode(normalizeScannerInput(e.target.value))}
                                 style={{ textAlign: 'center', fontSize: '18px', padding: '16px', marginBottom: '16px' }}
                                 autoFocus
                             />
