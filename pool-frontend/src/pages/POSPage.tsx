@@ -862,7 +862,10 @@ export default function POSPage() {
             font-size: ${isA5 ? '13px' : '10px'};
             color: #999;
           }
-          @media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }
+          @media print { 
+            * { color: #000 !important; background: transparent !important; }
+            body { font-weight: bold !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
         </style>
       </head>
       <body>
@@ -1129,7 +1132,7 @@ export default function POSPage() {
                 '<style>',
                 '@page { size: ' + (isA5 ? 'A5 relative' : '80mm auto') + '; margin: 0; }',
                 '@media screen { body { width: ' + (isA5 ? '100%' : '80mm') + '; aspect-ratio: 4/3; margin: 0 auto; overflow: hidden; } }',
-                '@media print { * { color: #000 !important; background: transparent !important; filter: grayscale(100%) !important; } }',
+                '@media print { * { color: #000 !important; background: transparent !important; } body { font-weight: bold !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
                 '* { margin: 0; padding: 0; box-sizing: border-box; }',
                 '.text-center { text-align: center; }',
                 '.mb-2 { margin-bottom: 8px; }',
@@ -1146,10 +1149,6 @@ export default function POSPage() {
                 '</head>',
                 '<body>',
                 content,
-                '<div class="footer" style="margin-top: 24px; text-align: center;">',
-                '<div>Cảm ơn quý khách và hẹn gặp lại!</div>',
-                '<div style="margin-top: 8px; font-size: 10px; color: #888; font-style: italic;">Phần mềm quản lý bởi Minads Soft</div>',
-                '</div>',
                 '</body>',
                 '</html>'
             ];
@@ -1249,9 +1248,9 @@ export default function POSPage() {
                             <span>{checkoutReceipt.paymentMethod === 'CASH' ? 'Tiền mặt' : checkoutReceipt.paymentMethod === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS'}</span>
                         </div>
 
-                        <div className="footer">
-                            <p>Cảm ơn quý khách và hẹn gặp lại!</p>
-                            <p>Phần mềm quản lý bán vé tự động</p>
+                        <div className="text-center" style={{ marginTop: '24px' }}>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Cảm ơn quý khách - hẹn gặp lại</div>
+                            <div style={{ marginTop: '8px', fontSize: '11px', color: '#555', fontStyle: 'italic' }}>phần mềm quản lý vé bơi Min.ads Soff - 0932798996</div>
                         </div>
                     </div>
 
@@ -1323,7 +1322,7 @@ export default function POSPage() {
                                         Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
                                         Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
                                         {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
-                                        <span style={{ display: 'block', marginTop: '16px', fontSize: '10px', color: '#888', fontStyle: 'italic' }}>Phần mềm quản lý bởi Minads Soft</span>
+                                        <span style={{ display: 'block', marginTop: '16px', fontSize: '10px', color: '#555', fontStyle: 'italic' }}>phần mềm quản lý vé bơi Min.ads Soff - 0932798996</span>
                                     </p>
                                 </div>
                             ))}
@@ -1394,7 +1393,7 @@ export default function POSPage() {
                                     Vui lòng xuất trình mã QR tại cổng kiểm soát.<br />
                                     Mã vé: {ticket.id.substring(0, 8).toUpperCase()}
                                     {soldTickets.length > 1 && <span style={{ display: 'block', marginTop: '4px', fontWeight: 'bold' }}>{`(${index + 1}/${soldTickets.length})`}</span>}
-                                    <span style={{ display: 'block', marginTop: '16px', fontSize: '10px', color: '#888', fontStyle: 'italic' }}>Phần mềm quản lý bởi Minads Soft</span>
+                                    <span style={{ display: 'block', marginTop: '16px', fontSize: '10px', color: '#555', fontStyle: 'italic' }}>phần mềm quản lý vé bơi Min.ads Soff - 0932798996</span>
                                 </p>
                             </div>
                         ))}
