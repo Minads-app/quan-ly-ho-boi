@@ -466,8 +466,24 @@ export default function POSPage() {
     }
 
     function addToCart(type: 'TICKET' | 'PRODUCT', item: any, quantity: number = 1) {
+        if (type === 'PRODUCT') {
+            const existing = cart.find(c => c.type === 'PRODUCT' && c.item.id === item.id);
+            const currentQty = existing ? existing.quantity : 0;
+            if (currentQty + quantity > item.stock_quantity) {
+                alert(`Sản phẩm "${item.name}" chỉ còn ${item.stock_quantity} trong kho!`);
+                return;
+            }
+        }
+
         setCart(prev => {
             const existing = prev.find(c => c.type === type && c.item.id === item.id);
+            if (type === 'PRODUCT') {
+                const prevQty = existing ? existing.quantity : 0;
+                if (prevQty + quantity > item.stock_quantity) {
+                    return prev;
+                }
+            }
+
             if (existing && type === 'PRODUCT') {
                 return prev.map(c => c.cart_id === existing.cart_id ? { ...c, quantity: c.quantity + quantity, subtotal: (c.quantity + quantity) * c.unitPrice } : c);
             }
@@ -1612,7 +1628,13 @@ export default function POSPage() {
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '2px' }}>
                                                     <button onClick={() => setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: Math.max(1, x.quantity - 1), subtotal: Math.max(1, x.quantity - 1) * x.unitPrice } : x))} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
                                                     <span style={{ fontSize: '13px', fontWeight: 600, width: '20px', textAlign: 'center' }}>{c.quantity}</span>
-                                                    <button onClick={() => setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: x.quantity + 1, subtotal: (x.quantity + 1) * x.unitPrice } : x))} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
+                                                    <button onClick={() => {
+                                                        if (c.type === 'PRODUCT' && c.quantity + 1 > c.item.stock_quantity) {
+                                                            alert(`Sản phẩm chỉ còn ${c.item.stock_quantity} trong kho!`);
+                                                            return;
+                                                        }
+                                                        setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: x.quantity + 1, subtotal: (x.quantity + 1) * x.unitPrice } : x));
+                                                    }} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
                                                 </div>
                                             </div>
                                         </div>
