@@ -311,7 +311,7 @@ export default function CustomerPage() {
 
     // --- Card code update ---
     async function handleUpdateCardCode(pkgId: string) {
-        const inputCardCode = newCardCode.trim();
+        const inputCardCode = newCardCode.trim().toUpperCase();
         if (!inputCardCode) { alert('Vui lòng nhập mã thẻ mới!'); return; }
         if (!confirm('Bạn có chắc chắn muốn thay đổi mã thẻ cho khách hàng này?')) return;
 
@@ -433,6 +433,18 @@ export default function CustomerPage() {
                     finalValidUntil = exp.toLocaleDateString('en-CA');
                 }
             }
+        }
+
+        // Tự động thay đổi trạng thái dựa trên ngày và số buổi cập nhật mới
+        const today = new Date().toLocaleDateString('en-CA');
+        const isDateExpired = finalValidUntil && finalValidUntil < today;
+        const isSessionExpired = updatedRemaining !== null && updatedRemaining <= 0;
+
+        if (isDateExpired || isSessionExpired) {
+            finalStatus = 'EXPIRED';
+        } else if (finalStatus === 'EXPIRED') {
+            // Nếu thẻ đang "Hết hạn" nhưng được gia hạn (ngày và số lượt đều hợp lệ)
+            finalStatus = 'IN_USE';
         }
 
         const updateData: any = {

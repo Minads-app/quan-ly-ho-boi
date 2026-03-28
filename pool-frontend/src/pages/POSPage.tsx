@@ -366,7 +366,7 @@ export default function POSPage() {
         }
         setSavingCustomer(true);
 
-        const inputCardCode = newCustCardCode.trim();
+        const inputCardCode = newCustCardCode.trim().toUpperCase();
 
         // 1. Check card_bank
         const { data: cardRes, error: cardErr } = await supabase

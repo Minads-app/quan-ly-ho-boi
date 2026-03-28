@@ -252,11 +252,26 @@ export default function OrdersPage() {
         if (!selectedPkg) return;
         if (!confirm('Bạn có chắc chắn muốn lưu các thay đổi này?')) return;
 
+        let finalStatus = selectedPkg.status;
+        const updatedRemaining = editSessions === '' ? null : Number(editSessions);
+        const finalValidUntil = editValidUntil || null;
+
+        const today = new Date().toLocaleDateString('en-CA');
+        const isDateExpired = finalValidUntil && finalValidUntil < today;
+        const isSessionExpired = updatedRemaining !== null && updatedRemaining <= 0;
+
+        if (isDateExpired || isSessionExpired) {
+            finalStatus = 'EXPIRED';
+        } else if (finalStatus === 'EXPIRED') {
+            finalStatus = 'IN_USE';
+        }
+
         const updateData: any = {
-            remaining_sessions: editSessions === '' ? null : Number(editSessions),
+            status: finalStatus,
+            remaining_sessions: updatedRemaining,
             total_sessions: editTotalSessions === '' ? null : Number(editTotalSessions),
             valid_from: editValidFrom || null,
-            valid_until: editValidUntil || null,
+            valid_until: finalValidUntil,
         };
 
         // If card_code changes, validate via manual code flow in DB or just update tickets
