@@ -103,6 +103,13 @@ export default function SettingsPage() {
     const [cardSubTab, setCardSubTab] = useState<'system' | 'manual' | 'batches'>('system');
     const [filterBatch, setFilterBatch] = useState<number | 'ALL'>('ALL');
 
+    const [checkCardCode, setCheckCardCode] = useState('');
+    const [checkCardResult, setCheckCardResult] = useState<{exists: boolean, data?: any} | null>(null);
+    const [checkingCard, setCheckingCard] = useState(false);
+
+    const [manualCardCode, setManualCardCode] = useState('');
+    const [addingManualCard, setAddingManualCard] = useState(false);
+
     // Ticket Types state
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
     const [showTicketModal, setShowTicketModal] = useState(false);
@@ -220,6 +227,33 @@ export default function SettingsPage() {
     async function fetchCardBatches() {
         const { data } = await supabase.from('card_batches_view').select('*').order('batch_number', { ascending: false });
         if (data) setCardBatches(data as CardBatchView[]);
+    }
+
+    async function handleCheckCard() {
+        const code = checkCardCode.trim().toUpperCase();
+        if (!code) return;
+        setCheckingCard(true);
+        setCheckCardResult(null);
+        try {
+            const { data, error } = await supabase
+                .from('card_bank')
+                .select('*')
+                .eq('card_code', code)
+                .single();
+
+            if (error && error.code !== 'PGRST116') {
+                throw error;
+            }
+
+            if (data) {
+                setCheckCardResult({ exists: true, data });
+            } else {
+                setCheckCardResult({ exists: false });
+            }
+        } catch (e: any) {
+            alert('Lỗi khi kiểm tra thẻ: ' + e.message);
+        }
+        setCheckingCard(false);
     }
 
     async function handleGenerateCards(e: React.FormEvent) {
@@ -375,6 +409,36 @@ export default function SettingsPage() {
             fetchCardBatches();
             if (filterBatch === batchNumber) setFilterBatch('ALL');
         }
+    }
+
+    async function handleAddManualCard(e: React.FormEvent) {
+        e.preventDefault();
+        const code = manualCardCode.trim().toUpperCase();
+        if (!code) return;
+        setAddingManualCard(true);
+
+        try {
+            // Check if exist
+            const { data: exist } = await supabase.from('card_bank').select('card_code').eq('card_code', code).maybeSingle();
+            if (exist) {
+                alert('Lỗi: Mã thẻ này đã tồn tại trong hệ thống!');
+            } else {
+                const { error } = await supabase.from('card_bank').insert([{
+                    card_code: code,
+                    status: 'UNUSED',
+                    source: 'MANUAL',
+                    created_by: profile?.id
+                }]);
+                if (error) throw error;
+                
+                alert(`Đã thêm mã thẻ thủ công "${code}" thành công!`);
+                setManualCardCode('');
+                fetchCards();
+            }
+        } catch (error: any) {
+            alert('Lỗi thêm thẻ thủ công. Chi tiết: ' + error.message);
+        }
+        setAddingManualCard(false);
     }
 
     function exportCardsToExcel() {
@@ -1682,6 +1746,75 @@ export default function SettingsPage() {
             {/* ============ CARDS BANK TAB ============ */}
             {activeTab === 'cards' && (
                 <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    {/* Check Card Block */}
+                    <div className="dashboard-content-card" style={{ marginBottom: '24px' }}>
+                        <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>🔍 Kiểm tra trạng thái mã thẻ</h2>
+                        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                            <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Nhập mã thẻ cần kiểm tra..."
+                                value={checkCardCode}
+                                onChange={e => setCheckCardCode(e.target.value.toUpperCase())}
+                                style={{ flex: 1, maxWidth: '400px', textTransform: 'uppercase' }}
+                                onKeyDown={e => { if (e.key === 'Enter') handleCheckCard(); }}
+                            />
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleCheckCard}
+                                disabled={checkingCard || !checkCardCode.trim()}
+                            >
+                                {checkingCard ? 'Đang kiểm tra...' : 'Kiểm tra'}
+                            </button>
+                        </div>
+                        {checkCardResult && (
+                            <div style={{ marginTop: '16px', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#f8fafc', animation: 'fadeIn 0.2s ease' }}>
+                                {checkCardResult.exists && checkCardResult.data ? (
+                                    <div>
+                                        <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--accent-green)', marginBottom: '12px' }}>
+                                            ✅ Thẻ tồn tại trong hệ thống
+                                        </div>
+                                        <div style={{ fontSize: '14px', color: '#334155', display: 'grid', gridTemplateColumns: 'minmax(120px, auto) 1fr', gap: '8px', alignItems: 'center' }}>
+                                            <div style={{ color: 'var(--text-secondary)' }}>Mã thẻ:</div>
+                                            <div><span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '15px', background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>{checkCardResult.data.card_code}</span></div>
+                                            
+                                            <div style={{ color: 'var(--text-secondary)' }}>Trạng thái:</div>
+                                            <div>
+                                                <span className={`badge ${checkCardResult.data.status === 'UNUSED' ? 'badge-success' : checkCardResult.data.status === 'USED' ? 'badge-primary' : 'badge-error'}`}>
+                                                    {checkCardResult.data.status === 'UNUSED' ? 'Chưa sử dụng' : checkCardResult.data.status === 'USED' ? 'Đã sử dụng' : checkCardResult.data.status}
+                                                </span>
+                                            </div>
+                                            
+                                            <div style={{ color: 'var(--text-secondary)' }}>Nguồn gốc:</div>
+                                            <div>{checkCardResult.data.source === 'SYSTEM' ? 'Hệ thống tạo tự động' : 'Nhập thủ công/Import'}</div>
+                                            
+                                            {checkCardResult.data.batch_number && (
+                                                <>
+                                                    <div style={{ color: 'var(--text-secondary)' }}>Lô số:</div>
+                                                    <div>Lô {checkCardResult.data.batch_number}</div>
+                                                </>
+                                            )}
+                                            
+                                            {checkCardResult.data.batch_note && (
+                                                <>
+                                                    <div style={{ color: 'var(--text-secondary)' }}>Ghi chú:</div>
+                                                    <div>{checkCardResult.data.batch_note}</div>
+                                                </>
+                                            )}
+                                            
+                                            <div style={{ color: 'var(--text-secondary)' }}>Ngày tạo:</div>
+                                            <div>{new Date(checkCardResult.data.created_at).toLocaleString('vi-VN')}</div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--alert-red)' }}>
+                                        ❌ Mã thẻ "{checkCardCode.toUpperCase()}" KHÔNG TỒN TẠI trong hệ thống.
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
                     {/* Sub-tabs */}
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
                         <button
@@ -1811,13 +1944,27 @@ export default function SettingsPage() {
                     {/* SUB-TAB: Thẻ Thủ Công */}
                     {cardSubTab === 'manual' && (
                         <div className="dashboard-content-card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
                                 <div>
                                     <h2 style={{ fontSize: '18px', margin: 0 }}>Kho Thẻ Thủ Công</h2>
                                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                        Các mã thẻ được import từ hệ thống cũ hoặc nhập thủ công.
+                                        Các mã thẻ được import từ hệ thống cũ hoặc nhập thủ công định danh.
                                     </div>
                                 </div>
+                                <form onSubmit={handleAddManualCard} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        placeholder="Nhập mã thẻ mới..."
+                                        value={manualCardCode}
+                                        onChange={e => setManualCardCode(e.target.value.toUpperCase())}
+                                        style={{ textTransform: 'uppercase', width: '250px' }}
+                                        required
+                                    />
+                                    <button type="submit" className="btn btn-primary btn-sm" disabled={addingManualCard || !manualCardCode.trim()}>
+                                        {addingManualCard ? 'Đang thêm...' : '➕ Thêm thẻ'}
+                                    </button>
+                                </form>
                             </div>
 
                             <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
