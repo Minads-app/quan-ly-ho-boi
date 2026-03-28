@@ -804,7 +804,7 @@ export default function CustomerPage() {
 
             {/* Search */}
             <input type="text" placeholder={subTab === 'CUSTOMERS' ? '🔍 Tìm theo tên, SĐT...' : '🔍 Tìm theo tên, SĐT, mã thẻ, mã gói...'}
-                value={searchTerm} onChange={e => setSearchTerm(normalizeScannerInput(e.target.value))}
+                value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
                 style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', marginBottom: '16px' }}
             />
 

@@ -238,7 +238,7 @@ export default function SettingsPage() {
             const { data, error } = await supabase
                 .from('card_bank')
                 .select('*')
-                .eq('card_code', code)
+                .ilike('card_code', code)
                 .single();
 
             if (error && error.code !== 'PGRST116') {
@@ -336,8 +336,8 @@ export default function SettingsPage() {
 
         try {
             const text = await batchTxtFile.text();
-            // Tách theo dòng, trim từng dòng và lọc dòng rỗng
-            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            // Tách theo dòng, trim, chuyển thành CHỮ HOA và lọc dòng rỗng
+            const lines = text.split('\n').map(l => l.trim().toUpperCase()).filter(l => l.length > 0);
 
             // Loại bỏ trùng mã trong chính file tải lên
             const uniqueCodes = Array.from(new Set(lines));
