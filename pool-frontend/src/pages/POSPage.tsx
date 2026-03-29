@@ -366,14 +366,17 @@ export default function POSPage() {
         }
         setSavingCustomer(true);
 
-        const inputCardCode = newCustCardCode.trim().toUpperCase();
+        const inputCardCode = newCustCardCode.trim();
 
-        // 1. Check card_bank
+        // 1. Check card_bank (case-insensitive)
         const { data: cardRes, error: cardErr } = await supabase
             .from('card_bank')
             .select('*')
-            .eq('card_code', inputCardCode)
+            .ilike('card_code', inputCardCode)
             .single();
+
+        // Use exact card_code from DB (preserve original case)
+        const finalCardCode = cardRes?.card_code ?? inputCardCode.toUpperCase();
 
         let shouldInsertCard = false;
         let shouldUpdateCardId = null;
@@ -412,7 +415,7 @@ export default function POSPage() {
 
         // 2. Insert customer
         const { data, error } = await supabase.from('customers').insert({
-            card_code: inputCardCode,
+            card_code: finalCardCode,
             full_name: newCustName.trim(),
             phone: newCustPhone.trim(),
             email: newCustEmail.trim() || null,
@@ -438,7 +441,7 @@ export default function POSPage() {
             const now = new Date();
             const monthYear = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(2)}`;
             await supabase.from('card_bank').insert({
-                card_code: inputCardCode,
+                card_code: finalCardCode,
                 prefix: 'MANUAL',
                 month_year: monthYear,
                 sequence_number: 0,
