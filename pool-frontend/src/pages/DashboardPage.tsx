@@ -265,6 +265,7 @@ export default function DashboardPage() {
     });
 
     const [dailyPassFilter, setDailyPassFilter] = useState<'ALL' | 'UNUSED' | 'VERIFIED' | 'EXPIRED'>('ALL');
+    const [dailyPassSearch, setDailyPassSearch] = useState('');
 
     // Compute date range
     function getDateBounds(): { from: string; to: string } {
@@ -964,6 +965,10 @@ export default function DashboardPage() {
         if (dailyPassFilter === 'UNUSED') filteredTickets = filteredTickets.filter(t => t.status === 'UNUSED');
         if (dailyPassFilter === 'VERIFIED') filteredTickets = filteredTickets.filter(t => t.status !== 'UNUSED' && t.status !== 'EXPIRED');
         if (dailyPassFilter === 'EXPIRED') filteredTickets = filteredTickets.filter(t => t.status === 'EXPIRED'); // New EXPIRED filter
+        if (dailyPassSearch.trim()) {
+            const q = dailyPassSearch.trim().toUpperCase();
+            filteredTickets = filteredTickets.filter(t => t.id.substring(0, 8).toUpperCase().includes(q));
+        }
 
         const totalSold = dailyTickets.length;
         const totalUsed = dailyTickets.filter(t => t.status !== 'UNUSED' && t.status !== 'EXPIRED').length;
@@ -978,14 +983,33 @@ export default function DashboardPage() {
             <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
                     {renderDateFilter()}
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Trạng thái:</span>
-                        <select className="input" style={{ width: '140px', padding: '6px 12px', fontSize: '13px' }} value={dailyPassFilter} onChange={(e: any) => setDailyPassFilter(e.target.value)}>
-                            <option value="ALL">Tất cả vé</option>
-                            <option value="UNUSED">Chưa quét cổng</option>
-                            <option value="VERIFIED">Đã quét cổng</option>
-                            <option value="EXPIRED">Hết hạn (Qua ngày)</option>
-                        </select>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ position: 'relative' }}>
+                            <input
+                                className="input"
+                                type="text"
+                                placeholder="🔍 Tìm theo mã vé..."
+                                value={dailyPassSearch}
+                                onChange={e => setDailyPassSearch(e.target.value)}
+                                style={{ width: '200px', padding: '6px 12px', fontSize: '13px', paddingRight: dailyPassSearch ? '30px' : '12px' }}
+                            />
+                            {dailyPassSearch && (
+                                <button
+                                    onClick={() => setDailyPassSearch('')}
+                                    style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', color: 'var(--text-secondary)', padding: '2px 4px', lineHeight: 1 }}
+                                    title="Xóa tìm kiếm"
+                                >✕</button>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Trạng thái:</span>
+                            <select className="input" style={{ width: '140px', padding: '6px 12px', fontSize: '13px' }} value={dailyPassFilter} onChange={(e: any) => setDailyPassFilter(e.target.value)}>
+                                <option value="ALL">Tất cả vé</option>
+                                <option value="UNUSED">Chưa quét cổng</option>
+                                <option value="VERIFIED">Đã quét cổng</option>
+                                <option value="EXPIRED">Hết hạn (Qua ngày)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 

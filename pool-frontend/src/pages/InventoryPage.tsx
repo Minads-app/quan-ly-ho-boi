@@ -380,6 +380,33 @@ export default function InventoryPage() {
         setSlipItems(prev => prev.filter(x => x.product.id !== productId));
     }
 
+    async function rpcWithRetry(fnName: string, params: Record<string, any>, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const { data, error } = await supabase.rpc(fnName, params);
+                return { data, error };
+            } catch (e: any) {
+                const isNetworkError = e?.message?.includes('Failed to fetch') ||
+                    e?.message?.includes('NetworkError') ||
+                    e?.message?.includes('ERR_INTERNET_DISCONNECTED') ||
+                    e?.message?.includes('ERR_NAME_NOT_RESOLVED') ||
+                    e?.name === 'TypeError';
+                if (isNetworkError && attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, 2000 * attempt));
+                    continue;
+                }
+                if (isNetworkError) {
+                    return {
+                        data: null,
+                        error: { message: 'Mất kết nối mạng. Vui lòng kiểm tra kết nối Internet và thử lại.' }
+                    };
+                }
+                return { data: null, error: { message: e?.message || 'Lỗi không xác định' } };
+            }
+        }
+        return { data: null, error: { message: 'Không thể kết nối đến máy chủ sau nhiều lần thử.' } };
+    }
+
     async function handleSubmitSlip() {
         if (!profile || slipItems.length === 0) return;
         if (slipMode === 'EXPORT' && !slipNote.trim()) {
@@ -394,7 +421,7 @@ export default function InventoryPage() {
             const finalQty = slipMode === 'IMPORT' ? item.quantity : -item.quantity;
             const type = slipMode === 'IMPORT' ? 'IMPORT' : 'EXPORT_ADJUST';
 
-            const { data, error } = await supabase.rpc('adjust_inventory', {
+            const { data, error } = await rpcWithRetry('adjust_inventory', {
                 p_product_id: item.product.id,
                 p_quantity: finalQty,
                 p_type: type,
@@ -403,11 +430,11 @@ export default function InventoryPage() {
             });
 
             if (error) {
-                alert(`Lỗi xử lý "${item.product.name}": ${error.message}`);
+                alert(`❌ Lỗi xử lý "${item.product.name}": ${error.message}`);
                 hasError = true;
                 break;
             } else if (data && !data.success) {
-                alert(`Lỗi "${item.product.name}": ${data.error}`);
+                alert(`❌ Lỗi "${item.product.name}": ${data.error}`);
                 hasError = true;
                 break;
             }
