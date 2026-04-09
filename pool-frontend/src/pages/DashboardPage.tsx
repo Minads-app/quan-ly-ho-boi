@@ -264,7 +264,7 @@ export default function DashboardPage() {
         name: 'Hệ Thống Vé Bơi', address: '', phone: '', logo: ''
     });
 
-    const [dailyPassFilter, setDailyPassFilter] = useState<'ALL' | 'UNUSED' | 'VERIFIED' | 'EXPIRED'>('ALL');
+    const [dailyPassFilter, setDailyPassFilter] = useState<'ALL' | 'UNUSED' | 'VERIFIED' | 'EXPIRED' | 'CANCELLED'>('ALL');
     const [dailyPassSearch, setDailyPassSearch] = useState('');
 
     // Compute date range
