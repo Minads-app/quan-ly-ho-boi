@@ -963,15 +963,16 @@ export default function DashboardPage() {
 
         let filteredTickets = dailyTickets;
         if (dailyPassFilter === 'UNUSED') filteredTickets = filteredTickets.filter(t => t.status === 'UNUSED');
-        if (dailyPassFilter === 'VERIFIED') filteredTickets = filteredTickets.filter(t => t.status !== 'UNUSED' && t.status !== 'EXPIRED');
+        if (dailyPassFilter === 'VERIFIED') filteredTickets = filteredTickets.filter(t => t.status !== 'UNUSED' && t.status !== 'EXPIRED' && t.status !== 'CANCELLED');
         if (dailyPassFilter === 'EXPIRED') filteredTickets = filteredTickets.filter(t => t.status === 'EXPIRED'); // New EXPIRED filter
+        if (dailyPassFilter === 'CANCELLED') filteredTickets = filteredTickets.filter(t => t.status === 'CANCELLED');
         if (dailyPassSearch.trim()) {
             const q = dailyPassSearch.trim().toUpperCase();
             filteredTickets = filteredTickets.filter(t => t.id.substring(0, 8).toUpperCase().includes(q));
         }
 
         const totalSold = dailyTickets.length;
-        const totalUsed = dailyTickets.filter(t => t.status !== 'UNUSED' && t.status !== 'EXPIRED').length;
+        const totalUsed = dailyTickets.filter(t => t.status !== 'UNUSED' && t.status !== 'EXPIRED' && t.status !== 'CANCELLED').length;
         const totalUnused = dailyTickets.filter(t => t.status === 'UNUSED').length;
         const totalExpired = dailyTickets.filter(t => t.status === 'EXPIRED').length;
 
@@ -1008,6 +1009,7 @@ export default function DashboardPage() {
                                 <option value="UNUSED">Chưa quét cổng</option>
                                 <option value="VERIFIED">Đã quét cổng</option>
                                 <option value="EXPIRED">Hết hạn (Qua ngày)</option>
+                                <option value="CANCELLED">Đã hủy</option>
                             </select>
                         </div>
                     </div>
