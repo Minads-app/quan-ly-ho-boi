@@ -1011,13 +1011,21 @@ export default function POSPage() {
         // Pre-fetch ticket information for preview popup
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const isUuid = uuidRegex.test(code);
-        const orFilter = isUuid ? `id.eq.${code},card_code.eq.${code}` : `card_code.eq.${code}`;
+        
+        // Find matching customer by card code to also search tickets by customer_id
+        const { data: customerData } = await supabase.from('customers').select('id').eq('card_code', code);
+        const customerIds = customerData?.map(c => c.id) || [];
+
+        let orFilter = isUuid ? `id.eq.${code},card_code.eq.${code}` : `card_code.eq.${code}`;
+        if (customerIds.length > 0) {
+            orFilter += `,customer_id.in.(${customerIds.join(',')})`;
+        }
 
         const { data: tickets, error } = await supabase
             .from('tickets')
             .select(`
                 *,
-                ticket_types (name, category, session_count)
+                ticket_types!inner (name, category, session_count)
             `)
             .or(orFilter)
             .neq('status', 'CANCELLED')
