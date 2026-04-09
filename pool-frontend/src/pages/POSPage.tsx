@@ -152,6 +152,9 @@ export default function POSPage() {
     const [showPackageSelectModal, setShowPackageSelectModal] = useState(false);
     const [availablePackages, setAvailablePackages] = useState<any[]>([]);
     const [pendingCheckinCode, setPendingCheckinCode] = useState('');
+    
+    // PREVIEW CHECKIN STATE
+    const [previewTicket, setPreviewTicket] = useState<any | null>(null);
 
     // POS Search & Filter
     const [searchTerm, setSearchTerm] = useState('');
@@ -1003,7 +1006,39 @@ export default function POSPage() {
         if (!checkinCode.trim()) return;
 
         setCheckingIn(true);
-        await doCheckin(checkinCode.trim().toUpperCase());
+        const code = checkinCode.trim().toUpperCase();
+
+        // Pre-fetch ticket information for preview popup
+        const { data: tickets, error } = await supabase
+            .from('tickets')
+            .select(`
+                *,
+                ticket_types (name, category, session_count)
+            `)
+            .or(`id.eq.${code},card_code.eq.${code}`)
+            .neq('status', 'CANCELLED')
+            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+            .order('sold_at', { ascending: false });
+
+        if (error || !tickets || tickets.length === 0) {
+            // Không tìm thấy hoặc thẻ ngày, gọi doCheckin để backend hiển thị lỗi chuẩn
+            await doCheckin(code);
+            setCheckingIn(false);
+            return;
+        }
+
+        // Lọc thẻ chưa hết hạn nếu backend xử lý sau, ta vẫn nên hiển thị cái gần nhất
+        const validTickets = tickets.filter(t => t.status !== 'EXPIRED');
+
+        if (validTickets.length === 0) {
+            // Để backend báo lỗi hết hạn
+            await doCheckin(code);
+            setCheckingIn(false);
+            return;
+        }
+
+        // Hiển thị popup preview với thông tin gói gần nhất
+        setPreviewTicket(validTickets[0]);
         setCheckingIn(false);
     }
 
@@ -1692,6 +1727,73 @@ export default function POSPage() {
                         </form>
                     </div>
                 </section>
+            )}
+
+            {/* Modal Preview Checkin */}
+            {previewTicket && (
+                <div className="modal-overlay" onClick={() => setPreviewTicket(null)}>
+                    <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px', padding: '32px 24px' }}>
+                        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                            <div style={{ fontSize: '56px', marginBottom: '12px', lineHeight: 1 }}>👤</div>
+                            <h2 style={{ fontSize: '22px', marginBottom: '8px' }}>Xác Nhận Check-in</h2>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Kiểm tra thông tin khách hàng trước khi xác nhận</p>
+                        </div>
+                        
+                        <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '28px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
+                                <span style={{ color: '#64748b', fontSize: '14px' }}>Khách hàng</span>
+                                <strong style={{ fontSize: '16px', color: '#0f172a' }}>{previewTicket.customer_name || 'Khách vãng lai'}</strong>
+                            </div>
+                            
+                            {previewTicket.customer_phone && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
+                                    <span style={{ color: '#64748b', fontSize: '14px' }}>Số điện thoại</span>
+                                    <strong style={{ fontSize: '15px' }}>{previewTicket.customer_phone}</strong>
+                                </div>
+                            )}
+
+                            {previewTicket.customer_name_2 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
+                                    <span style={{ color: '#64748b', fontSize: '14px' }}>Học viên 2</span>
+                                    <strong style={{ fontSize: '15px' }}>{previewTicket.customer_name_2}</strong>
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
+                                <span style={{ color: '#64748b', fontSize: '14px' }}>Gói thẻ</span>
+                                <span style={{ fontWeight: 700, color: '#3b82f6', textAlign: 'right', fontSize: '15px' }}>
+                                    {previewTicket.ticket_types?.category === 'LESSON' ? '📚 Học Bơi' : '🏊 ' + previewTicket.ticket_types?.name}
+                                </span>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: '#64748b', fontSize: '14px' }}>Số buổi còn lại</span>
+                                <strong style={{ fontSize: '16px', color: previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 3 ? '#ef4444' : '#10b981' }}>
+                                    {previewTicket.remaining_sessions !== null ? `${previewTicket.remaining_sessions} buổi` : 'Không giới hạn'}
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            <button className="btn btn-secondary" style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#f1f5f9', color: '#475569', border: 'none' }} onClick={() => setPreviewTicket(null)}>
+                                Hủy (ESC)
+                            </button>
+                            <button 
+                                className="btn btn-primary" 
+                                style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#0ea5e9', border: 'none', boxShadow: '0 4px 12px rgba(14,165,233,0.3)' }} 
+                                disabled={checkingIn}
+                                onClick={async () => {
+                                    setCheckingIn(true);
+                                    await doCheckin(checkinCode.trim().toUpperCase());
+                                    setPreviewTicket(null);
+                                    setCheckingIn(false);
+                                }}
+                            >
+                                {checkingIn ? 'Đang xử lý...' : 'Check-in (Enter)'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Modal Bán Vé */}
