@@ -1009,13 +1009,17 @@ export default function POSPage() {
         const code = checkinCode.trim().toUpperCase();
 
         // Pre-fetch ticket information for preview popup
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const isUuid = uuidRegex.test(code);
+        const orFilter = isUuid ? `id.eq.${code},card_code.eq.${code}` : `card_code.eq.${code}`;
+
         const { data: tickets, error } = await supabase
             .from('tickets')
             .select(`
                 *,
                 ticket_types (name, category, session_count)
             `)
-            .or(`id.eq.${code},card_code.eq.${code}`)
+            .or(orFilter)
             .neq('status', 'CANCELLED')
             .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .order('sold_at', { ascending: false });
