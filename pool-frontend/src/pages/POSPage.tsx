@@ -1033,6 +1033,7 @@ export default function POSPage() {
             .order('sold_at', { ascending: false });
 
         if (error || !tickets || tickets.length === 0) {
+            alert(`[Gỡ lỗi] Không tìm thấy vé hợp lệ để hiển thị Popup.\nCode quét: ${code}\nLý do: ${error?.message || 'tickets.length = 0'}\nSẽ gọi trực tiếp check-in cũ!`);
             // Không tìm thấy hoặc thẻ ngày, gọi doCheckin để backend hiển thị lỗi chuẩn
             await doCheckin(code);
             setCheckingIn(false);
@@ -1043,6 +1044,7 @@ export default function POSPage() {
         const validTickets = tickets.filter(t => t.status !== 'EXPIRED');
 
         if (validTickets.length === 0) {
+            alert(`[Gỡ lỗi] Vé bị từ chối chuyển sang Popup vì trạng thái vé đang là: ${tickets[0]?.status}\nSẽ gọi trực tiếp check-in cũ!`);
             // Để backend báo lỗi hết hạn
             await doCheckin(code);
             setCheckingIn(false);
