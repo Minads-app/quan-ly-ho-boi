@@ -94,10 +94,26 @@ export default function PrintTicketModal({ isOpen, onClose, ticket, bizInfo }: P
                     </h2>
 
                     <div style={{ textAlign: 'left', fontSize: '13px', lineHeight: '1.6' }}>
-                        <div><strong>{isLesson ? 'Học viên 1:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
-                        {ticket.customer_name_2 && (
-                            <div><strong>Học viên 2:</strong> {ticket.customer_name_2} - NS: {ticket.customer_birth_year_2 || 'N/A'}</div>
-                        )}
+                        {!isLesson ? (
+                            <div><strong>Khách hàng:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                        ) : (() => {
+                            const names = (ticket.customer_name || 'Khách Vãng Lai').split(' + ');
+                            if (names.length <= 1) {
+                                return (
+                                    <>
+                                        <div><strong>Học viên 1:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                        {ticket.customer_name_2 && (
+                                            <div><strong>Học viên 2:</strong> {ticket.customer_name_2} - NS: {ticket.customer_birth_year_2 || 'N/A'}</div>
+                                        )}
+                                    </>
+                                );
+                            }
+                            return names.map((n, idx) => {
+                                let val = n;
+                                if (idx === 1 && ticket.customer_name_2 && ticket.customer_birth_year_2) val = `${n} - NS: ${ticket.customer_birth_year_2}`;
+                                return <div key={idx}><strong>Học viên {idx + 1}:</strong> {val}</div>;
+                            });
+                        })()}
                         {ticket.guardian_name && (
                             <div style={{ fontSize: '11px', marginTop: '2px' }}><strong>Giám hộ:</strong> {ticket.guardian_name} - {ticket.guardian_phone}</div>
                         )}

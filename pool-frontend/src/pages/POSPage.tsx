@@ -1362,10 +1362,26 @@ export default function POSPage() {
                                     {/* Tiêu đề vé phân biệt theo loại */}
                                     <h2>{ticket.pass_category === 'LESSON' ? '📚 VÉ HỌC BƠI' : ticket.pass_category ? '🏊 VÉ BƠI TRẢ TRƯỚC' : '🏊 VÉ BƠI'}</h2>
 
-                                    <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên 1:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
-                                    {(ticket as any).customer_name_2 && (
-                                        <div><strong>Học viên 2:</strong> {(ticket as any).customer_name_2} - NS: {(ticket as any).customer_birth_year_2 || 'N/A'}</div>
-                                    )}
+                                    {ticket.pass_category !== 'LESSON' ? (
+                                        <div><strong>Khách hàng:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                    ) : (() => {
+                                        const names = (ticket.customer_name || 'Khách Vãng Lai').split(' + ');
+                                        if (names.length <= 1) {
+                                            return (
+                                                <>
+                                                    <div><strong>Học viên 1:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                                    {(ticket as any).customer_name_2 && (
+                                                        <div><strong>Học viên 2:</strong> {(ticket as any).customer_name_2} - NS: {(ticket as any).customer_birth_year_2 || 'N/A'}</div>
+                                                    )}
+                                                </>
+                                            );
+                                        }
+                                        return names.map((n, idx) => {
+                                            let val = n;
+                                            if (idx === 1 && (ticket as any).customer_name_2 && (ticket as any).customer_birth_year_2) val = `${n} - NS: ${(ticket as any).customer_birth_year_2}`;
+                                            return <div key={idx}><strong>Học viên {idx + 1}:</strong> {val}</div>;
+                                        });
+                                    })()}
                                     {(ticket as any).guardian_name && (
                                         <div style={{ fontSize: '11px', marginTop: '2px' }}><strong>Giám hộ:</strong> {(ticket as any).guardian_name} - {(ticket as any).guardian_phone}</div>
                                     )}
@@ -1433,10 +1449,26 @@ export default function POSPage() {
                                 {/* Tiêu đề vé phân biệt theo loại */}
                                 <h2>{ticket.pass_category === 'LESSON' ? '📚 VÉ HỌC BƠI' : ticket.pass_category ? '🏊 VÉ BƠI TRẢ TRƯỚC' : '🏊 VÉ BƠI'}</h2>
 
-                                <div><strong>{ticket.pass_category === 'LESSON' ? 'Học viên 1:' : 'Khách hàng:'}</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
-                                {(ticket as any).customer_name_2 && (
-                                    <div><strong>Học viên 2:</strong> {(ticket as any).customer_name_2} - NS: {(ticket as any).customer_birth_year_2 || 'N/A'}</div>
-                                )}
+                                {ticket.pass_category !== 'LESSON' ? (
+                                    <div><strong>Khách hàng:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                ) : (() => {
+                                    const names = (ticket.customer_name || 'Khách Vãng Lai').split(' + ');
+                                    if (names.length <= 1) {
+                                        return (
+                                            <>
+                                                <div><strong>Học viên 1:</strong> {ticket.customer_name || 'Khách Vãng Lai'}</div>
+                                                {(ticket as any).customer_name_2 && (
+                                                    <div><strong>Học viên 2:</strong> {(ticket as any).customer_name_2} - NS: {(ticket as any).customer_birth_year_2 || 'N/A'}</div>
+                                                )}
+                                            </>
+                                        );
+                                    }
+                                    return names.map((n, idx) => {
+                                        let val = n;
+                                        if (idx === 1 && (ticket as any).customer_name_2 && (ticket as any).customer_birth_year_2) val = `${n} - NS: ${(ticket as any).customer_birth_year_2}`;
+                                        return <div key={idx}><strong>Học viên {idx + 1}:</strong> {val}</div>;
+                                    });
+                                })()}
                                 {(ticket as any).guardian_name && (
                                     <div style={{ fontSize: '11px', marginTop: '2px' }}><strong>Giám hộ:</strong> {(ticket as any).guardian_name} - {(ticket as any).guardian_phone}</div>
                                 )}

@@ -1036,8 +1036,21 @@ export default function CustomerPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {[
                                 { label: 'Mã gói', value: selectedPkg.package_code || '—' },
-                                { label: selectedPkg.category === 'LESSON' ? 'Học viên 1' : 'Họ tên', value: selectedPkg.customer_name || '—' },
-                                ...(selectedPkg.category === 'LESSON' && selectedPkg.customer_name_2 ? [{ label: 'Học viên 2', value: `${selectedPkg.customer_name_2} - NS: ${selectedPkg.customer_birth_year_2 || 'N/A'}` }] : []),
+                                ...(() => {
+                                    if (selectedPkg.category !== 'LESSON') return [{ label: 'Họ tên', value: selectedPkg.customer_name || '—' }];
+                                    const names = (selectedPkg.customer_name || '').split(' + ');
+                                    if (names.length <= 1) {
+                                        return [
+                                            { label: 'Học viên 1', value: selectedPkg.customer_name || '—' },
+                                            ...(selectedPkg.customer_name_2 ? [{ label: 'Học viên 2', value: `${selectedPkg.customer_name_2} - NS: ${selectedPkg.customer_birth_year_2 || 'N/A'}` }] : [])
+                                        ];
+                                    }
+                                    return names.map((n: string, idx: number) => {
+                                        let val = n;
+                                        if (idx === 1 && selectedPkg.customer_name_2 && selectedPkg.customer_birth_year_2) val = `${n} - NS: ${selectedPkg.customer_birth_year_2}`;
+                                        return { label: `Học viên ${idx + 1}`, value: val };
+                                    });
+                                })(),
                                 ...(selectedPkg.guardian_name ? [{ label: 'Người giám hộ', value: `${selectedPkg.guardian_name} - ${selectedPkg.guardian_phone || 'N/A'}` }] : []),
                                 { label: 'Số điện thoại', value: selectedPkg.customer_phone || '—' },
                                 ...(isAdmin ? [{ label: 'Mã thẻ', value: selectedPkg.card_code || '—' }] : []),
