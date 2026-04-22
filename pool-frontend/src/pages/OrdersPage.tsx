@@ -78,6 +78,10 @@ export default function OrdersPage() {
     const [editCustName, setEditCustName] = useState('');
     const [editCustPhone, setEditCustPhone] = useState('');
 
+    // Edit Order Date
+    const [isEditingOrderDate, setIsEditingOrderDate] = useState(false);
+    const [editOrderDate, setEditOrderDate] = useState('');
+
     // Edit Package Modal
     const [selectedPkg, setSelectedPkg] = useState<TicketRow | null>(null);
     const [isEditingPkg, setIsEditingPkg] = useState(false);
@@ -242,6 +246,44 @@ export default function OrdersPage() {
         // Refresh detail view
         const updatedOrder = { ...selectedOrder, customer_name: editCustName, customer_phone: editCustPhone };
         updatedOrder.tickets = updatedOrder.tickets.map(t => ({ ...t, customer_name: editCustName, customer_phone: editCustPhone }));
+        setSelectedOrder(updatedOrder);
+
+        // Refresh list
+        setOrders(prev => prev.map(o => o.id === selectedOrder.id ? updatedOrder : o));
+    }
+
+    async function handleSaveOrderDate() {
+        if (!selectedOrder) return;
+        if (!editOrderDate) {
+            alert('Vui lòng chọn ngày giờ!');
+            return;
+        }
+        if (!confirm('Bạn có chắc chắn muốn thay đổi thời gian của hóa đơn và các vé đi kèm?')) return;
+
+        const newDateIso = new Date(editOrderDate).toISOString();
+
+        // Update orders table
+        const { error: err1 } = await supabase
+            .from('orders')
+            .update({ created_at: newDateIso })
+            .eq('id', selectedOrder.id);
+
+        if (err1) { alert('Lỗi: ' + err1.message); return; }
+
+        // Update tickets table for tickets in this order
+        const ticketIds = selectedOrder.tickets.map(t => t.id);
+        if (ticketIds.length > 0) {
+            await supabase
+                .from('tickets')
+                .update({ sold_at: newDateIso })
+                .in('id', ticketIds);
+        }
+
+        alert('✅ Cập nhật thời gian thành công!');
+        setIsEditingOrderDate(false);
+        // Refresh detail view
+        const updatedOrder = { ...selectedOrder, created_at: newDateIso };
+        updatedOrder.tickets = updatedOrder.tickets.map(t => ({ ...t, sold_at: newDateIso }));
         setSelectedOrder(updatedOrder);
 
         // Refresh list
@@ -469,7 +511,26 @@ export default function OrdersPage() {
 
                         {/* Order Meta */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', fontSize: '14px' }}>
-                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thời gian</div>{fmtDT(selectedOrder.created_at)}</div>
+                            <div>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    Thời gian
+                                    {!isEditingOrderDate && <button className="btn btn-ghost" style={{ padding: '2px 4px', fontSize: '10px', height: 'auto', minHeight: 'auto' }} onClick={() => {
+                                        const dt = new Date(selectedOrder.created_at);
+                                        dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+                                        setEditOrderDate(dt.toISOString().slice(0, 16));
+                                        setIsEditingOrderDate(true);
+                                    }}>✏️</button>}
+                                </div>
+                                {isEditingOrderDate ? (
+                                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                                        <input type="datetime-local" value={editOrderDate} onChange={e => setEditOrderDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '12px', width: '100%' }} />
+                                        <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '10px', flex: 1 }} onClick={handleSaveOrderDate}>Lưu</button>
+                                        <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '10px', flex: 1 }} onClick={() => setIsEditingOrderDate(false)}>✕</button>
+                                    </div>
+                                ) : (
+                                    <div style={{ marginTop: '2px' }}>{fmtDT(selectedOrder.created_at)}</div>
+                                )}
+                            </div>
                             <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thu ngân</div>{selectedOrder.created_by_name}</div>
                             <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thanh toán</div>{selectedOrder.payment_method}</div>
                             <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Ghi chú</div>{selectedOrder.note || '—'}</div>
