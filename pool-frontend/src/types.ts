@@ -1,7 +1,7 @@
 export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER';
 export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
 export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED' | 'CANCELLED';
-export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO';
+export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | 'PRIVATE';
 export type CardStatus = 'UNUSED' | 'USED' | 'REVOKED';
 
 export interface PermissionsMatrix {
@@ -40,6 +40,7 @@ export interface TicketType {
     duration_unit: 'days' | 'months' | null;
     lesson_class_type: LessonClassType | null;
     lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
+    student_count: number | null;
     age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
 }
 

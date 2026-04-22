@@ -39,8 +39,9 @@ interface TicketType {
     is_active: boolean;
     duration_months: number | null;
     duration_unit: 'days' | 'months' | null;
-    lesson_class_type: 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | null;
+    lesson_class_type: 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | 'PRIVATE' | null;
     lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
+    student_count: number | null;
     age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
 }
 
@@ -149,7 +150,8 @@ export default function SettingsPage() {
     const [lDurationVal, setLDurationVal] = useState<number | ''>(1);
     const [lDurationUnit, setLDurationUnit] = useState<'months' | 'days'>('months');
     const [lPrice, setLPrice] = useState(0);
-    const [lClassType, setLClassType] = useState<'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO'>('GROUP');
+    const [lClassType, setLClassType] = useState<'GROUP' | 'PRIVATE'>('GROUP');
+    const [lStudentCount, setLStudentCount] = useState<number>(1);
     const [lDesc, setLDesc] = useState('');
     const [lSchedules, setLSchedules] = useState<{ day: number; start: string; end: string; enabled: boolean }[]>(
         [0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false }))
@@ -158,6 +160,29 @@ export default function SettingsPage() {
     const [lAgeTiers, setLAgeTiers] = useState<{ minAge: number, maxAge: number, price: number }[]>([]);
 
 
+    // Helper: Lấy nhãn hiển thị cho loại lớp (tương thích ngược với ONE_ON_ONE / ONE_ON_TWO)
+    function getClassLabel(t: TicketType): string {
+        if (t.lesson_class_type === 'GROUP') return '👥 Lớp nhóm';
+        // Gói mới dùng student_count
+        if (t.student_count != null && t.student_count > 0) return `🧑‍🏫 1 kèm ${t.student_count}`;
+        // Tương thích ngược dữ liệu cũ
+        if (t.lesson_class_type === 'ONE_ON_ONE') return '🧑‍🏫 1 kèm 1';
+        if (t.lesson_class_type === 'ONE_ON_TWO') return '🧑‍🏫 1 kèm 2';
+        return '🧑‍🏫 Lớp kèm riêng';
+    }
+
+    // Helper: Kiểm tra gói có phải private (1 kèm N)
+    function isPrivateType(t: TicketType): boolean {
+        return t.lesson_class_type === 'PRIVATE' || t.lesson_class_type === 'ONE_ON_ONE' || t.lesson_class_type === 'ONE_ON_TWO';
+    }
+
+    // Helper: Lấy student_count thực tế (tương thích ngược)
+    function getStudentCount(t: TicketType): number {
+        if (t.student_count != null && t.student_count > 0) return t.student_count;
+        if (t.lesson_class_type === 'ONE_ON_ONE') return 1;
+        if (t.lesson_class_type === 'ONE_ON_TWO') return 2;
+        return 0;
+    }
 
     const dayNames: Record<number, string> = { 0: 'Chủ nhật', 1: 'Thứ 2', 2: 'Thứ 3', 3: 'Thứ 4', 4: 'Thứ 5', 5: 'Thứ 6', 6: 'Thứ 7' };
 
@@ -706,6 +731,7 @@ export default function SettingsPage() {
         setLDurationUnit('months');
         setLPrice(0);
         setLClassType('GROUP');
+        setLStudentCount(1);
         setLDesc('');
         setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false })));
         setLAgeTiers([]);
@@ -719,7 +745,10 @@ export default function SettingsPage() {
         setLDurationUnit(t.duration_unit || 'months');
         setLDurationVal(t.duration_unit === 'days' ? (t.validity_days || '') : (t.duration_months || ''));
         setLPrice(t.price);
-        setLClassType(t.lesson_class_type || 'GROUP');
+        // Tương thích ngược: map ONE_ON_ONE/ONE_ON_TWO sang PRIVATE
+        const isPriv = t.lesson_class_type === 'ONE_ON_ONE' || t.lesson_class_type === 'ONE_ON_TWO' || t.lesson_class_type === 'PRIVATE';
+        setLClassType(isPriv ? 'PRIVATE' : 'GROUP');
+        setLStudentCount(getStudentCount(t) || 1);
         setLDesc(t.description || '');
         // Load schedules
         const existing = lessonSchedulesMap[t.id] || [];
@@ -734,7 +763,7 @@ export default function SettingsPage() {
     async function handleSaveLesson(e: React.FormEvent) {
         e.preventDefault();
         setSaving(true);
-        const isPrivate = lClassType !== 'GROUP'; // ONE_ON_ONE, ONE_ON_TWO
+        const isPrivate = lClassType !== 'GROUP';
         const scheduleType = lClassType === 'GROUP' ? 'FIXED' : 'FLEXIBLE';
         const payload: any = {
             name: lName,
@@ -745,8 +774,9 @@ export default function SettingsPage() {
             duration_unit: isPrivate ? null : lDurationUnit,
             validity_days: isPrivate ? null : (lDurationUnit === 'days' ? (lDurationVal === '' ? null : Number(lDurationVal)) : null),
             duration_months: isPrivate ? null : (lDurationUnit === 'months' ? (lDurationVal === '' ? null : Number(lDurationVal)) : null),
-            lesson_class_type: lClassType,
+            lesson_class_type: isPrivate ? 'PRIVATE' : 'GROUP',
             lesson_schedule_type: scheduleType,
+            student_count: isPrivate ? lStudentCount : 0,
             age_price_tiers: isPrivate && lAgeTiers.length > 0 ? lAgeTiers : null
         };
 
@@ -1467,7 +1497,7 @@ export default function SettingsPage() {
                                                         }
                                                     }}
                                                 />
-                                                {t.name} <span style={{ color: 'var(--text-secondary, #64748b)' }}>({t.lesson_class_type === 'GROUP' ? 'Lớp nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '1 kèm 1' : '1 kèm 2'})</span>
+                                                {t.name} <span style={{ color: 'var(--text-secondary, #64748b)' }}>({getClassLabel(t)})</span>
                                             </label>
                                         ))}
                                         {lessonTypes.length === 0 && <div style={{ fontSize: '13px', color: 'gray' }}>Chưa có gói khóa học nào.</div>}
@@ -1531,7 +1561,7 @@ export default function SettingsPage() {
                                             </td>
                                             <td>
                                                 <span className="badge badge-outline" style={{ fontSize: '11px' }}>
-                                                    {t.lesson_class_type === 'GROUP' ? '👥 Lớp nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '🧑‍🏫 1 kèm 1' : '🧑‍🏫 1 kèm 2'}
+                                                    {getClassLabel(t)}
                                                 </span>
                                             </td>
                                             <td style={{ fontWeight: 600 }}>{t.session_count || '—'} buổi</td>
@@ -1540,10 +1570,10 @@ export default function SettingsPage() {
                                                 {formatScheduleSummary(t.id, t.lesson_class_type, t.lesson_schedule_type)}
                                             </td>
                                             <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
-                                                {(t.lesson_class_type === 'ONE_ON_ONE' || t.lesson_class_type === 'ONE_ON_TWO') && t.age_price_tiers?.length ? (
+                                                {isPrivateType(t) && t.age_price_tiers?.length ? (
                                                     <span style={{ fontSize: '13px' }}>Tính theo độ tuổi</span>
                                                 ) : (
-                                                    <>{t.price.toLocaleString('vi-VN')}đ{(t.lesson_class_type === 'ONE_ON_ONE' || t.lesson_class_type === 'ONE_ON_TWO') ? ' / buổi' : ''}</>
+                                                    <>{t.price.toLocaleString('vi-VN')}đ{isPrivateType(t) ? ' / buổi' : ''}</>
                                                 )}
                                             </td>
                                             <td>
@@ -1587,13 +1617,23 @@ export default function SettingsPage() {
                                     <label>Loại lớp <span style={{ color: 'red' }}>*</span></label>
                                     <select value={lClassType} onChange={e => {
                                         setLClassType(e.target.value as any);
-                                        if (e.target.value === 'GROUP') setLAgeTiers([]);
+                                        if (e.target.value === 'GROUP') { setLAgeTiers([]); setLStudentCount(0); }
+                                        else { setLStudentCount(1); }
                                     }}>
                                         <option value="GROUP">👥 Lớp bơi nhóm</option>
-                                        <option value="ONE_ON_ONE">🧑‍🏫 1 kèm 1</option>
-                                        <option value="ONE_ON_TWO">🧑‍🏫 1 kèm 2</option>
+                                        <option value="PRIVATE">🧑‍🏫 Lớp kèm riêng (1 kèm N)</option>
                                     </select>
                                 </div>
+                                {lClassType === 'PRIVATE' && (
+                                    <div className="form-group">
+                                        <label>Số học viên / buổi <span style={{ color: 'red' }}>*</span></label>
+                                        <select value={lStudentCount} onChange={e => setLStudentCount(Number(e.target.value))}>
+                                            {[1, 2, 3, 4, 5, 6].map(n => (
+                                                <option key={n} value={n}>1 kèm {n}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                                 <div className="form-group">
                                     {lClassType === 'GROUP' ? (
                                         <>
@@ -1610,7 +1650,7 @@ export default function SettingsPage() {
                                 </div>
                             </div>
 
-                            {/* Age Pricing Tiers specific for ONE_ON_ONE and ONE_ON_TWO */}
+                            {/* Age Pricing Tiers specific for PRIVATE lessons */}
                             {lClassType !== 'GROUP' && (
                                 <div style={{ marginBottom: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>

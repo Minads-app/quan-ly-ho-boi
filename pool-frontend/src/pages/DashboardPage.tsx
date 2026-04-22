@@ -1171,9 +1171,16 @@ export default function DashboardPage() {
             return { label: 'Đang học', color: '#10b981', bg: '#ecfdf5' };
         }
 
-        const classLabel = (ct: string | null) => ct === 'GROUP' ? '👥 Nhóm' : ct === 'ONE_ON_ONE' ? '🧑‍🏫 1:1' : ct === 'ONE_ON_TWO' ? '🧑‍🏫 1:2' : '—';
+        const classLabel = (ct: string | null, sc?: number | null) => {
+            if (ct === 'GROUP') return '👥 Nhóm';
+            if (sc != null && sc > 0) return `🧑‍🏫 1:${sc}`;
+            if (ct === 'ONE_ON_ONE') return '🧑‍🏫 1:1';
+            if (ct === 'ONE_ON_TWO') return '🧑‍🏫 1:2';
+            if (ct === 'PRIVATE') return '🧑‍🏫 Riêng';
+            return '—';
+        };
 
-        const tableRef = `<table id="lesson-table"><thead><tr><th>#</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>Gói</th><th>Loại lớp</th><th>Buổi còn</th><th>Hiệu lực</th><th>Giá</th><th>Trạng thái</th><th>Ngày ĐK</th></tr></thead><tbody>${lessonTickets.map((t, i) => { const st = getLessonStatus(t); return `<tr><td>${i + 1}</td><td>${t.customer_name || 'N/A'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${t.type_name}</td><td>${t.lesson_class_type === 'GROUP' ? 'Nhóm' : t.lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}</td><td>${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}</td><td>${t.valid_from ? fmtDate(t.valid_from) + ' → ' + fmtDate(t.valid_until) : 'Chưa KH'}</td><td>${fmt(t.price_paid)}</td><td>${st.label}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`; }).join('')}</tbody></table>`;
+        const tableRef = `<table id="lesson-table"><thead><tr><th>#</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>Gói</th><th>Loại lớp</th><th>Buổi còn</th><th>Hiệu lực</th><th>Giá</th><th>Trạng thái</th><th>Ngày ĐK</th></tr></thead><tbody>${lessonTickets.map((t, i) => { const st = getLessonStatus(t); const cl = t.lesson_class_type === 'GROUP' ? 'Nhóm' : (t as any).student_count > 0 ? `1:${(t as any).student_count}` : t.lesson_class_type === 'ONE_ON_ONE' ? '1:1' : t.lesson_class_type === 'ONE_ON_TWO' ? '1:2' : 'Riêng'; return `<tr><td>${i + 1}</td><td>${t.customer_name || 'N/A'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${t.type_name}</td><td>${cl}</td><td>${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}</td><td>${t.valid_from ? fmtDate(t.valid_from) + ' → ' + fmtDate(t.valid_until) : 'Chưa KH'}</td><td>${fmt(t.price_paid)}</td><td>${st.label}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`; }).join('')}</tbody></table>`;
 
         return (
             <div style={{ animation: 'fadeIn 0.3s ease' }}>
@@ -1190,7 +1197,7 @@ export default function DashboardPage() {
                                     const st = getLessonStatus(t);
                                     return [
                                         String(i + 1), t.customer_name || '', t.customer_phone || '', maskCardCode(t.card_code, isAdmin || false) || '',
-                                        t.type_name, classLabel(t.lesson_class_type),
+                                        t.type_name, classLabel(t.lesson_class_type, (t as any).student_count),
                                         `${t.remaining_sessions ?? ''}/${t.total_sessions ?? ''}`,
                                         t.valid_from ? `${fmtDate(t.valid_from)} → ${fmtDate(t.valid_until)}` : 'Chưa KH',
                                         fmt(t.price_paid), st.label, fmtDateTime(t.sold_at)
@@ -1229,7 +1236,7 @@ export default function DashboardPage() {
                                             <td style={tdS}>{t.customer_phone || '—'}</td>
                                             <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{t.card_code}</code> : '—'}</td>
                                             <td style={tdS}>{t.type_name}</td>
-                                            <td style={tdS}><span style={{ fontSize: '12px' }}>{classLabel(t.lesson_class_type)}</span></td>
+                                            <td style={tdS}><span style={{ fontSize: '12px' }}>{classLabel(t.lesson_class_type, (t as any).student_count)}</span></td>
                                             <td style={tdS}>
                                                 <span style={{ fontWeight: 600 }}>{t.remaining_sessions ?? '—'}</span>
                                                 <span style={{ color: '#94a3b8' }}> / {t.total_sessions ?? '—'}</span>

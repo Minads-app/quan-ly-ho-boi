@@ -133,17 +133,36 @@ export default function POSPage() {
     const [checkinError, setCheckinError] = useState('');
     const scannerInputRef = useRef<HTMLInputElement>(null);
 
-    // Private lesson (1:1 / 1:2) registration fields
+    // Private lesson (1 kèm N) registration fields
     const [privateSessions, setPrivateSessions] = useState<number | ''>(10);
     const [privateDurationVal, setPrivateDurationVal] = useState<number | ''>('');
     const [privateDurationUnit, setPrivateDurationUnit] = useState<'months' | 'days'>('months');
     const [privateUnlimited, setPrivateUnlimited] = useState(true);
     const [privateBirthYear, setPrivateBirthYear] = useState<number | ''>('');
-    const [customerName2, setCustomerName2] = useState('');
-    const [privateBirthYear2, setPrivateBirthYear2] = useState<number | ''>('');
+    // Mảng học viên bổ sung (từ HV2 trở đi) — dùng cho gói 1 kèm N (N>=2)
+    const [extraStudents, setExtraStudents] = useState<{ name: string; birthYear: number | '' }[]>([]);
     const [guardianName, setGuardianName] = useState('');
     const [guardianPhone, setGuardianPhone] = useState('');
     const [selectedCustomerBirthDate, setSelectedCustomerBirthDate] = useState<string | null>(null);
+
+    // Helper: kiểm tra gói private (tương thích ngược)
+    function isPrivateLesson(t: any): boolean {
+        return t?.category === 'LESSON' && (t?.lesson_class_type === 'PRIVATE' || t?.lesson_class_type === 'ONE_ON_ONE' || t?.lesson_class_type === 'ONE_ON_TWO');
+    }
+    // Helper: lấy student_count thực tế
+    function getStudentCount(t: any): number {
+        if (t?.student_count != null && t.student_count > 0) return t.student_count;
+        if (t?.lesson_class_type === 'ONE_ON_ONE') return 1;
+        if (t?.lesson_class_type === 'ONE_ON_TWO') return 2;
+        return 0;
+    }
+    // Helper: nhãn loại lớp
+    function getClassLabel(t: any): string {
+        if (t?.lesson_class_type === 'GROUP') return '👥 Nhóm';
+        const sc = getStudentCount(t);
+        if (sc > 0) return `1:${sc}`;
+        return '🧑‍🏫 Riêng';
+    }
 
     // Product Variants selection in POS
     const [selectingVariantFor, setSelectingVariantFor] = useState<RetailProduct | null>(null);
@@ -348,13 +367,18 @@ export default function POSPage() {
         setPrivateDurationVal('');
         setPrivateDurationUnit('months');
         setPrivateUnlimited(true);
-        setCustomerName2('');
-        setPrivateBirthYear2('');
         setGuardianName('');
         setGuardianPhone('');
-        // Auto-fill birth year from selected customer for 1:1 / 1:2 lessons
-        const isPrivate = ticketType.category === 'LESSON' && ((ticketType as any).lesson_class_type === 'ONE_ON_ONE' || (ticketType as any).lesson_class_type === 'ONE_ON_TWO');
-        if (isPrivate && selectedCustomerBirthDate) {
+        // Khởi tạo mảng extra students dựa trên student_count
+        const sc = getStudentCount(ticketType);
+        if (sc > 1) {
+            setExtraStudents(Array.from({ length: sc - 1 }, () => ({ name: '', birthYear: '' })));
+        } else {
+            setExtraStudents([]);
+        }
+        // Auto-fill birth year from selected customer for private lessons
+        const isPriv = isPrivateLesson(ticketType);
+        if (isPriv && selectedCustomerBirthDate) {
             setPrivateBirthYear(new Date(selectedCustomerBirthDate).getFullYear());
         } else {
             setPrivateBirthYear('');
@@ -663,22 +687,23 @@ export default function POSPage() {
         if (!selectedAdvancedType) return;
 
         // Validation for private lessons
-        const isPrivateLesson = selectedAdvancedType.category === 'LESSON' &&
-            ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO');
+        const isPriv = isPrivateLesson(selectedAdvancedType);
+        const sc = getStudentCount(selectedAdvancedType);
 
-        if (isPrivateLesson) {
+        if (isPriv) {
             if (!privateBirthYear) {
-                alert('Vui lòng nhập năm sinh học viên' + ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? ' 1!' : '!'));
+                alert(`Vui lòng nhập năm sinh học viên${sc > 1 ? ' 1' : ''}!`);
                 return;
             }
 
-            if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
-                if (!customerName2.trim()) {
-                    alert('Vui lòng nhập tên học viên 2!');
+            // Validate extra students (HV2, HV3, ...)
+            for (let i = 0; i < extraStudents.length; i++) {
+                if (!extraStudents[i].name.trim()) {
+                    alert(`Vui lòng nhập tên học viên ${i + 2}!`);
                     return;
                 }
-                if (!privateBirthYear2) {
-                    alert('Vui lòng nhập năm sinh học viên 2!');
+                if (!extraStudents[i].birthYear) {
+                    alert(`Vui lòng nhập năm sinh học viên ${i + 2}!`);
                     return;
                 }
             }
@@ -686,12 +711,13 @@ export default function POSPage() {
             // Guardian info required for under-18 students
             const currentYearGuardian = new Date().getFullYear();
             const age1Guardian = currentYearGuardian - Number(privateBirthYear);
-            const needsGuardian1 = age1Guardian < 18;
-            let needsGuardian2 = false;
-            if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                needsGuardian2 = (currentYearGuardian - Number(privateBirthYear2)) < 18;
+            let needsGuardian = age1Guardian < 18;
+            for (const s of extraStudents) {
+                if (s.birthYear && (currentYearGuardian - Number(s.birthYear)) < 18) {
+                    needsGuardian = true;
+                }
             }
-            if (needsGuardian1 || needsGuardian2) {
+            if (needsGuardian) {
                 if (!guardianName.trim() || !guardianPhone.trim()) {
                     alert('Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ (Họ tên, SĐT)!');
                     return;
@@ -700,18 +726,23 @@ export default function POSPage() {
 
             if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
                 const currentYear = new Date().getFullYear();
+                // Validate HV1
                 const age1 = currentYear - Number(privateBirthYear);
                 const isAge1Valid = selectedAdvancedType.age_price_tiers.some(tier => age1 >= tier.minAge && (tier.maxAge === null ? true : age1 <= tier.maxAge));
-                let isAge2Valid = true;
-
-                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                    const age2 = currentYear - Number(privateBirthYear2);
-                    isAge2Valid = selectedAdvancedType.age_price_tiers.some(tier => age2 >= tier.minAge && (tier.maxAge === null ? true : age2 <= tier.maxAge));
-                }
-
-                if (!isAge1Valid || !isAge2Valid) {
-                    alert('Độ tuổi học viên không phù hợp với khóa học này. Vui lòng chọn khóa học khác.');
+                if (!isAge1Valid) {
+                    alert('Độ tuổi học viên 1 không phù hợp với khóa học này.');
                     return;
+                }
+                // Validate extra students
+                for (let i = 0; i < extraStudents.length; i++) {
+                    if (extraStudents[i].birthYear) {
+                        const ageX = currentYear - Number(extraStudents[i].birthYear);
+                        const isAgeXValid = selectedAdvancedType.age_price_tiers.some(tier => ageX >= tier.minAge && (tier.maxAge === null ? true : ageX <= tier.maxAge));
+                        if (!isAgeXValid) {
+                            alert(`Độ tuổi học viên ${i + 2} không phù hợp với khóa học này.`);
+                            return;
+                        }
+                    }
                 }
             }
         } else if (selectedAdvancedType.category === 'LESSON' && (selectedAdvancedType as any).lesson_class_type === 'GROUP') {
@@ -723,26 +754,28 @@ export default function POSPage() {
 
         const calculateAdvancedPrice = () => {
             let subtotal = selectedAdvancedType.price;
-            if (isPrivateLesson && privateSessions) {
-                let unitPrice1 = selectedAdvancedType.price;
-                let unitPrice2 = 0;
-                if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
-                    const currentYear = new Date().getFullYear();
-                    if (privateBirthYear) {
-                        const age1 = currentYear - Number(privateBirthYear);
-                        const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && (t.maxAge === null ? true : age1 <= t.maxAge));
-                        if (tier1) unitPrice1 = Math.round(tier1.price);
+            if (isPriv && privateSessions) {
+                const currentYear = new Date().getFullYear();
+                // Tính giá từng học viên
+                const allBirthYears = [Number(privateBirthYear), ...extraStudents.map(s => Number(s.birthYear || 0))].filter(y => y > 0);
+                let totalUnitPrice = 0;
+
+                for (const by of allBirthYears) {
+                    let unitP = selectedAdvancedType.price;
+                    if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                        const age = currentYear - by;
+                        const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && (t.maxAge === null ? true : age <= t.maxAge));
+                        if (tier) unitP = Math.round(tier.price);
                     }
-                    if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                        unitPrice2 = selectedAdvancedType.price;
-                        const age2 = currentYear - Number(privateBirthYear2);
-                        const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && (t.maxAge === null ? true : age2 <= t.maxAge));
-                        if (tier2) unitPrice2 = Math.round(tier2.price);
-                    }
-                } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
-                    unitPrice2 = selectedAdvancedType.price;
+                    totalUnitPrice += unitP;
                 }
-                subtotal = Math.round((unitPrice1 + unitPrice2) * Number(privateSessions));
+
+                // Nếu chỉ có 1 HV mà không có age_tiers, dùng giá mặc định
+                if (allBirthYears.length === 0) {
+                    totalUnitPrice = selectedAdvancedType.price * sc;
+                }
+
+                subtotal = Math.round(totalUnitPrice * Number(privateSessions));
             }
             return subtotal;
         };
@@ -760,8 +793,9 @@ export default function POSPage() {
             promoId: selectedPromoId || undefined,
             privateSessions: privateSessionsVal,
             privateBirthYear: Number(privateBirthYear) || undefined,
-            privateBirthYear2: Number(privateBirthYear2) || undefined,
-            customerName2: customerName2 || undefined,
+            privateBirthYear2: extraStudents.length > 0 ? (Number(extraStudents[0]?.birthYear) || undefined) : undefined,
+            customerName2: extraStudents.length > 0 ? (extraStudents[0]?.name || undefined) : undefined,
+            extraStudents: extraStudents.length > 0 ? extraStudents : undefined,
             privateDurationVal: privateDurationVal ? Number(privateDurationVal) : undefined,
             privateDurationUnit: privateDurationUnit,
             privateUnlimited: privateUnlimited,
@@ -1120,11 +1154,10 @@ export default function POSPage() {
             badgeColor: '#ede9fe', disabled: false, onClick: () => sellTicket(t), filterCat: 'ADVANCED'
         })),
         ...lessonTypes.map((t): PosItem => {
-            const ct = (t as any).lesson_class_type;
-            const classLabel = ct === 'GROUP' ? '👥 Nhóm' : ct === 'ONE_ON_ONE' ? '1:1' : '1:2';
+            const label = getClassLabel(t);
             return {
                 id: t.id, name: t.name, description: t.description || '', icon: '📚', price: t.price,
-                borderColor: '#10b981', badge: classLabel, badge2: ct === 'ONE_ON_ONE' || ct === 'ONE_ON_TWO' ? '🧑‍🏫 Riêng' : `🏊 ${t.session_count || '?'}`,
+                borderColor: '#10b981', badge: label, badge2: isPrivateLesson(t) ? '🧑‍🏫 Riêng' : `🏊 ${t.session_count || '?'}`,
                 badgeColor: '#d1fae5', disabled: false, onClick: () => sellTicket(t), filterCat: 'LESSON'
             };
         }),
@@ -1659,9 +1692,9 @@ export default function POSPage() {
                                                 <span>{c.item.name} {c.type === 'TICKET' && c.item.category === 'LESSON' ? (c.privateSessions ? `(${c.privateSessions} buổi)` : '') : ''}</span>
                                                 <button onClick={() => setCart(prev => prev.filter(x => x.cart_id !== c.cart_id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0 4px' }}>&times;</button>
                                             </div>
-                                            {(c.customerName || c.customerName2) && (
+                                            {(c.customerName || c.customerName2 || (c as any).extraStudents?.length) && (
                                                 <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>
-                                                    👤 {c.customerName} {c.customerName2 ? `& ${c.customerName2}` : ''}
+                                                    👤 {c.customerName}{(c as any).extraStudents?.length ? ` & ${(c as any).extraStudents.map((s: any) => s.name).filter(Boolean).join(', ')}` : c.customerName2 ? ` & ${c.customerName2}` : ''}
                                                 </div>
                                             )}
                                             {c.promoId && (() => {
@@ -1876,13 +1909,17 @@ export default function POSPage() {
                                 </>
                             )}
 
-                            {selectedAdvancedType.category === 'LESSON' && ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' || (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') && (
+                            {isPrivateLesson(selectedAdvancedType) && (() => {
+                                const sc = getStudentCount(selectedAdvancedType);
+                                return (
                                 <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
                                     <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
-                                        🧑‍🏫 Thông tin đăng ký lớp {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_ONE' ? '1:1' : '1:2'}
+                                        🧑‍🏫 Thông tin đăng ký lớp 1:{sc}
                                     </div>
+
+                                    {/* Học viên 1 (chính) */}
                                     <div className="form-group" style={{ marginBottom: '12px' }}>
-                                        <label>Năm sinh học viên {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' ? '1 ' : ''}<span style={{ color: 'red' }}>*</span></label>
+                                        <label>Năm sinh học viên{sc > 1 ? ' 1' : ''} <span style={{ color: 'red' }}>*</span></label>
                                         <input type="number" min="1900" max={new Date().getFullYear()} required
                                             value={privateBirthYear}
                                             onChange={e => setPrivateBirthYear(e.target.value ? Number(e.target.value) : '')}
@@ -1896,48 +1933,61 @@ export default function POSPage() {
                                         )}
                                     </div>
 
-                                    {(selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && (
-                                        <>
-                                            <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                <label>Họ và Tên học viên 2 <span style={{ color: 'red' }}>*</span></label>
+                                    {/* Học viên bổ sung (HV2, HV3, ... HV-N) */}
+                                    {extraStudents.map((student, idx) => (
+                                        <div key={idx} style={{ background: '#ecfdf5', padding: '12px', borderRadius: '8px', marginBottom: '12px', border: '1px dashed #86efac' }}>
+                                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534', marginBottom: '8px' }}>
+                                                Học viên {idx + 2}
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: '8px' }}>
+                                                <label>Họ và Tên <span style={{ color: 'red' }}>*</span></label>
                                                 <input type="text" required
-                                                    value={customerName2}
-                                                    onChange={e => setCustomerName2(e.target.value)}
-                                                    placeholder="Nhập tên học viên 2"
+                                                    value={student.name}
+                                                    onChange={e => {
+                                                        const updated = [...extraStudents];
+                                                        updated[idx] = { ...updated[idx], name: e.target.value };
+                                                        setExtraStudents(updated);
+                                                    }}
+                                                    placeholder={`Nhập tên học viên ${idx + 2}`}
                                                     style={{ fontSize: '15px' }}
                                                 />
                                             </div>
-                                            <div className="form-group" style={{ marginBottom: '12px' }}>
-                                                <label>Năm sinh học viên 2 <span style={{ color: 'red' }}>*</span></label>
+                                            <div className="form-group">
+                                                <label>Năm sinh <span style={{ color: 'red' }}>*</span></label>
                                                 <input type="number" min="1900" max={new Date().getFullYear()} required
-                                                    value={privateBirthYear2}
-                                                    onChange={e => setPrivateBirthYear2(e.target.value ? Number(e.target.value) : '')}
+                                                    value={student.birthYear}
+                                                    onChange={e => {
+                                                        const updated = [...extraStudents];
+                                                        updated[idx] = { ...updated[idx], birthYear: e.target.value ? Number(e.target.value) : '' };
+                                                        setExtraStudents(updated);
+                                                    }}
                                                     placeholder="Nhập năm sinh (VD: 2010)"
                                                     style={{ fontSize: '15px' }}
                                                 />
-                                                {privateBirthYear2 && (
+                                                {student.birthYear && (
                                                     <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                        Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear2)} tuổi</strong>
+                                                        Độ tuổi: <strong>{new Date().getFullYear() - Number(student.birthYear)} tuổi</strong>
                                                     </div>
                                                 )}
                                             </div>
-                                        </>
-                                    )}
+                                        </div>
+                                    ))}
 
                                     {/* Thông tin người giám hộ — bắt buộc nếu học viên dưới 18 */}
                                     {(() => {
                                         const curYear = new Date().getFullYear();
                                         const a1 = privateBirthYear ? curYear - Number(privateBirthYear) : null;
-                                        const a2 = privateBirthYear2 ? curYear - Number(privateBirthYear2) : null;
-                                        const needsG = (a1 !== null && a1 < 18) || (a2 !== null && a2 < 18);
-                                        const isOOT = (selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO';
+                                        let needsG = a1 !== null && a1 < 18;
+                                        for (const s of extraStudents) {
+                                            if (s.birthYear && (curYear - Number(s.birthYear)) < 18) needsG = true;
+                                        }
                                         const s1Adult = a1 !== null && a1 >= 18;
                                         if (!needsG) return null;
                                         return (
                                             <div style={{ background: '#fef3c7', padding: '16px', borderRadius: '8px', marginTop: '12px', marginBottom: '12px', border: '1px solid #fcd34d' }}>
                                                 <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#92400e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                                                     <span>👨‍👩‍👧 Thông tin người giám hộ <span style={{ color: 'red' }}>*</span></span>
-                                                    {isOOT && s1Adult && (
+                                                    {sc > 1 && s1Adult && (
                                                         <button type="button" onClick={() => { setGuardianName(customerName); setGuardianPhone(customerPhone); }}
                                                             style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '6px', border: '1px solid #3b82f6', background: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
                                                             📋 Người giám hộ là học viên 1
@@ -1975,36 +2025,29 @@ export default function POSPage() {
                                             style={{ fontSize: '16px', fontWeight: 'bold' }}
                                         />
                                         {(() => {
-                                            let unitPrice1 = selectedAdvancedType.price;
-                                            let unitPrice2 = 0;
+                                            const currentYear = new Date().getFullYear();
+                                            const allBirthYears = [Number(privateBirthYear), ...extraStudents.map(s => Number(s.birthYear || 0))].filter(y => y > 0);
+                                            let totalUnitPrice = 0;
 
-                                            if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
-                                                const currentYear = new Date().getFullYear();
-
-                                                // Student 1
-                                                if (privateBirthYear) {
-                                                    const age1 = currentYear - Number(privateBirthYear);
-                                                    const tier1 = selectedAdvancedType.age_price_tiers.find(t => age1 >= t.minAge && age1 <= t.maxAge);
-                                                    if (tier1) unitPrice1 = tier1.price;
+                                            for (const by of allBirthYears) {
+                                                let unitP = selectedAdvancedType.price;
+                                                if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                                                    const age = currentYear - by;
+                                                    const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && age <= t.maxAge);
+                                                    if (tier) unitP = tier.price;
                                                 }
-
-                                                // Student 2
-                                                if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO' && privateBirthYear2) {
-                                                    unitPrice2 = selectedAdvancedType.price;
-                                                    const age2 = currentYear - Number(privateBirthYear2);
-                                                    const tier2 = selectedAdvancedType.age_price_tiers.find(t => age2 >= t.minAge && age2 <= t.maxAge);
-                                                    if (tier2) unitPrice2 = tier2.price;
-                                                }
-                                            } else if ((selectedAdvancedType as any).lesson_class_type === 'ONE_ON_TWO') {
-                                                unitPrice2 = selectedAdvancedType.price;
+                                                totalUnitPrice += unitP;
                                             }
 
-                                            const totalUnitPrice = Math.round(unitPrice1 + unitPrice2);
+                                            if (allBirthYears.length === 0) {
+                                                totalUnitPrice = selectedAdvancedType.price * sc;
+                                            }
+
                                             const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
 
                                             return (
                                                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                    Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {totalUnitPrice.toLocaleString('vi-VN')}đ/buổi)
+                                                    Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi{sc > 1 ? ` × ${allBirthYears.length || sc} HV` : ''})
                                                     {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
                                                 </div>
                                             );
@@ -2038,7 +2081,8 @@ export default function POSPage() {
                                         )}
                                     </div>
                                 </div>
-                            )}
+                                );
+                            })()}
 
 
                             <div className="form-group">
