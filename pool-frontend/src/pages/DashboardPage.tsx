@@ -320,7 +320,7 @@ export default function DashboardPage() {
             .select(`
                 id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
                 valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by, source,
-                ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type),
+                ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type, student_count),
                 profiles:sold_by (full_name),
                 customers:customer_id (full_name)
             `)
@@ -365,6 +365,7 @@ export default function DashboardPage() {
                     payment_method: t.payment_method || 'CASH',
                     lesson_class_type: t.ticket_types?.lesson_class_type || null,
                     lesson_schedule_type: t.ticket_types?.lesson_schedule_type || null,
+                    student_count: t.ticket_types?.student_count || null,
                     source: t.source
                 };
             });
