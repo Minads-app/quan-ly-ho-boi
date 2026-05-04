@@ -69,7 +69,7 @@ const fmt = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
 const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
 const fmtDateTime = (d: string) => { const dt = new Date(d); return dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + dt.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }); };
 
-const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap' };
+const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-card)' };
 const tdS: React.CSSProperties = { padding: '8px 10px', fontSize: '13px', whiteSpace: 'nowrap' };
 const dateInputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' };
 
@@ -91,7 +91,7 @@ function TicketTable({ data, title, isAdmin, bizInfo }: { data: TicketRow[], tit
     const paginated = data.slice((page - 1) * limit, page * limit);
 
     return (
-        <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh', marginBottom: '24px' }}>
             {title && <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🎟️ {title} ({data.length} vé)</h3>}
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -165,7 +165,7 @@ function RetailTable({ data }: { data: RetailRow[] }) {
     const totalQty = data.reduce((s, r) => s + r.quantity, 0);
 
     return (
-        <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh', marginBottom: '24px' }}>
             <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🛒 Sản Phẩm Bán Lẻ Đã Bán ({totalQty} món)</h3>
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -815,7 +815,7 @@ export default function DashboardPage() {
                         <h2 style={{ fontSize: '18px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span>💵</span> Lịch Sử Phiếu Chi Tiền Mặt
                         </h2>
-                        <div style={{ overflowX: 'auto' }}>
+                        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh' }}>
                             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                     <tr>
@@ -891,7 +891,7 @@ export default function DashboardPage() {
                     <div key={s.title} style={{ marginBottom: '20px' }}>
                         <h3 style={{ fontSize: '15px', marginBottom: '8px', color: s.color }}>● {s.title} ({s.data.length} lượt vào)</h3>
                         {s.data.length > 0 ? (
-                            <div style={{ overflowX: 'auto' }}>
+                            <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh' }}>
                                 <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
                                         <tr>
@@ -945,7 +945,7 @@ export default function DashboardPage() {
                 {warningTickets.length === 0 ? (
                     <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '32px' }}>✅ Không có khách nào cần cảnh báo!</p>
                 ) : (
-                    <div style={{ overflowX: 'auto' }}>
+                    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh' }}>
                         <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
@@ -1072,7 +1072,7 @@ export default function DashboardPage() {
                     )}>📊 Xuất Excel</button>
                 </div>
 
-                <div style={{ overflowX: 'auto' }}>
+                <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh' }}>
                     <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                             <tr>
@@ -1234,7 +1234,7 @@ export default function DashboardPage() {
                         </div>
                     </div>
 
-                    <div style={{ overflowX: 'auto' }}>
+                    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh' }}>
                         <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
