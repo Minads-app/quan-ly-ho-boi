@@ -266,6 +266,7 @@ export default function DashboardPage() {
 
     const [dailyPassFilter, setDailyPassFilter] = useState<'ALL' | 'UNUSED' | 'VERIFIED' | 'EXPIRED' | 'CANCELLED'>('ALL');
     const [dailyPassSearch, setDailyPassSearch] = useState('');
+    const [dailyScanMap, setDailyScanMap] = useState<Record<string, string>>({});
 
     // Compute date range
     function getDateBounds(): { from: string; to: string } {
@@ -545,11 +546,32 @@ export default function DashboardPage() {
     }
 
 
+    async function fetchDailyScanMap() {
+        const { from, to } = getDateBounds();
+        const { data } = await supabase
+            .from('scan_logs')
+            .select('ticket_id, scanned_at')
+            .eq('direction', 'IN')
+            .eq('success', true)
+            .gte('scanned_at', from + 'T00:00:00+07:00')
+            .lte('scanned_at', to + 'T23:59:59+07:00')
+            .order('scanned_at', { ascending: true });
+
+        if (data) {
+            const map: Record<string, string> = {};
+            data.forEach((row: any) => {
+                if (!map[row.ticket_id]) map[row.ticket_id] = row.scanned_at;
+            });
+            setDailyScanMap(map);
+        }
+    }
+
     useEffect(() => {
         fetchTickets();
         fetchRetailItems();
         fetchExpenses();
         if (activeTab === 'SESSIONS') fetchScanLogs();
+        if (activeTab === 'DAILY_PASSES') fetchDailyScanMap();
         fetchBusinessInfo();
     }, [dateRange, customFrom, customTo, activeTab]);
 
@@ -977,9 +999,11 @@ export default function DashboardPage() {
         const totalUnused = dailyTickets.filter(t => t.status === 'UNUSED').length;
         const totalExpired = dailyTickets.filter(t => t.status === 'EXPIRED').length;
 
-        const tableHtml = `<table><thead><tr><th>STT</th><th>Mã vé</th><th>Loại vé</th><th>Trạng thái</th><th>Giá bán</th><th>Người bán</th><th>Giờ bán</th></tr></thead><tbody>
-            ${filteredTickets.map((t, i) => `<tr><td>${i + 1}</td><td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${t.id.substring(0, 8).toUpperCase()}</code></td><td>${t.type_name}</td><td>${t.status === 'UNUSED' ? 'Chưa quét' : t.status === 'EXPIRED' ? 'Hết hạn' : 'Đã quét'}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`).join('')}
-            <tr class="total-row"><td colspan="4">TỔNG CỘNG (${filteredTickets.length} vé)</td><td style="text-align:right">${fmt(filteredTickets.reduce((s, t) => s + t.price_paid, 0))}</td><td></td><td></td></tr></tbody></table>`;
+        const fmtTime = (d: string | undefined) => d ? new Date(d).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' }) : '—';
+
+        const tableHtml = `<table><thead><tr><th>STT</th><th>Mã vé</th><th>Loại vé</th><th>Trạng thái</th><th>Giá bán</th><th>Người bán</th><th>Giờ bán</th><th>Giờ soát vé</th></tr></thead><tbody>
+            ${filteredTickets.map((t, i) => `<tr><td>${i + 1}</td><td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${t.id.substring(0, 8).toUpperCase()}</code></td><td>${t.type_name}</td><td>${t.status === 'UNUSED' ? 'Chưa quét' : t.status === 'EXPIRED' ? 'Hết hạn' : 'Đã quét'}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td><td>${fmtTime(dailyScanMap[t.id])}</td></tr>`).join('')}
+            <tr class="total-row"><td colspan="4">TỔNG CỘNG (${filteredTickets.length} vé)</td><td style="text-align:right">${fmt(filteredTickets.reduce((s, t) => s + t.price_paid, 0))}</td><td></td><td></td><td></td></tr></tbody></table>`;
 
         return (
             <>
@@ -1037,12 +1061,13 @@ export default function DashboardPage() {
 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport(`Danh sách Vé Lẻ (${dailyPassFilter === 'ALL' ? 'Tất cả' : dailyPassFilter === 'UNUSED' ? 'Chưa quét' : 'Đã quét'}) — ${from} → ${to}`, tableHtml)}>🖨️ In A4</button>
-                    <button className="btn btn-secondary" onClick={() => exportExcel(`ve_le_${from}_${to}`, ['STT', 'Mã vé', 'Loại vé', 'Trạng thái', 'H/T Thanh toán', 'Giá bán', 'Người bán', 'Thời gian'],
+                    <button className="btn btn-secondary" onClick={() => exportExcel(`ve_le_${from}_${to}`, ['STT', 'Mã vé', 'Loại vé', 'Trạng thái', 'H/T Thanh toán', 'Giá bán', 'Người bán', 'Thời gian', 'Giờ soát vé'],
                         filteredTickets.map((t, i) => [
                             String(i + 1), t.id.substring(0, 8).toUpperCase(), t.type_name,
                             t.status === 'UNUSED' ? 'Chưa quét' : t.status === 'EXPIRED' ? 'Hết hạn' : 'Đã quét',
                             t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
-                            String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at)
+                            String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at),
+                            dailyScanMap[t.id] ? fmtDateTime(dailyScanMap[t.id]) : '—'
                         ])
                     )}>📊 Xuất Excel</button>
                 </div>
@@ -1051,13 +1076,13 @@ export default function DashboardPage() {
                     <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                             <tr>
-                                <th style={thS}>#</th><th style={thS}>Mã vé</th><th style={thS}>Loại vé</th><th style={thS}>Trạng thái</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Giờ bán</th>
+                                <th style={thS}>#</th><th style={thS}>Mã vé</th><th style={thS}>Loại vé</th><th style={thS}>Trạng thái</th><th style={thS}>Thanh toán</th><th style={thS}>Giá bán</th><th style={thS}>Người bán</th><th style={thS}>Giờ bán</th><th style={thS}>Giờ soát vé</th>
                                 {isAdmin && <th style={thS}>Thao tác</th>}
                             </tr>
                         </thead>
                         <tbody>
                             {filteredTickets.length === 0 ? (
-                                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có khách ở mục này.</td></tr>
+                                <tr><td colSpan={9} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có khách ở mục này.</td></tr>
                             ) : filteredTickets.map((t, i) => (
                                 <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                     <td style={tdS}>{i + 1}</td>
@@ -1076,6 +1101,7 @@ export default function DashboardPage() {
                                     <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
                                     <td style={tdS}>{t.sold_by_name}</td>
                                     <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
+                                    <td style={{ ...tdS, fontWeight: dailyScanMap[t.id] ? 600 : 400, color: dailyScanMap[t.id] ? '#059669' : 'var(--text-secondary)' }}>{dailyScanMap[t.id] ? fmtDateTime(dailyScanMap[t.id]) : '—'}</td>
                                     {isAdmin && (
                                         <td style={tdS}>
                                             {t.status !== 'CANCELLED' && t.price_paid === 0 && (t.source === 'CHECKIN' || t.type_name === 'Vé Lượt (Từ Thẻ)' || t.type_name === 'Vé Lượt Trả Trước' || (t.type_name && t.type_name.includes('Lượt')) || (t.type_name && t.type_name.includes('Học Bơi')) || (t.type_name && (t.type_name.includes('VÃNG LAI') || t.type_name.includes('VÃNG')))) && (
