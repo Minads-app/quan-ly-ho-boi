@@ -938,6 +938,32 @@ export default function POSPage() {
 
     // --- CHECK IN LOGIC ---
     async function doCheckin(passId: string, confirmNewPackage: boolean = false, selectedTicketId?: string) {
+        // --- 1. Lấy thông tin gói gốc để kiểm tra sport_type ---
+        const { data: passData } = await supabase
+            .from('tickets')
+            .select('ticket_types(sport_type)')
+            .eq('id', passId)
+            .single();
+
+        const isBasketball = passData?.ticket_types?.sport_type === 'BASKETBALL';
+
+        // --- 2. Xử lý điểm danh riêng cho Bóng rổ ---
+        if (isBasketball) {
+            const { data, error } = await supabase.rpc('checkin_basketball_lesson', {
+                p_pass_id: passId,
+                p_staff_id: profile?.id
+            });
+            if (error || !data?.success) {
+                setCheckinError(error?.message || data?.message || 'Lỗi điểm danh Bóng rổ');
+                return;
+            }
+            alert(`✅ ${data.message}\n` + (data.remaining_sessions !== null ? `Còn lại: ${data.remaining_sessions} buổi.` : 'Không giới hạn.'));
+            setSoldTickets([]);
+            setCheckinCode('');
+            return;
+        }
+
+        // --- 3. Xử lý điểm danh cho Bơi lội (Cũ) ---
         const payload: any = {
             p_pass_id: passId,
             p_staff_id: profile?.id,
@@ -1000,7 +1026,7 @@ export default function POSPage() {
         alert(`✅ ${data.message}\n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} ${remainLabel}.` : 'Không giới hạn lượt.') + newPkgNote);
 
 
-        // Cập nhật giao diện in vé con
+        // --- Cập nhật giao diện in vé con (Bơi lội)
         let newTix = [];
         if (data.new_tickets && Array.isArray(data.new_tickets)) {
             newTix = data.new_tickets;
@@ -1031,6 +1057,7 @@ export default function POSPage() {
             pass_category: passCategory,
             pass_remaining_sessions: data.pass_status.remaining_sessions
         })));
+        
         setCheckinCode('');
     }
 
@@ -1059,7 +1086,7 @@ export default function POSPage() {
             .from('tickets')
             .select(`
                 *,
-                ticket_types!inner (name, category, session_count)
+                ticket_types!inner (name, category, session_count, sport_type)
             `)
             .or(orFilter)
             .neq('status', 'CANCELLED')

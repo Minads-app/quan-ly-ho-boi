@@ -153,6 +153,7 @@ export default function SettingsPage() {
     const [lClassType, setLClassType] = useState<'GROUP' | 'PRIVATE'>('GROUP');
     const [lStudentCount, setLStudentCount] = useState<number>(1);
     const [lDesc, setLDesc] = useState('');
+    const [lSportType, setLSportType] = useState<'SWIMMING' | 'BASKETBALL'>('SWIMMING');
     const [lSchedules, setLSchedules] = useState<{ day: number; start: string; end: string; enabled: boolean }[]>(
         [0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false }))
     );
@@ -733,6 +734,7 @@ export default function SettingsPage() {
         setLClassType('GROUP');
         setLStudentCount(1);
         setLDesc('');
+        setLSportType('SWIMMING');
         setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false })));
         setLAgeTiers([]);
         setShowLessonModal(true);
@@ -750,6 +752,7 @@ export default function SettingsPage() {
         setLClassType(isPriv ? 'PRIVATE' : 'GROUP');
         setLStudentCount(getStudentCount(t) || 1);
         setLDesc(t.description || '');
+        setLSportType(t.sport_type || 'SWIMMING');
         // Load schedules
         const existing = lessonSchedulesMap[t.id] || [];
         setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => {
@@ -777,6 +780,7 @@ export default function SettingsPage() {
             lesson_class_type: isPrivate ? 'PRIVATE' : 'GROUP',
             lesson_schedule_type: scheduleType,
             student_count: isPrivate ? lStudentCount : 0,
+            sport_type: lSportType,
             age_price_tiers: isPrivate && lAgeTiers.length > 0 ? lAgeTiers : null
         };
 
@@ -1614,16 +1618,26 @@ export default function SettingsPage() {
 
                             <div className="form-row">
                                 <div className="form-group">
+                                    <label>Môn thể thao <span style={{ color: 'red' }}>*</span></label>
+                                    <select value={lSportType} onChange={e => setLSportType(e.target.value as any)}>
+                                        <option value="SWIMMING">🏊 Bơi lội</option>
+                                        <option value="BASKETBALL">🏀 Bóng rổ</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
                                     <label>Loại lớp <span style={{ color: 'red' }}>*</span></label>
                                     <select value={lClassType} onChange={e => {
                                         setLClassType(e.target.value as any);
                                         if (e.target.value === 'GROUP') { setLAgeTiers([]); setLStudentCount(0); }
                                         else { setLStudentCount(1); }
                                     }}>
-                                        <option value="GROUP">👥 Lớp bơi nhóm</option>
+                                        <option value="GROUP">👥 Lớp nhóm</option>
                                         <option value="PRIVATE">🧑‍🏫 Lớp kèm riêng (1 kèm N)</option>
                                     </select>
                                 </div>
+                            </div>
+
+                            <div className="form-row">
                                 {lClassType === 'PRIVATE' && (
                                     <div className="form-group">
                                         <label>Số học viên / buổi <span style={{ color: 'red' }}>*</span></label>

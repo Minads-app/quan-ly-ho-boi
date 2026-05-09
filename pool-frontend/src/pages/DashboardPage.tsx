@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
 
-type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES';
+type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES' | 'BASKETBALL';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
 interface TicketRow {
@@ -55,6 +55,7 @@ interface ScanLogRow {
     scanned_at: string;
     status: string;
     ticket_id: string;
+    device_id: string;
     ticket: {
         customer_name: string | null;
         customer_phone: string | null;
@@ -62,6 +63,7 @@ interface ScanLogRow {
         price_paid: number;
         type_name: string;
         category: string;
+        sport_type?: string;
     } | null;
 }
 
@@ -454,10 +456,10 @@ export default function DashboardPage() {
         const { data, error } = await supabase
             .from('scan_logs')
             .select(`
-                id, scanned_at, direction, success, ticket_id,
+                id, scanned_at, direction, success, ticket_id, device_id,
                 tickets (
                     customer_name, customer_phone, card_code, price_paid,
-                    ticket_types (name, category),
+                    ticket_types (name, category, sport_type),
                     customers:customer_id (full_name)
                 )
             `)
@@ -477,13 +479,15 @@ export default function DashboardPage() {
                 scanned_at: row.scanned_at,
                 status: row.direction,
                 ticket_id: row.ticket_id,
+                device_id: row.device_id,
                 ticket: row.tickets ? {
                     customer_name: row.tickets.customers?.full_name || row.tickets.customer_name,
                     customer_phone: row.tickets.customer_phone,
                     card_code: row.tickets.card_code,
                     price_paid: row.tickets.price_paid,
                     type_name: row.tickets.ticket_types?.name || 'Không rõ',
-                    category: row.tickets.ticket_types?.category || 'UNKNOWN'
+                    category: row.tickets.ticket_types?.category || 'UNKNOWN',
+                    sport_type: row.tickets.ticket_types?.sport_type || 'SWIMMING'
                 } : null
             }));
             setScanLogs(mapped);
@@ -570,7 +574,7 @@ export default function DashboardPage() {
         fetchTickets();
         fetchRetailItems();
         fetchExpenses();
-        if (activeTab === 'SESSIONS') fetchScanLogs();
+        if (activeTab === 'SESSIONS' || activeTab === 'BASKETBALL') fetchScanLogs();
         if (activeTab === 'DAILY_PASSES') fetchDailyScanMap();
         fetchBusinessInfo();
     }, [dateRange, customFrom, customTo, activeTab]);
@@ -848,11 +852,13 @@ export default function DashboardPage() {
     function renderSessionsTab() {
         const { from, to } = getDateBounds();
 
+        const poolLogs = scanLogs.filter(s => s.device_id !== 'BASKETBALL_POS' && s.ticket?.sport_type !== 'BASKETBALL');
+
         // Categorize scan logs
-        const dailyScans = scanLogs.filter(s => s.ticket?.category === 'DAILY');
-        const multiScans = scanLogs.filter(s => s.ticket?.category === 'MULTI');
-        const monthlyScans = scanLogs.filter(s => s.ticket?.category === 'MONTHLY');
-        const lessonScans = scanLogs.filter(s => s.ticket?.category === 'LESSON');
+        const dailyScans = poolLogs.filter(s => s.ticket?.category === 'DAILY');
+        const multiScans = poolLogs.filter(s => s.ticket?.category === 'MULTI');
+        const monthlyScans = poolLogs.filter(s => s.ticket?.category === 'MONTHLY');
+        const lessonScans = poolLogs.filter(s => s.ticket?.category === 'LESSON');
 
         const sections = [
             { title: 'Khách Lẻ (Vé lượt)', data: dailyScans, color: '#f59e0b' },
@@ -918,6 +924,70 @@ export default function DashboardPage() {
                         ) : <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Không có lượt khách qua cổng ở phân loại này.</p>}
                     </div>
                 ))}
+            </>
+        );
+    }
+
+    function renderBasketballTab() {
+        const { from, to } = getDateBounds();
+
+        const basketballLogs = scanLogs.filter(s => s.device_id === 'BASKETBALL_POS' || s.ticket?.sport_type === 'BASKETBALL');
+
+        const tableHtml = `<h3 style="margin:16px 0 4px">Khách Check-in Bóng Rổ (${basketballLogs.length} lượt)</h3>` +
+            `<table><thead><tr><th>STT</th><th>Khách</th><th>Loại vé</th><th>Mã thẻ</th><th>Thời gian check-in</th></tr></thead><tbody>` +
+            basketballLogs.map((t, i) => `<tr><td>${i + 1}</td><td>${t.ticket?.customer_name || 'Khách lẻ'}</td><td>${t.ticket?.type_name || ''}</td><td>${maskCardCode(t.ticket?.card_code || null, isAdmin || false) || ''}</td><td>${fmtDateTime(t.scanned_at)}</td></tr>`).join('') +
+            `</tbody></table>`;
+
+        return (
+            <>
+                {renderDateFilter()}
+                <div style={{ marginBottom: '16px', padding: '12px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', color: '#c2410c', fontSize: '13px' }}>
+                    🏀 <strong>Lịch sử Check-in Bóng Rổ:</strong> Đây là danh sách học viên bóng rổ đã được lễ tân check-in tại quầy POS. Các khách này không đi qua cổng từ hồ bơi.
+                </div>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '140px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
+                        <div style={{ fontSize: '22px', fontWeight: 700, color: '#f97316' }}>{basketballLogs.length}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Lượt check-in Bóng rổ</div>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                    <button className="btn btn-secondary" onClick={() => handlePrintReport(`Báo cáo Check-in Bóng Rổ (${from} → ${to})`, tableHtml)}>🖨️ In A4</button>
+                    <button className="btn btn-secondary" onClick={() => exportExcel(`checkin_bong_ro_${from}_${to}`, ['STT', 'Khách', 'Loại vé', 'Mã thẻ', 'Thời gian check-in'],
+                        basketballLogs.map((s, i) => [String(i + 1), s.ticket?.customer_name || 'Khách lẻ', s.ticket?.type_name || '', maskCardCode(s.ticket?.card_code || null, isAdmin || false) || '', fmtDateTime(s.scanned_at)])
+                    )}>📊 Xuất Excel</button>
+                </div>
+                
+                <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '15px', marginBottom: '8px', color: '#f97316' }}>● Lịch sử Check-in ({basketballLogs.length} lượt)</h3>
+                    {basketballLogs.length > 0 ? (
+                        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh' }}>
+                            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr>
+                                        <th style={thS}>#</th><th style={thS}>Khóa học</th><th style={thS}>Học viên</th><th style={thS}>Mã thẻ</th><th style={thS}>Thời gian check-in</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {basketballLogs.map((l, i) => (
+                                        <tr key={l.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                            <td style={tdS}>{i + 1}</td>
+                                            <td style={tdS}>
+                                                <span style={{ background: '#ffedd5', color: '#c2410c', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
+                                                    {l.ticket?.type_name || 'Không rõ'}
+                                                </span>
+                                            </td>
+                                            <td style={tdS}>{l.ticket?.customer_name || 'Khách lẻ'}</td>
+                                            <td style={tdS}>{l.ticket?.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{maskCardCode(l.ticket?.card_code, isAdmin || false)}</code> : '—'}</td>
+                                            <td style={tdS}>{fmtDateTime(l.scanned_at)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có khách check-in bóng rổ.</div>
+                    )}
+                </div>
             </>
         );
     }
@@ -1303,6 +1373,7 @@ export default function DashboardPage() {
         { key: 'LESSON_PACKAGES', label: 'Gói Học Bơi', icon: '📚', adminOnly: true },
         { key: 'WARNINGS', label: 'Cảnh báo', icon: '⚠️', adminOnly: true },
         { key: 'MY_SALES', label: 'Vé Dài Hạn Đã Bán', icon: '🛒' },
+        { key: 'BASKETBALL', label: 'Check-in Bóng Rổ', icon: '🏀', adminOnly: true },
     ];
 
     return (
@@ -1330,6 +1401,7 @@ export default function DashboardPage() {
             {!loading && activeTab === 'SESSIONS' && renderSessionsTab()}
             {!loading && activeTab === 'DAILY_PASSES' && renderDailyPassesTab()}
             {!loading && activeTab === 'LESSON_PACKAGES' && renderLessonPackagesTab()}
+            {!loading && activeTab === 'BASKETBALL' && renderBasketballTab()}
             {!loading && activeTab === 'WARNINGS' && renderWarningsTab()}
             {!loading && activeTab === 'MY_SALES' && renderMySalesTab()}
 
