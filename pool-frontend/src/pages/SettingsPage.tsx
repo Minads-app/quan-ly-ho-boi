@@ -43,6 +43,7 @@ interface TicketType {
     lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
     student_count: number | null;
     age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
+    sport_type?: 'SWIMMING' | 'BASKETBALL';
 }
 
 interface LessonScheduleRow {

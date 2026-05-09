@@ -945,7 +945,7 @@ export default function POSPage() {
             .eq('id', passId)
             .single();
 
-        const isBasketball = passData?.ticket_types?.sport_type === 'BASKETBALL';
+        const isBasketball = (passData as any)?.ticket_types?.sport_type === 'BASKETBALL';
 
         // --- 2. Xử lý điểm danh riêng cho Bóng rổ ---
         if (isBasketball) {
