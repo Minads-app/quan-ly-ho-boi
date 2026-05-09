@@ -887,7 +887,7 @@ export default function SettingsPage() {
                     style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
                     onClick={() => setActiveTab('lessons')}
                 >
-                    📚 Gói Khóa Học Bơi
+                    📚 Gói Khóa Học
                 </button>
                 <button
                     className={`btn ${activeTab === 'promotions' ? 'btn-primary' : 'btn-ghost'}`}
@@ -1537,7 +1537,7 @@ export default function SettingsPage() {
                 <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
                     <div className="dashboard-content-card">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <h2 style={{ fontSize: '18px', margin: 0 }}>📚 Gói Khóa Học Bơi</h2>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>📚 Gói Khóa Học</h2>
                             <button className="btn btn-primary btn-sm" onClick={openNewLessonModal}>
                                 ➕ Tạo gói mới
                             </button>

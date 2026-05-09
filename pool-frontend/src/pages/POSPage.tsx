@@ -1226,7 +1226,7 @@ export default function POSPage() {
         { key: 'ALL', label: 'Tất cả', icon: '📋', count: allPosItems.length },
         { key: 'DAILY', label: 'Vé Lượt', icon: '🎫', count: dailyTypes.length },
         { key: 'ADVANCED', label: 'Vé Gói', icon: '🔢', count: advancedTypes.length },
-        { key: 'LESSON', label: 'Học Bơi', icon: '📚', count: lessonTypes.length },
+        { key: 'LESSON', label: 'Khóa Học', icon: '📚', count: lessonTypes.length },
         { key: 'PRODUCT', label: 'Sản Phẩm', icon: '🥤', count: products.length },
     ];
 
