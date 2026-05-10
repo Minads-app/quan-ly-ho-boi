@@ -64,6 +64,18 @@ interface Promotion {
     is_active: boolean;
     applicable_ticket_types: string[] | null;
     applicable_lesson_types: string[] | null;
+    customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
+}
+
+interface Voucher {
+    id: string;
+    promotion_id: string;
+    code: string;
+    max_uses: number | null;
+    used_count: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
 }
 
 
@@ -141,6 +153,21 @@ export default function SettingsPage() {
     const [pSelectedTickets, setPSelectedTickets] = useState<string[]>([]);
     const [pAllLessons, setPAllLessons] = useState(true);
     const [pSelectedLessons, setPSelectedLessons] = useState<string[]>([]);
+    const [pCustomerCondition, setPCustomerCondition] = useState<'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER'>('ALL');
+
+    // Voucher management state
+    const [vouchers, setVouchers] = useState<Voucher[]>([]);
+    const [showVoucherModal, setShowVoucherModal] = useState(false);
+    const [voucherPromoId, setVoucherPromoId] = useState<string>('');
+    const [voucherPromoName, setVoucherPromoName] = useState<string>('');
+    const [voucherSubTab, setVoucherSubTab] = useState<'list' | 'create_single' | 'create_batch'>('list');
+    // Single voucher form
+    const [vSingleCode, setVSingleCode] = useState('');
+    const [vSingleMaxUses, setVSingleMaxUses] = useState<number | ''>('');
+    // Batch voucher form
+    const [vBatchPrefix, setVBatchPrefix] = useState('');
+    const [vBatchQuantity, setVBatchQuantity] = useState<number | ''>(10);
+    const [generatingVouchers, setGeneratingVouchers] = useState(false);
 
     // --- LESSON PACKAGES state ---
     const [lessonTypes, setLessonTypes] = useState<TicketType[]>([]);
@@ -638,6 +665,7 @@ export default function SettingsPage() {
         setPSelectedTickets([]);
         setPAllLessons(true);
         setPSelectedLessons([]);
+        setPCustomerCondition('ALL');
         setShowPromoModal(true);
     }
 
@@ -653,6 +681,7 @@ export default function SettingsPage() {
         setPSelectedTickets(p.applicable_ticket_types || []);
         setPAllLessons(p.applicable_lesson_types === null);
         setPSelectedLessons(p.applicable_lesson_types || []);
+        setPCustomerCondition(p.customer_condition || 'ALL');
         setShowPromoModal(true);
     }
 
@@ -672,7 +701,8 @@ export default function SettingsPage() {
             valid_from: (!isUnlimitedPromo && pFrom) ? new Date(pFrom).toISOString() : null,
             valid_until: (!isUnlimitedPromo && pUntil) ? new Date(pUntil).toISOString() : null,
             applicable_ticket_types: pAllTickets ? null : pSelectedTickets,
-            applicable_lesson_types: pAllLessons ? null : pSelectedLessons
+            applicable_lesson_types: pAllLessons ? null : pSelectedLessons,
+            customer_condition: pCustomerCondition
         };
 
         let err = null;
@@ -694,7 +724,7 @@ export default function SettingsPage() {
     }
 
     async function handleDeletePromo(id: string) {
-        if (!window.confirm('Bạn có chắc chắn muốn xóa chương trình khuyến mãi này?')) return;
+        if (!window.confirm('Bạn có chắc chắn muốn xóa chương trình khuyến mãi này? Tất cả mã Voucher thuộc chương trình này cũng sẽ bị xóa.')) return;
 
         const { error } = await supabase.from('promotions').delete().eq('id', id);
         if (error) {
@@ -702,6 +732,105 @@ export default function SettingsPage() {
         } else {
             fetchPromotions();
         }
+    }
+
+    // --- VOUCHER MANAGEMENT ---
+    function getPromoStatus(p: Promotion): { label: string; badge: string; color: string } {
+        if (!p.is_active) return { label: '⏸️ Tạm dừng', badge: 'badge-warning', color: '#f59e0b' };
+        if (p.valid_until && new Date() > new Date(p.valid_until)) return { label: '⚪ Hết hạn', badge: 'badge-error', color: '#94a3b8' };
+        if (p.valid_from && new Date() < new Date(p.valid_from)) return { label: '⏳ Chưa bắt đầu', badge: 'badge-outline', color: '#6366f1' };
+        return { label: '🟢 Đang hoạt động', badge: 'badge-success', color: '#22c55e' };
+    }
+
+    async function openVoucherModal(promoId: string, promoName: string) {
+        setVoucherPromoId(promoId);
+        setVoucherPromoName(promoName);
+        setVoucherSubTab('list');
+        setVSingleCode('');
+        setVSingleMaxUses('');
+        setVBatchPrefix('');
+        setVBatchQuantity(10);
+        setShowVoucherModal(true);
+        await fetchVouchers(promoId);
+    }
+
+    async function fetchVouchers(promoId: string) {
+        const { data } = await supabase
+            .from('promotion_vouchers')
+            .select('*')
+            .eq('promotion_id', promoId)
+            .order('created_at', { ascending: false });
+        if (data) setVouchers(data);
+    }
+
+    async function handleCreateSingleVoucher() {
+        if (!vSingleCode.trim()) { alert('Vui lòng nhập mã Voucher!'); return; }
+        setSaving(true);
+        const { error } = await supabase.from('promotion_vouchers').insert({
+            promotion_id: voucherPromoId,
+            code: vSingleCode.trim().toUpperCase(),
+            max_uses: vSingleMaxUses ? Number(vSingleMaxUses) : null
+        });
+        if (error) {
+            if (error.message.includes('unique') || error.message.includes('duplicate')) {
+                alert('Mã "' + vSingleCode.trim().toUpperCase() + '" đã tồn tại! Vui lòng chọn mã khác.');
+            } else {
+                alert('Lỗi tạo Voucher: ' + error.message);
+            }
+        } else {
+            setVSingleCode('');
+            setVSingleMaxUses('');
+            await fetchVouchers(voucherPromoId);
+            setVoucherSubTab('list');
+        }
+        setSaving(false);
+    }
+
+    async function handleCreateBatchVouchers() {
+        if (!vBatchPrefix.trim()) { alert('Vui lòng nhập tiền tố (Prefix)!'); return; }
+        if (!vBatchQuantity || Number(vBatchQuantity) < 1) { alert('Vui lòng nhập số lượng hợp lệ!'); return; }
+        setGeneratingVouchers(true);
+        const { data, error } = await supabase.rpc('generate_vouchers', {
+            p_promotion_id: voucherPromoId,
+            p_prefix: vBatchPrefix.trim().toUpperCase() + '-',
+            p_quantity: Number(vBatchQuantity),
+            p_max_uses: 1
+        });
+        if (error) {
+            alert('Lỗi tạo hàng loạt: ' + error.message);
+        } else if (data && !data.success) {
+            alert('Lỗi: ' + data.error);
+        } else {
+            alert(`Đã tạo thành công ${data?.count || 0} mã Voucher!`);
+            setVBatchPrefix('');
+            setVBatchQuantity(10);
+            await fetchVouchers(voucherPromoId);
+            setVoucherSubTab('list');
+        }
+        setGeneratingVouchers(false);
+    }
+
+    async function toggleVoucherActive(id: string, currentStatus: boolean) {
+        await supabase.from('promotion_vouchers').update({ is_active: !currentStatus }).eq('id', id);
+        await fetchVouchers(voucherPromoId);
+    }
+
+    async function handleDeleteVoucher(id: string) {
+        if (!window.confirm('Xóa mã Voucher này?')) return;
+        const { error } = await supabase.from('promotion_vouchers').delete().eq('id', id);
+        if (error) {
+            alert('Không thể xóa: ' + error.message);
+        } else {
+            await fetchVouchers(voucherPromoId);
+        }
+    }
+
+    function getVoucherStatus(v: Voucher, promo?: Promotion): { label: string; color: string } {
+        if (!v.is_active) return { label: 'Vô hiệu hóa', color: '#94a3b8' };
+        if (promo?.valid_until && new Date() > new Date(promo.valid_until)) return { label: 'Hết hạn', color: '#94a3b8' };
+        if (v.max_uses !== null && v.used_count >= v.max_uses) return { label: 'Đã dùng hết', color: '#ef4444' };
+        if (v.used_count > 0) return { label: `Đã dùng ${v.used_count}/${v.max_uses || '∞'}`, color: '#f59e0b' };
+        return { label: 'Chưa sử dụng', color: '#22c55e' };
     }
 
     // --- LESSON PACKAGES MANAGEMENT ---
@@ -1225,9 +1354,9 @@ export default function SettingsPage() {
                 <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
                     <div className="dashboard-content-card">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <h2 style={{ fontSize: '18px', margin: 0 }}>Chương trình Khuyến mãi</h2>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>🎫 Chương trình Khuyến mãi & Voucher</h2>
                             <button className="btn btn-primary btn-sm" onClick={openNewPromoModal}>
-                                ➕ Thêm Khuyến mãi
+                                ➕ Thêm Chương trình
                             </button>
                         </div>
 
@@ -1238,19 +1367,28 @@ export default function SettingsPage() {
                                         <th>Tên chương trình</th>
                                         <th>Hình thức</th>
                                         <th>Giá trị</th>
-                                        <th>Thời hạn áp dụng</th>
-                                        <th>Loại vé áp dụng</th>
+                                        <th>Đối tượng</th>
+                                        <th>Thời hạn</th>
                                         <th>Trạng thái</th>
                                         <th>Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {promotions.map(p => (
-                                        <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.5 }}>
-                                            <td><strong>{p.name}</strong></td>
+                                    {promotions.map(p => {
+                                        const status = getPromoStatus(p);
+                                        return (
+                                        <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.6 }}>
+                                            <td>
+                                                <strong>{p.name}</strong>
+                                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                                                    {p.applicable_ticket_types === null && p.applicable_lesson_types === null
+                                                        ? 'Tất cả dịch vụ'
+                                                        : `${(p.applicable_ticket_types?.length || 0) + (p.applicable_lesson_types?.length || 0)} dịch vụ`}
+                                                </div>
+                                            </td>
                                             <td>
                                                 <span className="badge badge-outline">
-                                                    {p.type === 'AMOUNT' ? 'Giảm tiền mặt' : p.type === 'PERCENT' ? 'Giảm %' : 'Tặng thêm buổi'}
+                                                    {p.type === 'AMOUNT' ? 'Giảm tiền' : p.type === 'PERCENT' ? 'Giảm %' : 'Tặng buổi'}
                                                 </span>
                                             </td>
                                             <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
@@ -1259,50 +1397,51 @@ export default function SettingsPage() {
                                                 {p.type === 'BONUS_SESSION' && `+${p.value} buổi`}
                                             </td>
                                             <td>
-                                                <div style={{ fontSize: '13px' }}>
-                                                    {p.valid_from ? new Date(p.valid_from).toLocaleDateString() : 'Bất kỳ'}
+                                                <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', background: p.customer_condition === 'OLD_CUSTOMER' ? '#dbeafe' : p.customer_condition === 'NEW_CUSTOMER' ? '#dcfce7' : '#f1f5f9', color: p.customer_condition === 'OLD_CUSTOMER' ? '#1d4ed8' : p.customer_condition === 'NEW_CUSTOMER' ? '#166534' : '#64748b' }}>
+                                                    {p.customer_condition === 'OLD_CUSTOMER' ? '👤 Khách cũ' : p.customer_condition === 'NEW_CUSTOMER' ? '🆕 Khách mới' : 'Tất cả'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div style={{ fontSize: '12px' }}>
+                                                    {p.valid_from ? new Date(p.valid_from).toLocaleDateString('vi-VN') : 'Bất kỳ'}
                                                     {' → '}
-                                                    {p.valid_until ? new Date(p.valid_until).toLocaleDateString() : 'Không thời hạn'}
+                                                    {p.valid_until ? new Date(p.valid_until).toLocaleDateString('vi-VN') : '∞'}
                                                 </div>
-                                            </td>
-                                            <td>
-                                                <div style={{ fontSize: '13px' }}>
-                                                    {p.applicable_ticket_types === null ? 'Tất cả loại vé' : `${p.applicable_ticket_types.length} loại vé`}
-                                                </div>
-                                                {p.applicable_lesson_types && p.applicable_lesson_types.length > 0 && (
-                                                    <div style={{ fontSize: '11px', color: '#6366f1', marginTop: '2px' }}>
-                                                        📚 {p.applicable_lesson_types.length} gói khóa học
-                                                    </div>
-                                                )}
                                             </td>
                                             <td>
                                                 <button
-                                                    className={`badge ${p.is_active ? 'badge-success' : 'badge-error'}`}
                                                     onClick={() => togglePromoActive(p.id, p.is_active)}
-                                                    style={{ cursor: 'pointer', border: 'none' }}
+                                                    style={{ cursor: 'pointer', border: 'none', background: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, color: status.color }}
                                                 >
-                                                    {p.is_active ? 'Đang bật' : 'Đã tắt'}
+                                                    {status.label}
                                                 </button>
                                             </td>
                                             <td>
-                                                <button
-                                                    className="btn btn-ghost btn-sm"
-                                                    onClick={() => openEditPromoModal(p)}
-                                                >
-                                                    ✏️ Sửa
-                                                </button>
-                                                <button
-                                                    className="btn btn-ghost btn-sm"
-                                                    style={{ color: 'var(--alert-red)', marginLeft: '8px' }}
-                                                    onClick={() => handleDeletePromo(p.id)}
-                                                >
-                                                    🗑️ Xóa
-                                                </button>
+                                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        className="btn btn-ghost btn-sm"
+                                                        style={{ color: '#6366f1', fontSize: '12px' }}
+                                                        onClick={() => openVoucherModal(p.id, p.name)}
+                                                    >
+                                                        🎟️ Mã Voucher
+                                                    </button>
+                                                    <button className="btn btn-ghost btn-sm" onClick={() => openEditPromoModal(p)}>
+                                                        ✏️
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-ghost btn-sm"
+                                                        style={{ color: 'var(--alert-red)' }}
+                                                        onClick={() => handleDeletePromo(p.id)}
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                     {promotions.length === 0 && (
-                                        <tr><td colSpan={6} style={{ textAlign: 'center' }}>Chưa có chương trình khuyến mãi nào.</td></tr>
+                                        <tr><td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>Chưa có chương trình khuyến mãi nào. Bấm "Thêm Chương trình" để bắt đầu.</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -1397,6 +1536,15 @@ export default function SettingsPage() {
                                     <label>Giá trị (Tiền / Tỷ lệ / Số buổi)</label>
                                     <input type="number" min="1" required value={pValue} onChange={e => setPValue(Number(e.target.value))} />
                                 </div>
+                            </div>
+
+                            <div className="form-group" style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '8px' }}>Đối tượng áp dụng</label>
+                                <select value={pCustomerCondition} onChange={e => setPCustomerCondition(e.target.value as any)} style={{ width: '100%' }}>
+                                    <option value="ALL">Tất cả khách hàng</option>
+                                    <option value="OLD_CUSTOMER">👤 Chỉ Khách hàng cũ (Đã từng mua vé/gói)</option>
+                                    <option value="NEW_CUSTOMER">🆕 Chỉ Khách hàng mới (Chưa từng mua)</option>
+                                </select>
                             </div>
 
                             <div className="form-group" style={{ marginBottom: '16px' }}>
@@ -1528,6 +1676,94 @@ export default function SettingsPage() {
                                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu cài đặt'}</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ============ VOUCHER MANAGEMENT MODAL ============ */}
+            {showVoucherModal && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '700px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ margin: 0, fontSize: '18px' }}>🎟️ Mã Voucher — {voucherPromoName}</h2>
+                            <button onClick={() => setShowVoucherModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>&times;</button>
+                        </div>
+
+                        {/* Sub-tabs */}
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                            <button className={`btn btn-sm ${voucherSubTab === 'list' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setVoucherSubTab('list')}>📋 Danh sách mã</button>
+                            <button className={`btn btn-sm ${voucherSubTab === 'create_single' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setVoucherSubTab('create_single')}>✏️ Tạo mã thủ công</button>
+                            <button className={`btn btn-sm ${voucherSubTab === 'create_batch' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setVoucherSubTab('create_batch')}>📦 Tạo hàng loạt</button>
+                        </div>
+
+                        {/* LIST */}
+                        {voucherSubTab === 'list' && (
+                            <div style={{ flex: 1, overflowY: 'auto' }}>
+                                <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>Tổng: {vouchers.length} mã | Chưa dùng: {vouchers.filter(v => v.used_count === 0 && v.is_active).length} | Đã dùng hết: {vouchers.filter(v => v.max_uses !== null && v.used_count >= v.max_uses).length}</div>
+                                <table className="data-table" style={{ fontSize: '13px' }}>
+                                    <thead><tr><th>Mã</th><th>Lượt dùng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+                                    <tbody>
+                                        {vouchers.map(v => {
+                                            const promo = promotions.find(p => p.id === v.promotion_id);
+                                            const st = getVoucherStatus(v, promo);
+                                            return (
+                                                <tr key={v.id}>
+                                                    <td><code style={{ background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, fontSize: '13px' }}>{v.code}</code></td>
+                                                    <td>{v.used_count} / {v.max_uses ?? '∞'}</td>
+                                                    <td><span style={{ color: st.color, fontWeight: 600, fontSize: '12px' }}>● {st.label}</span></td>
+                                                    <td>
+                                                        <button className="btn btn-ghost btn-sm" style={{ fontSize: '11px' }} onClick={() => toggleVoucherActive(v.id, v.is_active)}>{v.is_active ? '⏸️' : '▶️'}</button>
+                                                        <button className="btn btn-ghost btn-sm" style={{ fontSize: '11px', color: '#ef4444' }} onClick={() => handleDeleteVoucher(v.id)}>🗑️</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {vouchers.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>Chưa có mã Voucher nào. Tạo mã thủ công hoặc tạo hàng loạt.</td></tr>}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* CREATE SINGLE */}
+                        {voucherSubTab === 'create_single' && (
+                            <div>
+                                <div className="form-group">
+                                    <label>Mã Voucher (VD: HVC10, SUMMER2026)</label>
+                                    <input type="text" value={vSingleCode} onChange={e => setVSingleCode(e.target.value.toUpperCase())} placeholder="Nhập mã tùy chỉnh..." style={{ textTransform: 'uppercase', fontWeight: 600 }} />
+                                </div>
+                                <div className="form-group">
+                                    <label>Số lượt sử dụng tối đa</label>
+                                    <input type="number" min="1" value={vSingleMaxUses} onChange={e => setVSingleMaxUses(e.target.value ? Number(e.target.value) : '')} placeholder="Để trống = Không giới hạn lượt" />
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Mỗi Khách hàng chỉ được dùng mã này 1 lần duy nhất (bất kể số lượt).</div>
+                                </div>
+                                <div className="modal-actions" style={{ marginTop: '16px' }}>
+                                    <button className="btn btn-ghost" onClick={() => setVoucherSubTab('list')} disabled={saving}>Quay lại</button>
+                                    <button className="btn btn-primary" onClick={handleCreateSingleVoucher} disabled={saving}>{saving ? 'Đang tạo...' : 'Tạo mã Voucher'}</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* CREATE BATCH */}
+                        {voucherSubTab === 'create_batch' && (
+                            <div>
+                                <div className="form-group">
+                                    <label>Tiền tố (Prefix)</label>
+                                    <input type="text" value={vBatchPrefix} onChange={e => setVBatchPrefix(e.target.value.toUpperCase())} placeholder="VD: TET2026, SUMMER..." style={{ textTransform: 'uppercase', fontWeight: 600 }} />
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Mã tạo ra sẽ có dạng: {(vBatchPrefix || 'PREFIX').toUpperCase()}-XXXX (4 ký tự ngẫu nhiên)</div>
+                                </div>
+                                <div className="form-group">
+                                    <label>Số lượng mã cần tạo (Tối đa 500)</label>
+                                    <input type="number" min="1" max="500" value={vBatchQuantity} onChange={e => setVBatchQuantity(e.target.value ? Number(e.target.value) : '')} />
+                                </div>
+                                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', fontSize: '12px', color: '#92400e', marginBottom: '16px' }}>
+                                    ⚠️ Mỗi mã tạo hàng loạt sẽ chỉ dùng được <strong>1 lần duy nhất</strong>. Bạn có thể gửi các mã này cho khách hàng qua Zalo/SMS.
+                                </div>
+                                <div className="modal-actions">
+                                    <button className="btn btn-ghost" onClick={() => setVoucherSubTab('list')} disabled={generatingVouchers}>Quay lại</button>
+                                    <button className="btn btn-primary" onClick={handleCreateBatchVouchers} disabled={generatingVouchers}>{generatingVouchers ? 'Đang tạo...' : `Tạo ${vBatchQuantity || 0} mã`}</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

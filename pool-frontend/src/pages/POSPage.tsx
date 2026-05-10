@@ -14,6 +14,7 @@ export interface CartItem {
     unitPrice: number;
     subtotal: number;
     promoId?: string;
+    voucherId?: string;
     privateSessions?: number;
     privateBirthYear?: number;
     privateBirthYear2?: number;
@@ -49,6 +50,15 @@ interface Promotion {
     is_active: boolean;
     applicable_ticket_types: string[] | null;
     applicable_lesson_types: string[] | null;
+    customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
+}
+
+interface ValidatedVoucher {
+    voucher_id: string;
+    promotion_id: string;
+    promo_name: string;
+    promo_type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
+    promo_value: number;
 }
 
 interface BusinessInfo {
@@ -115,9 +125,13 @@ export default function POSPage() {
     const [hotkeyCustomers, setHotkeyCustomers] = useState<Customer[]>([]);
     const [newCustHotkey, setNewCustHotkey] = useState('');
 
-    // Promotions
+    // Promotions & Voucher
     const [promotions, setPromotions] = useState<Promotion[]>([]);
     const [selectedPromoId, setSelectedPromoId] = useState<string>('');
+    const [voucherCode, setVoucherCode] = useState('');
+    const [validatedVoucher, setValidatedVoucher] = useState<ValidatedVoucher | null>(null);
+    const [voucherError, setVoucherError] = useState('');
+    const [validatingVoucher, setValidatingVoucher] = useState(false);
     const printRef = useRef<HTMLDivElement>(null);
 
     // Business Info & Payment Options
@@ -171,9 +185,15 @@ export default function POSPage() {
     const [showPackageSelectModal, setShowPackageSelectModal] = useState(false);
     const [availablePackages, setAvailablePackages] = useState<any[]>([]);
     const [pendingCheckinCode, setPendingCheckinCode] = useState('');
-    
+
     // PREVIEW CHECKIN STATE
     const [previewTicket, setPreviewTicket] = useState<any | null>(null);
+
+    // CHECK-IN HISTORY STATE
+    const [checkinHistory, setCheckinHistory] = useState<any[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+    const [historySearchTerm, setHistorySearchTerm] = useState('');
+    const [historyMode, setHistoryMode] = useState<'TODAY' | 'SEARCH'>('TODAY');
 
     // POS Search & Filter
     const [searchTerm, setSearchTerm] = useState('');
@@ -316,6 +336,42 @@ export default function POSPage() {
         if (data) setPromotions(data);
     }
 
+    async function handleApplyVoucher() {
+        if (!voucherCode.trim()) return;
+        setVoucherError('');
+        setValidatedVoucher(null);
+        setValidatingVoucher(true);
+
+        const { data, error } = await supabase.rpc('validate_voucher', {
+            p_code: voucherCode.trim(),
+            p_customer_id: selectedCustomerId || null,
+            p_ticket_type_id: selectedAdvancedType?.id || null
+        });
+
+        if (error) {
+            setVoucherError('Lỗi hệ thống: ' + error.message);
+        } else if (data && !data.valid) {
+            setVoucherError(data.error || 'Mã không hợp lệ.');
+        } else if (data && data.valid) {
+            setValidatedVoucher({
+                voucher_id: data.voucher_id,
+                promotion_id: data.promotion_id,
+                promo_name: data.promo_name,
+                promo_type: data.promo_type,
+                promo_value: data.promo_value
+            });
+            setSelectedPromoId(data.promotion_id);
+        }
+        setValidatingVoucher(false);
+    }
+
+    function clearVoucher() {
+        setVoucherCode('');
+        setValidatedVoucher(null);
+        setVoucherError('');
+        setSelectedPromoId('');
+    }
+
     async function fetchHotkeyCustomers() {
         const { data } = await supabase
             .from('customers')
@@ -360,6 +416,9 @@ export default function POSPage() {
         setSelectedAdvancedType(ticketType);
         // DO NOT reset customerName/Phone/cardCode — they are managed by cart search bar
         setSelectedPromoId('');
+        setVoucherCode('');
+        setValidatedVoucher(null);
+        setVoucherError('');
         setCustSearchTerm('');
         setCustSearchResults([]);
         // Reset private lesson fields
@@ -570,11 +629,8 @@ export default function POSPage() {
             if (c.promoId) {
                 const promo = promotions.find(p => p.id === c.promoId);
                 if (promo) {
-                    if (promo.type === 'AMOUNT') {
-                        finalPrice = Math.max(0, finalPrice - promo.value);
-                    } else if (promo.type === 'PERCENT') {
-                        finalPrice = Math.round(finalPrice * (1 - promo.value / 100));
-                    } else if (promo.type === 'BONUS_SESSION' && finalSessions !== null) {
+                    // AMOUNT & PERCENT đã được tính trong calculateAdvancedPrice() → không tính lại
+                    if (promo.type === 'BONUS_SESSION' && finalSessions !== null) {
                         finalSessions += promo.value;
                     }
                 }
@@ -618,6 +674,18 @@ export default function POSPage() {
             alert('Lỗi bán hàng: ' + (error?.message || data?.error));
             setSelling(false);
             return;
+        }
+
+        // Ghi nhận sử dụng Voucher (nếu có)
+        for (const c of cart) {
+            if ((c as any).voucherId) {
+                await supabase.rpc('use_voucher', {
+                    p_voucher_id: (c as any).voucherId,
+                    p_customer_id: selectedCustomerId || null,
+                    p_ticket_id: null,
+                    p_used_by: profile?.id || null
+                });
+            }
         }
 
         // Build receipt object before clearing cart
@@ -777,10 +845,15 @@ export default function POSPage() {
 
                 subtotal = Math.round(totalUnitPrice * Number(privateSessions));
             }
+            // Áp dụng giảm giá từ Voucher (nếu có)
+            if (validatedVoucher) {
+                if (validatedVoucher.promo_type === 'AMOUNT') subtotal = Math.max(0, subtotal - validatedVoucher.promo_value);
+                if (validatedVoucher.promo_type === 'PERCENT') subtotal = Math.round(subtotal * (1 - validatedVoucher.promo_value / 100));
+            }
             return subtotal;
         };
 
-        const privateSessionsVal = Number(privateSessions) || undefined;
+        const privateSessionsVal = isPriv ? (Number(privateSessions) || undefined) : undefined;
 
         // ADD TO CART 
         setCart(prev => [...prev, {
@@ -791,6 +864,7 @@ export default function POSPage() {
             unitPrice: calculateAdvancedPrice(),
             subtotal: calculateAdvancedPrice(),
             promoId: selectedPromoId || undefined,
+            voucherId: validatedVoucher?.voucher_id || undefined,
             privateSessions: privateSessionsVal,
             privateBirthYear: Number(privateBirthYear) || undefined,
             privateBirthYear2: extraStudents.length > 0 ? (Number(extraStudents[0]?.birthYear) || undefined) : undefined,
@@ -830,7 +904,7 @@ export default function POSPage() {
         iframe.style.width = '0';
         iframe.style.height = '0';
         iframe.style.border = 'none';
-        
+
         // Add iframe to body so it gets a contentWindow
         document.body.appendChild(iframe);
         const win = iframe.contentWindow;
@@ -914,7 +988,7 @@ export default function POSPage() {
       </html>
     `);
         win.document.close();
-        
+
         // Wait for fonts/styles to load and print
         setTimeout(() => {
             win.focus();
@@ -1057,8 +1131,10 @@ export default function POSPage() {
             pass_category: passCategory,
             pass_remaining_sessions: data.pass_status.remaining_sessions
         })));
-        
+
         setCheckinCode('');
+        // Refresh check-in history after successful check-in
+        if (historyMode === 'TODAY') fetchCheckinHistory();
     }
 
     async function handleCheckinSubmit(e: React.FormEvent) {
@@ -1072,7 +1148,7 @@ export default function POSPage() {
         // Pre-fetch ticket information for preview popup
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const isUuid = uuidRegex.test(code);
-        
+
         // Find matching customer by card code to also search tickets by customer_id
         const { data: customerData } = await supabase.from('customers').select('id').ilike('card_code', `%${code}%`);
         const customerIds = customerData?.map(c => c.id) || [];
@@ -1129,7 +1205,103 @@ export default function POSPage() {
         if (activeTab === 'CHECKIN' && scannerInputRef.current) {
             scannerInputRef.current.focus();
         }
+        if (activeTab === 'CHECKIN') {
+            fetchCheckinHistory();
+        }
     }, [activeTab]);
+
+    // Fetch check-in history (today or search)
+    async function fetchCheckinHistory(searchQuery?: string) {
+        setLoadingHistory(true);
+        try {
+            const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+            // Check-in sub-tickets are identified by: price_paid=0 + total_sessions=1
+            // (this works regardless of whether source='CHECKIN' was set correctly)
+            let query = supabase
+                .from('tickets')
+                .select(`
+                    id,
+                    customer_name,
+                    customer_phone,
+                    card_code,
+                    customer_id,
+                    status,
+                    sold_at,
+                    sold_by,
+                    ticket_type_id,
+                    ticket_types!inner (name, category, sport_type),
+                    profiles:sold_by (full_name)
+                `)
+                .eq('price_paid', 0)
+                .eq('total_sessions', 1);
+
+            if (searchQuery && searchQuery.trim().length >= 2) {
+                // Search mode: first find matching customer IDs, then search tickets
+                const term = searchQuery.trim();
+
+                // Find customers matching the search term
+                const { data: matchedCustomers } = await supabase
+                    .from('customers')
+                    .select('id')
+                    .or(`card_code.ilike.%${term}%,full_name.ilike.%${term}%,phone.ilike.%${term}%`);
+
+                const customerIds = (matchedCustomers || []).map((c: any) => c.id);
+
+                // Build OR filter: match directly on ticket fields OR via customer_id
+                let orParts = `card_code.ilike.%${term}%,customer_name.ilike.%${term}%,customer_phone.ilike.%${term}%`;
+                if (customerIds.length > 0) {
+                    orParts += `,customer_id.in.(${customerIds.join(',')})`;
+                }
+                query = query.or(orParts);
+                query = query.order('sold_at', { ascending: false }).limit(100);
+            } else {
+                // Today mode
+                query = query.gte('sold_at', todayStr + 'T00:00:00')
+                    .lte('sold_at', todayStr + 'T23:59:59')
+                    .order('sold_at', { ascending: false });
+            }
+
+            const { data: checkinTickets, error } = await query;
+
+            if (error) {
+                console.error('Error fetching check-in history:', error);
+                setCheckinHistory([]);
+                setLoadingHistory(false);
+                return;
+            }
+
+            // Now fetch cancelled tickets info for these tickets
+            const ticketIds = (checkinTickets || []).map((t: any) => t.id);
+            let cancelledMap: Record<string, any> = {};
+
+            if (ticketIds.length > 0) {
+                const { data: cancelledData } = await supabase
+                    .from('cancelled_tickets')
+                    .select('ticket_id, reason, sessions_restored, cancelled_at, cancelled_by, profiles:cancelled_by (full_name)')
+                    .in('ticket_id', ticketIds);
+
+                if (cancelledData) {
+                    cancelledData.forEach((c: any) => {
+                        cancelledMap[c.ticket_id] = c;
+                    });
+                }
+            }
+
+            // Merge data
+            const merged = (checkinTickets || []).map((t: any) => ({
+                ...t,
+                cancellation: cancelledMap[t.id] || null,
+                isCancelled: t.status === 'CANCELLED',
+            }));
+
+            setCheckinHistory(merged);
+        } catch (err) {
+            console.error('Error fetching check-in history:', err);
+            setCheckinHistory([]);
+        }
+        setLoadingHistory(false);
+    }
 
     const dailyTypes = ticketTypes.filter(t => t.category === 'DAILY');
     const advancedTypes = ticketTypes.filter(t => t.category === 'MONTHLY' || t.category === 'MULTI');
@@ -1227,7 +1399,7 @@ export default function POSPage() {
         { key: 'DAILY', label: 'Vé Lượt', icon: '🎫', count: dailyTypes.length },
         { key: 'ADVANCED', label: 'Vé Gói', icon: '🔢', count: advancedTypes.length },
         { key: 'LESSON', label: 'Khóa Học', icon: '📚', count: lessonTypes.length },
-        { key: 'PRODUCT', label: 'Sản Phẩm', icon: '🥤', count: products.length },
+        { key: 'PRODUCT', label: 'Sản Phẩm', icon: '🥽', count: products.length },
     ];
 
     // Show Master Receipt 
@@ -1809,30 +1981,219 @@ export default function POSPage() {
             )}
 
             {activeTab === 'CHECKIN' && (
-                <section className="dashboard-content-card" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center', animation: 'fadeIn 0.3s ease' }}>
-                    <div style={{ padding: '32px 0' }}>
-                        <div style={{ fontSize: '48px', marginBottom: '16px' }}>📸</div>
-                        <h2 style={{ marginBottom: '8px' }}>Quét Thẻ Tháng / Thẻ Nhiểu Buổi</h2>
-                        <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Dùng máy quét mã vạch hoặc nhập mã thẻ vào ô bên dưới để lấy vé lượt cho khách đi qua cổng kiểm soát.</p>
+                <div style={{ animation: 'fadeIn 0.3s ease' }}>
+                    {/* SCAN FORM */}
+                    <section className="dashboard-content-card" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
+                        <div style={{ padding: '32px 0' }}>
+                            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📸</div>
+                            <h2 style={{ marginBottom: '8px' }}>Quét Thẻ Tháng / Thẻ Nhiều Buổi</h2>
+                            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Dùng máy quét mã vạch hoặc nhập mã thẻ vào ô bên dưới để lấy vé lượt cho khách đi qua cổng kiểm soát.</p>
 
-                        <form onSubmit={handleCheckinSubmit} style={{ maxWidth: '400px', margin: '0 auto' }}>
-                            {checkinError && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{checkinError}</div>}
-                            <input
-                                ref={scannerInputRef}
-                                type="text"
-                                className="input"
-                                placeholder="Quét mã QR Thẻ vào đây..."
-                                value={checkinCode}
-                                onChange={e => setCheckinCode(normalizeScannerInput(e.target.value))}
-                                style={{ textAlign: 'center', fontSize: '18px', padding: '16px', marginBottom: '16px' }}
-                                autoFocus
-                            />
-                            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }} disabled={checkingIn}>
-                                {checkingIn ? 'Đang xử lý...' : 'Xác nhận (Enter)'}
-                            </button>
-                        </form>
-                    </div>
-                </section>
+                            <form onSubmit={handleCheckinSubmit} style={{ maxWidth: '400px', margin: '0 auto' }}>
+                                {checkinError && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{checkinError}</div>}
+                                <input
+                                    ref={scannerInputRef}
+                                    type="text"
+                                    className="input"
+                                    placeholder="Quét mã QR Thẻ vào đây..."
+                                    value={checkinCode}
+                                    onChange={e => setCheckinCode(normalizeScannerInput(e.target.value))}
+                                    style={{ textAlign: 'center', fontSize: '18px', padding: '16px', marginBottom: '16px' }}
+                                    autoFocus
+                                />
+                                <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }} disabled={checkingIn}>
+                                    {checkingIn ? 'Đang xử lý...' : 'Xác nhận (Enter)'}
+                                </button>
+                            </form>
+                        </div>
+                    </section>
+
+                    {/* CHECK-IN HISTORY */}
+                    <section style={{ maxWidth: '900px', margin: '24px auto 0', background: '#fff', borderRadius: '16px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+                        {/* Header */}
+                        <div style={{ padding: '20px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                            <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                📋 Lịch Sử Check-in Thẻ Gói
+                            </h3>
+                            <div style={{ display: 'flex', gap: '6px', background: '#f1f5f9', padding: '3px', borderRadius: '10px' }}>
+                                <button
+                                    onClick={() => { setHistoryMode('TODAY'); setHistorySearchTerm(''); fetchCheckinHistory(); }}
+                                    style={{
+                                        padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
+                                        cursor: 'pointer', transition: 'all 0.15s',
+                                        background: historyMode === 'TODAY' ? '#3b82f6' : 'transparent',
+                                        color: historyMode === 'TODAY' ? '#fff' : '#475569',
+                                    }}
+                                >📅 Hôm nay</button>
+                                <button
+                                    onClick={() => setHistoryMode('SEARCH')}
+                                    style={{
+                                        padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
+                                        cursor: 'pointer', transition: 'all 0.15s',
+                                        background: historyMode === 'SEARCH' ? '#3b82f6' : 'transparent',
+                                        color: historyMode === 'SEARCH' ? '#fff' : '#475569',
+                                    }}
+                                >🔍 Tra cứu KH</button>
+                            </div>
+                        </div>
+
+                        {/* Search bar (only in SEARCH mode) */}
+                        {historyMode === 'SEARCH' && (
+                            <div style={{ padding: '12px 24px 0' }}>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <div style={{ flex: 1, position: 'relative' }}>
+                                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: '#94a3b8' }}>🔍</span>
+                                        <input
+                                            type="text"
+                                            placeholder="Nhập mã thẻ, tên KH hoặc SĐT..."
+                                            value={historySearchTerm}
+                                            onChange={e => setHistorySearchTerm(e.target.value)}
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchCheckinHistory(historySearchTerm); } }}
+                                            style={{
+                                                width: '100%', padding: '10px 12px 10px 36px', fontSize: '14px',
+                                                borderRadius: '10px', border: '1px solid #e2e8f0', outline: 'none',
+                                                background: '#f8fafc', transition: 'border-color 0.2s',
+                                            }}
+                                            onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
+                                            onBlur={e => e.currentTarget.style.borderColor = '#e2e8f0'}
+                                        />
+                                    </div>
+                                    <button
+                                        className="btn btn-primary"
+                                        style={{ padding: '10px 20px', fontSize: '13px', whiteSpace: 'nowrap' }}
+                                        onClick={() => fetchCheckinHistory(historySearchTerm)}
+                                        disabled={loadingHistory || historySearchTerm.trim().length < 2}
+                                    >
+                                        {loadingHistory ? '...' : 'Tìm kiếm'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Stats summary */}
+                        {!loadingHistory && checkinHistory.length > 0 && (
+                            <div style={{ padding: '12px 24px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569' }}>
+                                    <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 10px', borderRadius: '12px', fontWeight: 700, fontSize: '13px' }}>
+                                        {checkinHistory.filter(h => !h.isCancelled).length}
+                                    </span>
+                                    Thành công
+                                </div>
+                                {checkinHistory.filter(h => h.isCancelled).length > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569' }}>
+                                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 10px', borderRadius: '12px', fontWeight: 700, fontSize: '13px' }}>
+                                            {checkinHistory.filter(h => h.isCancelled).length}
+                                        </span>
+                                        Đã hủy
+                                    </div>
+                                )}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#94a3b8' }}>
+                                    Tổng: {checkinHistory.length} lượt
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Table */}
+                        <div style={{ padding: '0 24px 20px', overflowX: 'auto' }}>
+                            {loadingHistory ? (
+                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
+                                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>⏳</div>
+                                    Đang tải...
+                                </div>
+                            ) : checkinHistory.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
+                                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭</div>
+                                    <p style={{ margin: 0 }}>
+                                        {historyMode === 'TODAY'
+                                            ? 'Chưa có lượt check-in nào hôm nay.'
+                                            : 'Không tìm thấy lịch sử check-in cho từ khóa này.'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Thời gian</th>
+                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Khách hàng</th>
+                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Loại gói</th>
+                                            <th style={{ textAlign: 'center', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Trạng thái</th>
+                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Nhân viên</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {checkinHistory.map((h, idx) => {
+                                            const time = new Date(h.sold_at);
+                                            const timeStr = time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                                            const dateStr = historyMode === 'SEARCH'
+                                                ? time.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+                                                : '';
+                                            const ticketTypeName = (h.ticket_types as any)?.name || 'N/A';
+                                            const staffName = (h.profiles as any)?.full_name || '—';
+                                            const sportType = (h.ticket_types as any)?.sport_type;
+                                            const sportIcon = sportType === 'BASKETBALL' ? '🏀' : '🏊';
+
+                                            return (
+                                                <tr key={h.id || idx} style={{
+                                                    borderBottom: '1px solid #f1f5f9',
+                                                    background: h.isCancelled ? '#fef2f2' : (idx % 2 === 0 ? '#fff' : '#fafbfc'),
+                                                    transition: 'background 0.15s',
+                                                }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = h.isCancelled ? '#fee2e2' : '#f0f9ff'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = h.isCancelled ? '#fef2f2' : (idx % 2 === 0 ? '#fff' : '#fafbfc')}
+                                                >
+                                                    <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
+                                                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{timeStr}</span>
+                                                        {dateStr && <span style={{ color: '#94a3b8', marginLeft: '4px', fontSize: '11px' }}>{dateStr}</span>}
+                                                    </td>
+                                                    <td style={{ padding: '10px 8px' }}>
+                                                        <div style={{ fontWeight: 600, color: '#1e293b' }}>{h.customer_name || 'Khách vãng lai'}</div>
+                                                        {h.card_code && (
+                                                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                                                🏷️ {profile?.role === 'ADMIN' ? h.card_code : (h.card_code.length > 6 ? `${h.card_code.substring(0, 5)}***${h.card_code.substring(h.card_code.length - 4)}` : '***')}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '10px 8px' }}>
+                                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                            {sportIcon} {ticketTypeName}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                                                        {h.isCancelled ? (
+                                                            <div>
+                                                                <span style={{
+                                                                    display: 'inline-block',
+                                                                    background: '#fee2e2', color: '#991b1b',
+                                                                    padding: '3px 10px', borderRadius: '12px',
+                                                                    fontSize: '11px', fontWeight: 700,
+                                                                }}>🔄 Đã hủy</span>
+                                                                {h.cancellation?.sessions_restored > 0 && (
+                                                                    <div style={{ fontSize: '10px', color: '#059669', marginTop: '3px', fontWeight: 600 }}>
+                                                                        +{h.cancellation.sessions_restored} buổi hoàn trả
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <span style={{
+                                                                display: 'inline-block',
+                                                                background: '#dcfce7', color: '#166534',
+                                                                padding: '3px 10px', borderRadius: '12px',
+                                                                fontSize: '11px', fontWeight: 700,
+                                                            }}>✅ Thành công</span>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '10px 8px', color: '#64748b', fontSize: '12px' }}>
+                                                        {staffName}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </section>
+                </div>
             )}
 
             {/* Modal Preview Checkin */}
@@ -1844,13 +2205,13 @@ export default function POSPage() {
                             <h2 style={{ fontSize: '22px', marginBottom: '8px' }}>Xác Nhận Check-in</h2>
                             <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Kiểm tra thông tin khách hàng trước khi xác nhận</p>
                         </div>
-                        
+
                         <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '28px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
                                 <span style={{ color: '#64748b', fontSize: '14px' }}>Khách hàng</span>
                                 <strong style={{ fontSize: '16px', color: '#0f172a' }}>{previewTicket.customer_name || 'Khách vãng lai'}</strong>
                             </div>
-                            
+
                             {previewTicket.customer_phone && (
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
                                     <span style={{ color: '#64748b', fontSize: '14px' }}>Số điện thoại</span>
@@ -1884,9 +2245,9 @@ export default function POSPage() {
                             <button className="btn btn-secondary" style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#f1f5f9', color: '#475569', border: 'none' }} onClick={() => setPreviewTicket(null)}>
                                 Hủy (ESC)
                             </button>
-                            <button 
-                                className="btn btn-primary" 
-                                style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#0ea5e9', border: 'none', boxShadow: '0 4px 12px rgba(14,165,233,0.3)' }} 
+                            <button
+                                className="btn btn-primary"
+                                style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#0ea5e9', border: 'none', boxShadow: '0 4px 12px rgba(14,165,233,0.3)' }}
                                 disabled={checkingIn}
                                 onClick={async () => {
                                     setCheckingIn(true);
@@ -1915,11 +2276,10 @@ export default function POSPage() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px' }}>
                                 <span style={{ color: 'var(--text-secondary)' }}>Tiền thu:</span>
                                 <span>
-                                    {selectedPromoId ? (() => {
-                                        const p = promotions.find(x => x.id === selectedPromoId);
+                                    {validatedVoucher ? (() => {
                                         let curr = selectedAdvancedType.price;
-                                        if (p?.type === 'AMOUNT') curr = Math.max(0, curr - p.value);
-                                        if (p?.type === 'PERCENT') curr = Math.round(curr * (1 - p.value / 100));
+                                        if (validatedVoucher.promo_type === 'AMOUNT') curr = Math.max(0, curr - validatedVoucher.promo_value);
+                                        if (validatedVoucher.promo_type === 'PERCENT') curr = Math.round(curr * (1 - validatedVoucher.promo_value / 100));
                                         return (
                                             <>
                                                 <span style={{ textDecoration: 'line-through', color: '#999', marginRight: '8px', fontSize: '13px' }}>
@@ -1941,14 +2301,13 @@ export default function POSPage() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
                                 <span style={{ color: 'var(--text-secondary)' }}>Số lượt bơi:</span>
                                 <span>
-                                    {selectedPromoId ? (() => {
-                                        const p = promotions.find(x => x.id === selectedPromoId);
+                                    {validatedVoucher ? (() => {
                                         let sess = selectedAdvancedType.session_count;
-                                        if (p?.type === 'BONUS_SESSION' && sess) {
+                                        if (validatedVoucher.promo_type === 'BONUS_SESSION' && sess) {
                                             return (
                                                 <>
                                                     <span style={{ textDecoration: 'line-through', color: '#999', marginRight: '8px', fontSize: '13px' }}>{sess}</span>
-                                                    <strong style={{ color: 'var(--accent-blue)' }}>{sess + p.value} lượt</strong>
+                                                    <strong style={{ color: 'var(--accent-blue)' }}>{sess + validatedVoucher.promo_value} lượt</strong>
                                                 </>
                                             )
                                         }
@@ -1971,207 +2330,207 @@ export default function POSPage() {
                             {isPrivateLesson(selectedAdvancedType) && (() => {
                                 const sc = getStudentCount(selectedAdvancedType);
                                 return (
-                                <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
-                                    <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
-                                        🧑‍🏫 Thông tin đăng ký lớp 1:{sc}
-                                    </div>
-
-                                    {/* Học viên 1 (chính) */}
-                                    <div className="form-group" style={{ marginBottom: '12px' }}>
-                                        <label>Năm sinh học viên{sc > 1 ? ' 1' : ''} <span style={{ color: 'red' }}>*</span></label>
-                                        <input type="number" min="1900" max={new Date().getFullYear()} required
-                                            value={privateBirthYear}
-                                            onChange={e => setPrivateBirthYear(e.target.value ? Number(e.target.value) : '')}
-                                            placeholder="Nhập năm sinh (VD: 2010)"
-                                            style={{ fontSize: '15px' }}
-                                        />
-                                        {privateBirthYear && (
-                                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear)} tuổi</strong>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Học viên bổ sung (HV2, HV3, ... HV-N) */}
-                                    {extraStudents.map((student, idx) => (
-                                        <div key={idx} style={{ background: '#ecfdf5', padding: '12px', borderRadius: '8px', marginBottom: '12px', border: '1px dashed #86efac' }}>
-                                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534', marginBottom: '8px' }}>
-                                                Học viên {idx + 2}
-                                            </div>
-                                            <div className="form-group" style={{ marginBottom: '8px' }}>
-                                                <label>Họ và Tên <span style={{ color: 'red' }}>*</span></label>
-                                                <input type="text" required
-                                                    value={student.name}
-                                                    onChange={e => {
-                                                        const updated = [...extraStudents];
-                                                        updated[idx] = { ...updated[idx], name: e.target.value };
-                                                        setExtraStudents(updated);
-                                                    }}
-                                                    placeholder={`Nhập tên học viên ${idx + 2}`}
-                                                    style={{ fontSize: '15px' }}
-                                                />
-                                            </div>
-                                            <div className="form-group">
-                                                <label>Năm sinh <span style={{ color: 'red' }}>*</span></label>
-                                                <input type="number" min="1900" max={new Date().getFullYear()} required
-                                                    value={student.birthYear}
-                                                    onChange={e => {
-                                                        const updated = [...extraStudents];
-                                                        updated[idx] = { ...updated[idx], birthYear: e.target.value ? Number(e.target.value) : '' };
-                                                        setExtraStudents(updated);
-                                                    }}
-                                                    placeholder="Nhập năm sinh (VD: 2010)"
-                                                    style={{ fontSize: '15px' }}
-                                                />
-                                                {student.birthYear && (
-                                                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                        Độ tuổi: <strong>{new Date().getFullYear() - Number(student.birthYear)} tuổi</strong>
-                                                    </div>
-                                                )}
-                                            </div>
+                                    <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
+                                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
+                                            🧑‍🏫 Thông tin đăng ký lớp 1:{sc}
                                         </div>
-                                    ))}
 
-                                    {/* Thông tin người giám hộ — bắt buộc nếu học viên dưới 18 */}
-                                    {(() => {
-                                        const curYear = new Date().getFullYear();
-                                        const a1 = privateBirthYear ? curYear - Number(privateBirthYear) : null;
-                                        let needsG = a1 !== null && a1 < 18;
-                                        for (const s of extraStudents) {
-                                            if (s.birthYear && (curYear - Number(s.birthYear)) < 18) needsG = true;
-                                        }
-                                        const s1Adult = a1 !== null && a1 >= 18;
-                                        if (!needsG) return null;
-                                        return (
-                                            <div style={{ background: '#fef3c7', padding: '16px', borderRadius: '8px', marginTop: '12px', marginBottom: '12px', border: '1px solid #fcd34d' }}>
-                                                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#92400e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                                                    <span>👨‍👩‍👧 Thông tin người giám hộ <span style={{ color: 'red' }}>*</span></span>
-                                                    {sc > 1 && s1Adult && (
-                                                        <button type="button" onClick={() => { setGuardianName(customerName); setGuardianPhone(customerPhone); }}
-                                                            style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '6px', border: '1px solid #3b82f6', background: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                                            📋 Người giám hộ là học viên 1
-                                                        </button>
-                                                    )}
+                                        {/* Học viên 1 (chính) */}
+                                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                                            <label>Năm sinh học viên{sc > 1 ? ' 1' : ''} <span style={{ color: 'red' }}>*</span></label>
+                                            <input type="number" min="1900" max={new Date().getFullYear()} required
+                                                value={privateBirthYear}
+                                                onChange={e => setPrivateBirthYear(e.target.value ? Number(e.target.value) : '')}
+                                                placeholder="Nhập năm sinh (VD: 2010)"
+                                                style={{ fontSize: '15px' }}
+                                            />
+                                            {privateBirthYear && (
+                                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                    Độ tuổi: <strong>{new Date().getFullYear() - Number(privateBirthYear)} tuổi</strong>
                                                 </div>
-                                                <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '10px' }}>
-                                                    ⚠️ Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ
+                                            )}
+                                        </div>
+
+                                        {/* Học viên bổ sung (HV2, HV3, ... HV-N) */}
+                                        {extraStudents.map((student, idx) => (
+                                            <div key={idx} style={{ background: '#ecfdf5', padding: '12px', borderRadius: '8px', marginBottom: '12px', border: '1px dashed #86efac' }}>
+                                                <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534', marginBottom: '8px' }}>
+                                                    Học viên {idx + 2}
                                                 </div>
-                                                <div className="form-group" style={{ marginBottom: '10px' }}>
-                                                    <label>Họ tên giám hộ <span style={{ color: 'red' }}>*</span></label>
-                                                    <input type="text" value={guardianName}
-                                                        onChange={e => setGuardianName(e.target.value)}
-                                                        placeholder="Nhập họ tên người giám hộ"
+                                                <div className="form-group" style={{ marginBottom: '8px' }}>
+                                                    <label>Họ và Tên <span style={{ color: 'red' }}>*</span></label>
+                                                    <input type="text" required
+                                                        value={student.name}
+                                                        onChange={e => {
+                                                            const updated = [...extraStudents];
+                                                            updated[idx] = { ...updated[idx], name: e.target.value };
+                                                            setExtraStudents(updated);
+                                                        }}
+                                                        placeholder={`Nhập tên học viên ${idx + 2}`}
                                                         style={{ fontSize: '15px' }}
                                                     />
                                                 </div>
                                                 <div className="form-group">
-                                                    <label>SĐT giám hộ <span style={{ color: 'red' }}>*</span></label>
-                                                    <input type="tel" value={guardianPhone}
-                                                        onChange={e => setGuardianPhone(e.target.value)}
-                                                        placeholder="Nhập số điện thoại giám hộ"
+                                                    <label>Năm sinh <span style={{ color: 'red' }}>*</span></label>
+                                                    <input type="number" min="1900" max={new Date().getFullYear()} required
+                                                        value={student.birthYear}
+                                                        onChange={e => {
+                                                            const updated = [...extraStudents];
+                                                            updated[idx] = { ...updated[idx], birthYear: e.target.value ? Number(e.target.value) : '' };
+                                                            setExtraStudents(updated);
+                                                        }}
+                                                        placeholder="Nhập năm sinh (VD: 2010)"
                                                         style={{ fontSize: '15px' }}
                                                     />
+                                                    {student.birthYear && (
+                                                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                            Độ tuổi: <strong>{new Date().getFullYear() - Number(student.birthYear)} tuổi</strong>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
-                                        );
-                                    })()}
+                                        ))}
 
-                                    <div className="form-group" style={{ marginBottom: '12px' }}>
-                                        <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
-                                        <input type="number" min="1" required
-                                            value={privateSessions}
-                                            onChange={e => setPrivateSessions(e.target.value ? Number(e.target.value) : '')}
-                                            style={{ fontSize: '16px', fontWeight: 'bold' }}
-                                        />
+                                        {/* Thông tin người giám hộ — bắt buộc nếu học viên dưới 18 */}
                                         {(() => {
-                                            const currentYear = new Date().getFullYear();
-                                            const allBirthYears = [Number(privateBirthYear), ...extraStudents.map(s => Number(s.birthYear || 0))].filter(y => y > 0);
-                                            let totalUnitPrice = 0;
-
-                                            for (const by of allBirthYears) {
-                                                let unitP = selectedAdvancedType.price;
-                                                if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
-                                                    const age = currentYear - by;
-                                                    const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && age <= t.maxAge);
-                                                    if (tier) unitP = tier.price;
-                                                }
-                                                totalUnitPrice += unitP;
+                                            const curYear = new Date().getFullYear();
+                                            const a1 = privateBirthYear ? curYear - Number(privateBirthYear) : null;
+                                            let needsG = a1 !== null && a1 < 18;
+                                            for (const s of extraStudents) {
+                                                if (s.birthYear && (curYear - Number(s.birthYear)) < 18) needsG = true;
                                             }
-
-                                            if (allBirthYears.length === 0) {
-                                                totalUnitPrice = selectedAdvancedType.price * sc;
-                                            }
-
-                                            const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
-
+                                            const s1Adult = a1 !== null && a1 >= 18;
+                                            if (!needsG) return null;
                                             return (
-                                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                                                    Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi{sc > 1 ? ` × ${allBirthYears.length || sc} HV` : ''})
-                                                    {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
+                                                <div style={{ background: '#fef3c7', padding: '16px', borderRadius: '8px', marginTop: '12px', marginBottom: '12px', border: '1px solid #fcd34d' }}>
+                                                    <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#92400e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                                                        <span>👨‍👩‍👧 Thông tin người giám hộ <span style={{ color: 'red' }}>*</span></span>
+                                                        {sc > 1 && s1Adult && (
+                                                            <button type="button" onClick={() => { setGuardianName(customerName); setGuardianPhone(customerPhone); }}
+                                                                style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '6px', border: '1px solid #3b82f6', background: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                                                📋 Người giám hộ là học viên 1
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '10px' }}>
+                                                        ⚠️ Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ
+                                                    </div>
+                                                    <div className="form-group" style={{ marginBottom: '10px' }}>
+                                                        <label>Họ tên giám hộ <span style={{ color: 'red' }}>*</span></label>
+                                                        <input type="text" value={guardianName}
+                                                            onChange={e => setGuardianName(e.target.value)}
+                                                            placeholder="Nhập họ tên người giám hộ"
+                                                            style={{ fontSize: '15px' }}
+                                                        />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>SĐT giám hộ <span style={{ color: 'red' }}>*</span></label>
+                                                        <input type="tel" value={guardianPhone}
+                                                            onChange={e => setGuardianPhone(e.target.value)}
+                                                            placeholder="Nhập số điện thoại giám hộ"
+                                                            style={{ fontSize: '15px' }}
+                                                        />
+                                                    </div>
                                                 </div>
                                             );
                                         })()}
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Thời hạn học</label>
-                                        <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
-                                                <input type="radio" checked={privateUnlimited} onChange={() => setPrivateUnlimited(true)} />
-                                                Không thời hạn
-                                            </label>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
-                                                <input type="radio" checked={!privateUnlimited} onChange={() => setPrivateUnlimited(false)} />
-                                                Có thời hạn
-                                            </label>
+
+                                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                                            <label>Số buổi học <span style={{ color: 'red' }}>*</span></label>
+                                            <input type="number" min="1" required
+                                                value={privateSessions}
+                                                onChange={e => setPrivateSessions(e.target.value ? Number(e.target.value) : '')}
+                                                style={{ fontSize: '16px', fontWeight: 'bold' }}
+                                            />
+                                            {(() => {
+                                                const currentYear = new Date().getFullYear();
+                                                const allBirthYears = [Number(privateBirthYear), ...extraStudents.map(s => Number(s.birthYear || 0))].filter(y => y > 0);
+                                                let totalUnitPrice = 0;
+
+                                                for (const by of allBirthYears) {
+                                                    let unitP = selectedAdvancedType.price;
+                                                    if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
+                                                        const age = currentYear - by;
+                                                        const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && age <= t.maxAge);
+                                                        if (tier) unitP = tier.price;
+                                                    }
+                                                    totalUnitPrice += unitP;
+                                                }
+
+                                                if (allBirthYears.length === 0) {
+                                                    totalUnitPrice = selectedAdvancedType.price * sc;
+                                                }
+
+                                                const totalPrice = Math.round(Number(privateSessions || 0) * totalUnitPrice);
+
+                                                return (
+                                                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                        Tổng tiền: <strong style={{ color: 'var(--accent-green)' }}>{totalPrice.toLocaleString('vi-VN')}đ</strong> ({privateSessions || 0} buổi × {Math.round(totalUnitPrice).toLocaleString('vi-VN')}đ/buổi{sc > 1 ? ` × ${allBirthYears.length || sc} HV` : ''})
+                                                        {selectedAdvancedType.age_price_tiers?.length ? ' (Giá theo độ tuổi)' : ''}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
-                                        {!privateUnlimited && (
-                                            <div style={{ display: 'flex', gap: '8px' }}>
-                                                <input type="number" min="1" step="1"
-                                                    value={privateDurationVal}
-                                                    onChange={e => setPrivateDurationVal(e.target.value ? Number(e.target.value) : '')}
-                                                    placeholder="Nhập số..."
-                                                    style={{ flex: 1 }}
-                                                />
-                                                <select value={privateDurationUnit} onChange={e => setPrivateDurationUnit(e.target.value as any)} style={{ width: '100px' }}>
-                                                    <option value="months">Tháng</option>
-                                                    <option value="days">Ngày</option>
-                                                </select>
+                                        <div className="form-group">
+                                            <label>Thời hạn học</label>
+                                            <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
+                                                    <input type="radio" checked={privateUnlimited} onChange={() => setPrivateUnlimited(true)} />
+                                                    Không thời hạn
+                                                </label>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '13px' }}>
+                                                    <input type="radio" checked={!privateUnlimited} onChange={() => setPrivateUnlimited(false)} />
+                                                    Có thời hạn
+                                                </label>
                                             </div>
-                                        )}
+                                            {!privateUnlimited && (
+                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                    <input type="number" min="1" step="1"
+                                                        value={privateDurationVal}
+                                                        onChange={e => setPrivateDurationVal(e.target.value ? Number(e.target.value) : '')}
+                                                        placeholder="Nhập số..."
+                                                        style={{ flex: 1 }}
+                                                    />
+                                                    <select value={privateDurationUnit} onChange={e => setPrivateDurationUnit(e.target.value as any)} style={{ width: '100px' }}>
+                                                        <option value="months">Tháng</option>
+                                                        <option value="days">Ngày</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
                                 );
                             })()}
 
 
                             <div className="form-group">
-                                <label>Áp dụng Khuyến mãi (Tùy chọn)</label>
-                                <select
-                                    value={selectedPromoId}
-                                    onChange={e => setSelectedPromoId(e.target.value)}
-                                    style={{ borderColor: selectedPromoId ? 'var(--accent-blue)' : '' }}
-                                >
-                                    <option value="">-- Không áp dụng KM --</option>
-                                    {promotions
-                                        .filter(p => {
-                                            if (!p.is_active) return false;
-                                            // Check date range
-                                            if (p.valid_from && new Date() < new Date(p.valid_from)) return false;
-                                            if (p.valid_until && new Date() > new Date(p.valid_until)) return false;
-                                            if (selectedAdvancedType.category === 'LESSON') {
-                                                // For lessons: only show promos that EXPLICITLY list this lesson type
-                                                return p.applicable_lesson_types !== null && p.applicable_lesson_types.includes(selectedAdvancedType.id);
-                                            }
-                                            return p.applicable_ticket_types === null || p.applicable_ticket_types.includes(selectedAdvancedType.id);
-                                        })
-                                        .map(p => {
-                                            let label = p.name;
-                                            if (p.type === 'AMOUNT') label += ` (-${p.value.toLocaleString()}đ)`;
-                                            if (p.type === 'PERCENT') label += ` (-${p.value}%)`;
-                                            if (p.type === 'BONUS_SESSION') label += ` (+${p.value} lượt)`;
-                                            return <option key={p.id} value={p.id}>{label}</option>
-                                        })}
-                                </select>
+                                <label>🎟️ Mã Voucher Khuyến mãi (Tùy chọn)</label>
+                                {validatedVoucher ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 12px' }}>
+                                        <span style={{ color: '#16a34a', fontWeight: 600, flex: 1, fontSize: '14px' }}>
+                                            ✅ {validatedVoucher.promo_name}
+                                            {validatedVoucher.promo_type === 'AMOUNT' && ` (−${validatedVoucher.promo_value.toLocaleString('vi-VN')}đ)`}
+                                            {validatedVoucher.promo_type === 'PERCENT' && ` (−${validatedVoucher.promo_value}%)`}
+                                            {validatedVoucher.promo_type === 'BONUS_SESSION' && ` (+${validatedVoucher.promo_value} buổi)`}
+                                        </span>
+                                        <button type="button" onClick={clearVoucher} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>&times;</button>
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <input
+                                            type="text"
+                                            value={voucherCode}
+                                            onChange={e => { setVoucherCode(e.target.value.toUpperCase()); setVoucherError(''); }}
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleApplyVoucher(); } }}
+                                            placeholder="Nhập mã Voucher..."
+                                            style={{ flex: 1, textTransform: 'uppercase', fontWeight: 600, borderColor: voucherError ? '#ef4444' : '' }}
+                                        />
+                                        <button type="button" className="btn btn-primary btn-sm" onClick={handleApplyVoucher} disabled={validatingVoucher || !voucherCode.trim()} style={{ whiteSpace: 'nowrap' }}>
+                                            {validatingVoucher ? '...' : 'Áp dụng'}
+                                        </button>
+                                    </div>
+                                )}
+                                {voucherError && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '6px', fontWeight: 500 }}>❌ {voucherError}</div>}
                             </div>
 
 
