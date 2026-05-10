@@ -44,6 +44,7 @@ interface TicketType {
     student_count: number | null;
     age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
     sport_type?: 'SWIMMING' | 'BASKETBALL';
+    requires_gate_ticket?: boolean;
 }
 
 interface LessonScheduleRow {
@@ -65,6 +66,8 @@ interface Promotion {
     applicable_ticket_types: string[] | null;
     applicable_lesson_types: string[] | null;
     customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
+    auto_apply: boolean;
+    combinable: boolean;
 }
 
 interface Voucher {
@@ -154,6 +157,8 @@ export default function SettingsPage() {
     const [pAllLessons, setPAllLessons] = useState(true);
     const [pSelectedLessons, setPSelectedLessons] = useState<string[]>([]);
     const [pCustomerCondition, setPCustomerCondition] = useState<'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER'>('ALL');
+    const [pAutoApply, setPAutoApply] = useState(false);
+    const [pCombinable, setPCombinable] = useState(true);
 
     // Voucher management state
     const [vouchers, setVouchers] = useState<Voucher[]>([]);
@@ -182,6 +187,7 @@ export default function SettingsPage() {
     const [lStudentCount, setLStudentCount] = useState<number>(1);
     const [lDesc, setLDesc] = useState('');
     const [lSportType, setLSportType] = useState<'SWIMMING' | 'BASKETBALL'>('SWIMMING');
+    const [lRequiresGateTicket, setLRequiresGateTicket] = useState(true);
     const [lSchedules, setLSchedules] = useState<{ day: number; start: string; end: string; enabled: boolean }[]>(
         [0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false }))
     );
@@ -666,6 +672,8 @@ export default function SettingsPage() {
         setPAllLessons(true);
         setPSelectedLessons([]);
         setPCustomerCondition('ALL');
+        setPAutoApply(false);
+        setPCombinable(true);
         setShowPromoModal(true);
     }
 
@@ -682,6 +690,8 @@ export default function SettingsPage() {
         setPAllLessons(p.applicable_lesson_types === null);
         setPSelectedLessons(p.applicable_lesson_types || []);
         setPCustomerCondition(p.customer_condition || 'ALL');
+        setPAutoApply(p.auto_apply ?? false);
+        setPCombinable(p.combinable ?? true);
         setShowPromoModal(true);
     }
 
@@ -702,7 +712,9 @@ export default function SettingsPage() {
             valid_until: (!isUnlimitedPromo && pUntil) ? new Date(pUntil).toISOString() : null,
             applicable_ticket_types: pAllTickets ? null : pSelectedTickets,
             applicable_lesson_types: pAllLessons ? null : pSelectedLessons,
-            customer_condition: pCustomerCondition
+            customer_condition: pCustomerCondition,
+            auto_apply: pAutoApply,
+            combinable: pCombinable
         };
 
         let err = null;
@@ -865,6 +877,7 @@ export default function SettingsPage() {
         setLStudentCount(1);
         setLDesc('');
         setLSportType('SWIMMING');
+        setLRequiresGateTicket(true);
         setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => ({ day: d, start: '10:00', end: '11:00', enabled: false })));
         setLAgeTiers([]);
         setShowLessonModal(true);
@@ -883,6 +896,7 @@ export default function SettingsPage() {
         setLStudentCount(getStudentCount(t) || 1);
         setLDesc(t.description || '');
         setLSportType(t.sport_type || 'SWIMMING');
+        setLRequiresGateTicket(t.requires_gate_ticket !== false);
         // Load schedules
         const existing = lessonSchedulesMap[t.id] || [];
         setLSchedules([0, 1, 2, 3, 4, 5, 6].map(d => {
@@ -911,6 +925,7 @@ export default function SettingsPage() {
             lesson_schedule_type: scheduleType,
             student_count: isPrivate ? lStudentCount : 0,
             sport_type: lSportType,
+            requires_gate_ticket: lRequiresGateTicket,
             age_price_tiers: isPrivate && lAgeTiers.length > 0 ? lAgeTiers : null
         };
 
@@ -1380,10 +1395,18 @@ export default function SettingsPage() {
                                         <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.6 }}>
                                             <td>
                                                 <strong>{p.name}</strong>
-                                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                                                    {p.applicable_ticket_types === null && p.applicable_lesson_types === null
-                                                        ? 'Tất cả dịch vụ'
-                                                        : `${(p.applicable_ticket_types?.length || 0) + (p.applicable_lesson_types?.length || 0)} dịch vụ`}
+                                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                                    {p.auto_apply && (
+                                                        <span style={{ background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontWeight: 600, fontSize: '10px' }}>🎯 Tự động</span>
+                                                    )}
+                                                    {!p.combinable && (
+                                                        <span style={{ background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px', fontWeight: 600, fontSize: '10px' }}>⚡ Không chung</span>
+                                                    )}
+                                                    <span>
+                                                        {p.applicable_ticket_types === null && p.applicable_lesson_types === null
+                                                            ? 'Tất cả dịch vụ'
+                                                            : `${(p.applicable_ticket_types?.length || 0) + (p.applicable_lesson_types?.length || 0)} dịch vụ`}
+                                                    </span>
                                                 </div>
                                             </td>
                                             <td>
@@ -1671,6 +1694,29 @@ export default function SettingsPage() {
                                 </div>
                             )}
 
+                            {/* AUTO APPLY & COMBINABLE */}
+                            <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px' }}>
+                                <div style={{ fontWeight: 600, fontSize: '13px', color: '#0369a1', marginBottom: '10px' }}>⚡ Cấu hình nâng cao</div>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 'normal', margin: '0 0 10px 0', fontSize: '14px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={pAutoApply}
+                                        onChange={e => setPAutoApply(e.target.checked)}
+                                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6' }}
+                                    />
+                                    <span>🎯 <strong>Tự động áp dụng</strong> — KM tự động được áp khi nhân viên chọn gói vé phù hợp (không cần nhập Voucher)</span>
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 'normal', margin: 0, fontSize: '14px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={pCombinable}
+                                        onChange={e => setPCombinable(e.target.checked)}
+                                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6' }}
+                                    />
+                                    <span>🔗 <strong>Cho phép áp dụng chung</strong> — Có thể dùng cùng lúc với chương trình KM khác</span>
+                                </label>
+                            </div>
+
                             <div className="modal-actions" style={{ marginTop: '24px' }}>
                                 <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPromoModal(false)} disabled={saving}>Hủy</button>
                                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu cài đặt'}</button>
@@ -1873,6 +1919,22 @@ export default function SettingsPage() {
                                     </select>
                                 </div>
                             </div>
+
+                            {/* Gate ticket toggle */}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 'normal', margin: '0 0 16px 0', fontSize: '14px', padding: '10px 14px', background: lRequiresGateTicket ? '#f0fdf4' : '#fef3c7', border: `1px solid ${lRequiresGateTicket ? '#bbf7d0' : '#fcd34d'}`, borderRadius: '10px', transition: 'all 0.2s' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={lRequiresGateTicket}
+                                    onChange={e => setLRequiresGateTicket(e.target.checked)}
+                                    style={{ width: '18px', height: '18px', accentColor: '#22c55e' }}
+                                />
+                                <span>
+                                    {lRequiresGateTicket
+                                        ? <><strong>🎫 In vé cổng khi check-in</strong> — Tạo vé lượt để qua cổng soát vé</>
+                                        : <><strong>📋 Chỉ điểm danh</strong> — Không in vé cổng (ví dụ: Bóng rổ không qua cổng hồ)</>
+                                    }
+                                </span>
+                            </label>
 
                             <div className="form-row">
                                 {lClassType === 'PRIVATE' && (

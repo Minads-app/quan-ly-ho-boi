@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { normalizeScannerInput } from '../utils/scannerUtils';
+import { ToastProvider, toast, showConfirm } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { TicketType, Ticket, RetailProduct, Customer } from '../types';
@@ -14,6 +15,7 @@ export interface CartItem {
     unitPrice: number;
     subtotal: number;
     promoId?: string;
+    autoPromoId?: string;
     voucherId?: string;
     privateSessions?: number;
     privateBirthYear?: number;
@@ -51,6 +53,8 @@ interface Promotion {
     applicable_ticket_types: string[] | null;
     applicable_lesson_types: string[] | null;
     customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
+    auto_apply: boolean;
+    combinable: boolean;
 }
 
 interface ValidatedVoucher {
@@ -128,6 +132,7 @@ export default function POSPage() {
     // Promotions & Voucher
     const [promotions, setPromotions] = useState<Promotion[]>([]);
     const [selectedPromoId, setSelectedPromoId] = useState<string>('');
+    const [autoAppliedPromo, setAutoAppliedPromo] = useState<Promotion | null>(null);
     const [voucherCode, setVoucherCode] = useState('');
     const [validatedVoucher, setValidatedVoucher] = useState<ValidatedVoucher | null>(null);
     const [voucherError, setVoucherError] = useState('');
@@ -360,7 +365,16 @@ export default function POSPage() {
                 promo_type: data.promo_type,
                 promo_value: data.promo_value
             });
-            setSelectedPromoId(data.promotion_id);
+            // Check combinable: if auto-applied promo or voucher's promo is NOT combinable → replace
+            const voucherPromo = promotions.find(p => p.id === data.promotion_id);
+            if (autoAppliedPromo && (!autoAppliedPromo.combinable || (voucherPromo && !voucherPromo.combinable))) {
+                // Cannot combine → voucher wins (user explicitly entered it)
+                setSelectedPromoId(data.promotion_id);
+                setAutoAppliedPromo(null); // Remove auto-applied
+            } else {
+                // Can combine → keep both (voucher takes selectedPromoId for cart)
+                setSelectedPromoId(data.promotion_id);
+            }
         }
         setValidatingVoucher(false);
     }
@@ -369,7 +383,29 @@ export default function POSPage() {
         setVoucherCode('');
         setValidatedVoucher(null);
         setVoucherError('');
-        setSelectedPromoId('');
+        // Restore auto-applied promo if it was removed
+        if (selectedAdvancedType) {
+            const now = new Date();
+            const autoPromo = promotions.find(p => {
+                if (!p.auto_apply || !p.is_active) return false;
+                if (p.valid_from && now < new Date(p.valid_from)) return false;
+                if (p.valid_until && now > new Date(p.valid_until)) return false;
+                if (p.applicable_ticket_types !== null && !p.applicable_ticket_types.includes(selectedAdvancedType.id)) {
+                    if (p.applicable_lesson_types !== null && !p.applicable_lesson_types.includes(selectedAdvancedType.id)) return false;
+                    if (p.applicable_lesson_types === null) return false;
+                }
+                return true;
+            });
+            if (autoPromo) {
+                setSelectedPromoId(autoPromo.id);
+                setAutoAppliedPromo(autoPromo);
+            } else {
+                setSelectedPromoId('');
+                setAutoAppliedPromo(null);
+            }
+        } else {
+            setSelectedPromoId('');
+        }
     }
 
     async function fetchHotkeyCustomers() {
@@ -442,12 +478,37 @@ export default function POSPage() {
         } else {
             setPrivateBirthYear('');
         }
+
+        // Auto-apply promotion detection
+        const now = new Date();
+        const autoPromo = promotions.find(p => {
+            if (!p.auto_apply || !p.is_active) return false;
+            // Check validity dates
+            if (p.valid_from && now < new Date(p.valid_from)) return false;
+            if (p.valid_until && now > new Date(p.valid_until)) return false;
+            // Check applicable ticket types
+            if (p.applicable_ticket_types !== null && !p.applicable_ticket_types.includes(ticketType.id)) {
+                // Also check lesson types
+                if (p.applicable_lesson_types !== null && !p.applicable_lesson_types.includes(ticketType.id)) {
+                    return false;
+                }
+                if (p.applicable_lesson_types === null) return false;
+            }
+            return true;
+        });
+
+        if (autoPromo) {
+            setSelectedPromoId(autoPromo.id);
+            setAutoAppliedPromo(autoPromo);
+        } else {
+            setAutoAppliedPromo(null);
+        }
     }
 
     // --- Save new customer to customers table ---
     async function handleSaveNewCustomer() {
         if (!newCustCardCode.trim() || !newCustName.trim() || !newCustPhone.trim()) {
-            alert('Vui lòng nhập đầy đủ: Mã thẻ, Họ tên, Số điện thoại!');
+            toast.warning('Thông tin thiếu', 'Vui lòng nhập đầy đủ: Mã thẻ, Họ tên, Số điện thoại!');
             return;
         }
         setSavingCustomer(true);
@@ -469,28 +530,28 @@ export default function POSPage() {
 
         if (cardErr || !cardRes) {
             if (profile?.role === 'ADMIN') {
-                const confirmCreate = window.confirm(`Mã thẻ "${inputCardCode}" không có trong ngân hàng thẻ. Bạn có muốn tự động tạo và gán cho khách không?`);
+                const confirmCreate = await showConfirm({ title: 'Thẻ chưa có trong kho', message: `Mã thẻ "${inputCardCode}" không có trong ngân hàng thẻ. Bạn có muốn tự động tạo và gán cho khách không?`, type: 'warning', confirmText: 'Tạo & Gán', icon: '🆕' });
                 if (!confirmCreate) {
                     setSavingCustomer(false);
                     return;
                 }
                 shouldInsertCard = true;
             } else {
-                alert('Mã thẻ không hợp lệ hoặc chưa được khởi tạo trong kho thẻ. Vui lòng liên hệ Admin.');
+                toast.error('Thẻ không hợp lệ', 'Mã thẻ chưa được khởi tạo trong kho thẻ. Vui lòng liên hệ Admin.');
                 setSavingCustomer(false);
                 return;
             }
         } else {
             if (cardRes.status !== 'UNUSED') {
-                if (profile?.role === 'ADMIN') {
-                    const confirmUse = window.confirm(`Mã thẻ "${inputCardCode}" đã được sử dụng hoặc bị hủy (Trạng thái: ${cardRes.status}). Bạn có chắc chắn muốn ép dùng mã này không?`);
+            if (profile?.role === 'ADMIN') {
+                    const confirmUse = await showConfirm({ title: 'Thẻ đã sử dụng', message: `Mã thẻ "${inputCardCode}" đang có trạng thái: ${cardRes.status}. Bạn có chắc chắn muốn ép dùng mã này không?`, type: 'danger', confirmText: 'Ép dùng', icon: '⚠️' });
                     if (!confirmUse) {
                         setSavingCustomer(false);
                         return;
                     }
                     shouldUpdateCardId = cardRes.id;
                 } else {
-                    alert(`Mã thẻ này đã được sử dụng hoặc hỏng (Trạng thái: ${cardRes.status}). Vui lòng lấy thẻ khác.`);
+                    toast.error('Thẻ đã được sử dụng', `Mã thẻ có trạng thái: ${cardRes.status}. Vui lòng lấy thẻ khác.`);
                     setSavingCustomer(false);
                     return;
                 }
@@ -514,9 +575,9 @@ export default function POSPage() {
 
         if (error) {
             if (error.message.includes('duplicate') || error.message.includes('unique')) {
-                alert('Mã thẻ "' + inputCardCode + '" đã tồn tại trong danh sách khách hàng!');
+                toast.error('Trùng mã thẻ', `Mã thẻ "${inputCardCode}" đã tồn tại trong danh sách khách hàng!`);
             } else {
-                alert('Lỗi lưu khách hàng: ' + error.message);
+                toast.error('Lỗi lưu khách hàng', error.message);
             }
             setSavingCustomer(false);
             return;
@@ -559,7 +620,7 @@ export default function POSPage() {
             const existing = cart.find(c => c.type === 'PRODUCT' && c.item.id === item.id);
             const currentQty = existing ? existing.quantity : 0;
             if (currentQty + quantity > item.stock_quantity) {
-                alert(`Sản phẩm "${item.name}" chỉ còn ${item.stock_quantity} trong kho!`);
+                toast.warning('Hết hàng', `Sản phẩm "${item.name}" chỉ còn ${item.stock_quantity} trong kho!`);
                 return;
             }
         }
@@ -635,6 +696,13 @@ export default function POSPage() {
                     }
                 }
             }
+            // Auto-applied promo (if different from promoId, to avoid double-counting)
+            if (c.autoPromoId && c.autoPromoId !== c.promoId) {
+                const autoPromo = promotions.find(p => p.id === c.autoPromoId);
+                if (autoPromo && autoPromo.type === 'BONUS_SESSION' && finalSessions !== null) {
+                    finalSessions += autoPromo.value;
+                }
+            }
 
             return {
                 type: 'TICKET', id: c.item.id, quantity: c.quantity, unit_price: c.quantity > 1 ? c.unitPrice : finalPrice, subtotal: c.subtotal,
@@ -671,7 +739,7 @@ export default function POSPage() {
         });
 
         if (error || !data?.success) {
-            alert('Lỗi bán hàng: ' + (error?.message || data?.error));
+            toast.error('Lỗi bán hàng', error?.message || data?.error);
             setSelling(false);
             return;
         }
@@ -760,18 +828,18 @@ export default function POSPage() {
 
         if (isPriv) {
             if (!privateBirthYear) {
-                alert(`Vui lòng nhập năm sinh học viên${sc > 1 ? ' 1' : ''}!`);
+                toast.warning('Thiếu thông tin', `Vui lòng nhập năm sinh học viên${sc > 1 ? ' 1' : ''}!`);
                 return;
             }
 
             // Validate extra students (HV2, HV3, ...)
             for (let i = 0; i < extraStudents.length; i++) {
                 if (!extraStudents[i].name.trim()) {
-                    alert(`Vui lòng nhập tên học viên ${i + 2}!`);
+                    toast.warning('Thiếu thông tin', `Vui lòng nhập tên học viên ${i + 2}!`);
                     return;
                 }
                 if (!extraStudents[i].birthYear) {
-                    alert(`Vui lòng nhập năm sinh học viên ${i + 2}!`);
+                    toast.warning('Thiếu thông tin', `Vui lòng nhập năm sinh học viên ${i + 2}!`);
                     return;
                 }
             }
@@ -787,7 +855,7 @@ export default function POSPage() {
             }
             if (needsGuardian) {
                 if (!guardianName.trim() || !guardianPhone.trim()) {
-                    alert('Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ (Họ tên, SĐT)!');
+                    toast.warning('Cần giám hộ', 'Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ (Họ tên, SĐT)!');
                     return;
                 }
             }
@@ -798,7 +866,7 @@ export default function POSPage() {
                 const age1 = currentYear - Number(privateBirthYear);
                 const isAge1Valid = selectedAdvancedType.age_price_tiers.some(tier => age1 >= tier.minAge && (tier.maxAge === null ? true : age1 <= tier.maxAge));
                 if (!isAge1Valid) {
-                    alert('Độ tuổi học viên 1 không phù hợp với khóa học này.');
+                    toast.error('Độ tuổi không phù hợp', 'Độ tuổi học viên 1 không phù hợp với khóa học này.');
                     return;
                 }
                 // Validate extra students
@@ -807,7 +875,7 @@ export default function POSPage() {
                         const ageX = currentYear - Number(extraStudents[i].birthYear);
                         const isAgeXValid = selectedAdvancedType.age_price_tiers.some(tier => ageX >= tier.minAge && (tier.maxAge === null ? true : ageX <= tier.maxAge));
                         if (!isAgeXValid) {
-                            alert(`Độ tuổi học viên ${i + 2} không phù hợp với khóa học này.`);
+                            toast.error('Độ tuổi không phù hợp', `Độ tuổi học viên ${i + 2} không phù hợp với khóa học này.`);
                             return;
                         }
                     }
@@ -815,7 +883,7 @@ export default function POSPage() {
             }
         } else if (selectedAdvancedType.category === 'LESSON' && (selectedAdvancedType as any).lesson_class_type === 'GROUP') {
             if (!customerName || !customerName.trim()) {
-                alert('Vui lòng tìm và chọn khách hàng (hoặc nhập tên) trước khi mua Gói Bơi Nhóm!');
+                toast.warning('Thiếu khách hàng', 'Vui lòng tìm và chọn khách hàng trước khi mua Gói Bơi Nhóm!\nBấm F3 để tìm hoặc bấm "+" để thêm mới.');
                 return;
             }
         }
@@ -864,6 +932,7 @@ export default function POSPage() {
             unitPrice: calculateAdvancedPrice(),
             subtotal: calculateAdvancedPrice(),
             promoId: selectedPromoId || undefined,
+            autoPromoId: autoAppliedPromo?.id || undefined,
             voucherId: validatedVoucher?.voucher_id || undefined,
             privateSessions: privateSessionsVal,
             privateBirthYear: Number(privateBirthYear) || undefined,
@@ -910,7 +979,7 @@ export default function POSPage() {
         const win = iframe.contentWindow;
         if (!win) {
             document.body.removeChild(iframe);
-            alert('Không thể khởi tạo trình in bộ nhớ tạm.');
+            toast.error('Lỗi in', 'Không thể khởi tạo trình in bộ nhớ tạm.');
             return;
         }
 
@@ -1012,37 +1081,13 @@ export default function POSPage() {
 
     // --- CHECK IN LOGIC ---
     async function doCheckin(passId: string, confirmNewPackage: boolean = false, selectedTicketId?: string) {
-        // --- 1. Lấy thông tin gói gốc để kiểm tra sport_type ---
-        const { data: passData } = await supabase
-            .from('tickets')
-            .select('ticket_types(sport_type)')
-            .eq('id', passId)
-            .single();
-
-        const isBasketball = (passData as any)?.ticket_types?.sport_type === 'BASKETBALL';
-
-        // --- 2. Xử lý điểm danh riêng cho Bóng rổ ---
-        if (isBasketball) {
-            const { data, error } = await supabase.rpc('checkin_basketball_lesson', {
-                p_pass_id: passId,
-                p_staff_id: profile?.id
-            });
-            if (error || !data?.success) {
-                setCheckinError(error?.message || data?.message || 'Lỗi điểm danh Bóng rổ');
-                return;
-            }
-            alert(`✅ ${data.message}\n` + (data.remaining_sessions !== null ? `Còn lại: ${data.remaining_sessions} buổi.` : 'Không giới hạn.'));
-            setSoldTickets([]);
-            setCheckinCode('');
-            return;
-        }
-
-        // --- 3. Xử lý điểm danh cho Bơi lội (Cũ) ---
+        // --- Tất cả loại gói đều dùng chung RPC checkin_pass_and_issue_ticket ---
+        // (RPC xử lý requires_gate_ticket, sport_type, và ghi checkin_logs)
         const payload: any = {
             p_pass_id: passId,
             p_staff_id: profile?.id,
             p_confirm_new_package: confirmNewPackage,
-            p_selected_ticket_id: selectedTicketId || null // Must send null to match 4-argument RPC signature
+            p_selected_ticket_id: selectedTicketId || null
         };
 
         const { data, error } = await supabase.rpc('checkin_pass_and_issue_ticket', payload);
@@ -1070,15 +1115,19 @@ export default function POSPage() {
             const headerMsg = data.message || 'Xác nhận kích hoạt gói';
 
 
-            const confirmed = window.confirm(
-                `📋 ${headerMsg}\n\n` +
-                `Thông tin gói: \n` +
-                `• Khách: ${info.customer_name || 'N/A'}\n` +
-                `• Loại: ${catLabel} — ${info.type_name}\n` +
-                `• Số buổi: ${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}\n\n` +
-                `Bấm OK để KÍCH HOẠT và trừ 1 buổi.\n` +
-                `Bấm Hủy để KHÔNG kích hoạt.`
-            );
+            const confirmed = await showConfirm({
+                title: 'Kích hoạt gói mới',
+                message: headerMsg,
+                icon: '📦',
+                type: 'warning',
+                confirmText: '⚡ Kích hoạt & Trừ 1 buổi',
+                cancelText: 'Không kích hoạt',
+                details: [
+                    { label: 'Khách hàng', value: info.customer_name || 'N/A' },
+                    { label: 'Loại gói', value: `${catLabel} — ${info.type_name}` },
+                    { label: 'Số buổi', value: `${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}` },
+                ],
+            });
 
             if (confirmed) {
                 // Gọi lại với confirm = true, truyền selected_ticket_id nếu có
@@ -1095,42 +1144,50 @@ export default function POSPage() {
 
         // --- Success ---
         const passCategory = data.pass_status.category || '';
-        const remainLabel = passCategory === 'LESSON' ? 'buổi học' : 'buổi bơi';
-        const newPkgNote = data.is_new_package ? '\n🆕 Đã kích hoạt GÓI MỚI!' : '';
-        alert(`✅ ${data.message}\n` + (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} ${remainLabel}.` : 'Không giới hạn lượt.') + newPkgNote);
+        const passTypeName = data.pass_status.type_name || '';
+        toast.success(
+            data.is_new_package ? '🆕 Kích hoạt gói mới thành công' : '✅ Check-in thành công',
+            `📦 Gói: ${passTypeName}\n` +
+            (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} buổi.` : 'Không giới hạn lượt.') +
+            (data.requires_gate_ticket === false ? '\n📋 Chỉ điểm danh (không in vé cổng).' : '')
+        );
 
 
-        // --- Cập nhật giao diện in vé con (Bơi lội)
-        let newTix = [];
-        if (data.new_tickets && Array.isArray(data.new_tickets)) {
-            newTix = data.new_tickets;
-        } else if (data.new_ticket) {
-            newTix = [data.new_ticket];
+        // --- Cập nhật giao diện in vé con (chỉ khi requires_gate_ticket = true)
+        if (data.requires_gate_ticket !== false) {
+            let newTix = [];
+            if (data.new_tickets && Array.isArray(data.new_tickets)) {
+                newTix = data.new_tickets;
+            } else if (data.new_ticket) {
+                newTix = [data.new_ticket];
+            }
+
+            if (newTix.length > 0) {
+                setSoldTickets(newTix.map((t: any) => ({
+                    id: t.id,
+                    ticket_type_id: '',
+                    status: 'UNUSED',
+                    customer_birth_year: null,
+                    price_paid: t.price_paid,
+                    sold_at: t.sold_at,
+                    valid_from: new Date().toISOString().split('T')[0],
+                    valid_until: new Date().toISOString().split('T')[0],
+                    type_name: t.type_name,
+                    pool_close_time: t.pool_close_time,
+                    remaining_sessions: 1,
+                    customer_name: t.customer_name,
+                    customer_phone: null,
+                    sold_by: profile?.id || null,
+                    last_scan_direction: null,
+                    last_scan_at: null,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    payment_method: 'CASH',
+                    pass_category: passCategory,
+                    pass_remaining_sessions: data.pass_status.remaining_sessions
+                })));
+            }
         }
-
-        setSoldTickets(newTix.map((t: any) => ({
-            id: t.id,
-            ticket_type_id: '',
-            status: 'UNUSED',
-            customer_birth_year: null,
-            price_paid: t.price_paid,
-            sold_at: t.sold_at,
-            valid_from: new Date().toISOString().split('T')[0],
-            valid_until: new Date().toISOString().split('T')[0],
-            type_name: t.type_name,
-            pool_close_time: t.pool_close_time,
-            remaining_sessions: 1,
-            customer_name: t.customer_name,
-            customer_phone: null,
-            sold_by: profile?.id || null,
-            last_scan_direction: null,
-            last_scan_at: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            payment_method: 'CASH',
-            pass_category: passCategory,
-            pass_remaining_sessions: data.pass_status.remaining_sessions
-        })));
 
         setCheckinCode('');
         // Refresh check-in history after successful check-in
@@ -1181,14 +1238,22 @@ export default function POSPage() {
         const validTickets = tickets.filter(t => t.status !== 'EXPIRED');
 
         if (validTickets.length === 0) {
-            // alert(`[Gỡ lỗi] Vé bị từ chối chuyển sang Popup vì trạng thái vé đang là: ${tickets[0]?.status}\nSẽ gọi trực tiếp check-in cũ!`);
             // Để backend báo lỗi hết hạn
             await doCheckin(code);
             setCheckingIn(false);
             return;
         }
 
-        // Hiển thị popup preview với thông tin gói gần nhất
+        // Kiểm tra có nhiều LOẠI gói khác nhau không (theo ticket_type_id)
+        const uniqueTypes = new Set(validTickets.map(t => t.ticket_type_id));
+        if (uniqueTypes.size > 1) {
+            // Nhiều loại gói → bỏ qua preview, gọi thẳng doCheckin để backend Smart Selection xử lý
+            await doCheckin(code);
+            setCheckingIn(false);
+            return;
+        }
+
+        // Chỉ 1 loại gói → Hiển thị popup preview với thông tin gói
         setPreviewTicket(validTickets[0]);
         setCheckingIn(false);
     }
@@ -1210,92 +1275,87 @@ export default function POSPage() {
         }
     }, [activeTab]);
 
-    // Fetch check-in history (today or search)
     async function fetchCheckinHistory(searchQuery?: string) {
         setLoadingHistory(true);
         try {
-            const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+            const todayStr = new Date().toLocaleDateString('en-CA');
 
-            // Check-in sub-tickets are identified by: price_paid=0 + total_sessions=1
-            // (this works regardless of whether source='CHECKIN' was set correctly)
-            let query = supabase
-                .from('tickets')
+            // --- TRY 1: Query from checkin_logs (new table, correct package names) ---
+            let logQuery = supabase
+                .from('checkin_logs')
                 .select(`
-                    id,
-                    customer_name,
-                    customer_phone,
-                    card_code,
-                    customer_id,
-                    status,
-                    sold_at,
-                    sold_by,
-                    ticket_type_id,
-                    ticket_types!inner (name, category, sport_type),
-                    profiles:sold_by (full_name)
-                `)
-                .eq('price_paid', 0)
-                .eq('total_sessions', 1);
+                    id, source_ticket_id, gate_ticket_id, customer_id, customer_name, card_code,
+                    ticket_type_name, ticket_category, sport_type, remaining_sessions,
+                    is_new_activation, requires_gate_ticket, checked_in_at, checked_in_by, status,
+                    profiles:checked_in_by (full_name)
+                `);
 
             if (searchQuery && searchQuery.trim().length >= 2) {
-                // Search mode: first find matching customer IDs, then search tickets
                 const term = searchQuery.trim();
-
-                // Find customers matching the search term
-                const { data: matchedCustomers } = await supabase
-                    .from('customers')
-                    .select('id')
+                const { data: mc } = await supabase.from('customers').select('id')
                     .or(`card_code.ilike.%${term}%,full_name.ilike.%${term}%,phone.ilike.%${term}%`);
-
-                const customerIds = (matchedCustomers || []).map((c: any) => c.id);
-
-                // Build OR filter: match directly on ticket fields OR via customer_id
-                let orParts = `card_code.ilike.%${term}%,customer_name.ilike.%${term}%,customer_phone.ilike.%${term}%`;
-                if (customerIds.length > 0) {
-                    orParts += `,customer_id.in.(${customerIds.join(',')})`;
-                }
-                query = query.or(orParts);
-                query = query.order('sold_at', { ascending: false }).limit(100);
+                const cids = (mc || []).map((c: any) => c.id);
+                let orP = `card_code.ilike.%${term}%,customer_name.ilike.%${term}%`;
+                if (cids.length > 0) orP += `,customer_id.in.(${cids.join(',')})`;
+                logQuery = logQuery.or(orP).order('checked_in_at', { ascending: false }).limit(100);
             } else {
-                // Today mode
-                query = query.gte('sold_at', todayStr + 'T00:00:00')
-                    .lte('sold_at', todayStr + 'T23:59:59')
-                    .order('sold_at', { ascending: false });
+                logQuery = logQuery.gte('checked_in_at', todayStr + 'T00:00:00')
+                    .lte('checked_in_at', todayStr + 'T23:59:59')
+                    .order('checked_in_at', { ascending: false });
             }
 
-            const { data: checkinTickets, error } = await query;
+            const { data: logs, error: logError } = await logQuery;
 
-            if (error) {
-                console.error('Error fetching check-in history:', error);
-                setCheckinHistory([]);
+            if (!logError && logs && logs.length > 0) {
+                const mapped = logs.map((log: any) => ({
+                    id: log.id, customer_name: log.customer_name, card_code: log.card_code,
+                    customer_id: log.customer_id,
+                    status: log.status === 'CANCELLED' ? 'CANCELLED' : 'UNUSED',
+                    sold_at: log.checked_in_at, sold_by: log.checked_in_by,
+                    ticket_type_name: log.ticket_type_name, ticket_category: log.ticket_category,
+                    sport_type: log.sport_type, remaining_sessions: log.remaining_sessions,
+                    is_new_activation: log.is_new_activation, requires_gate_ticket: log.requires_gate_ticket,
+                    profiles: log.profiles, isCancelled: log.status === 'CANCELLED', cancellation: null,
+                    gate_ticket_id: log.gate_ticket_id, source_ticket_id: log.source_ticket_id,
+                }));
+                setCheckinHistory(mapped);
                 setLoadingHistory(false);
                 return;
             }
 
-            // Now fetch cancelled tickets info for these tickets
-            const ticketIds = (checkinTickets || []).map((t: any) => t.id);
-            let cancelledMap: Record<string, any> = {};
+            // --- FALLBACK: Query from tickets table (old system, backward compatible) ---
+            let oldQuery = supabase.from('tickets')
+                .select(`id, customer_name, customer_phone, card_code, customer_id, status,
+                    sold_at, sold_by, ticket_type_id,
+                    ticket_types!inner (name, category, sport_type),
+                    profiles:sold_by (full_name)`)
+                .eq('price_paid', 0).eq('total_sessions', 1);
 
-            if (ticketIds.length > 0) {
-                const { data: cancelledData } = await supabase
-                    .from('cancelled_tickets')
-                    .select('ticket_id, reason, sessions_restored, cancelled_at, cancelled_by, profiles:cancelled_by (full_name)')
-                    .in('ticket_id', ticketIds);
-
-                if (cancelledData) {
-                    cancelledData.forEach((c: any) => {
-                        cancelledMap[c.ticket_id] = c;
-                    });
-                }
+            if (searchQuery && searchQuery.trim().length >= 2) {
+                const term = searchQuery.trim();
+                const { data: mc } = await supabase.from('customers').select('id')
+                    .or(`card_code.ilike.%${term}%,full_name.ilike.%${term}%,phone.ilike.%${term}%`);
+                const cids = (mc || []).map((c: any) => c.id);
+                let orP = `card_code.ilike.%${term}%,customer_name.ilike.%${term}%,customer_phone.ilike.%${term}%`;
+                if (cids.length > 0) orP += `,customer_id.in.(${cids.join(',')})`;
+                oldQuery = oldQuery.or(orP).order('sold_at', { ascending: false }).limit(100);
+            } else {
+                oldQuery = oldQuery.gte('sold_at', todayStr + 'T00:00:00')
+                    .lte('sold_at', todayStr + 'T23:59:59')
+                    .order('sold_at', { ascending: false });
             }
 
-            // Merge data
-            const merged = (checkinTickets || []).map((t: any) => ({
-                ...t,
-                cancellation: cancelledMap[t.id] || null,
-                isCancelled: t.status === 'CANCELLED',
-            }));
+            const { data: oldTickets, error: oldErr } = await oldQuery;
+            if (oldErr) { console.error('Fallback error:', oldErr); setCheckinHistory([]); setLoadingHistory(false); return; }
 
-            setCheckinHistory(merged);
+            const oldMapped = (oldTickets || []).map((t: any) => ({
+                ...t,
+                ticket_type_name: (t.ticket_types as any)?.name || 'N/A',
+                ticket_category: (t.ticket_types as any)?.category || '',
+                sport_type: (t.ticket_types as any)?.sport_type || 'SWIMMING',
+                profiles: t.profiles, isCancelled: t.status === 'CANCELLED', cancellation: null,
+            }));
+            setCheckinHistory(oldMapped);
         } catch (err) {
             console.error('Error fetching check-in history:', err);
             setCheckinHistory([]);
@@ -1449,7 +1509,7 @@ export default function POSPage() {
             const win = iframe.contentWindow;
             if (!win) {
                 document.body.removeChild(iframe);
-                alert('Không thể khởi tạo trình in bộ nhớ tạm.');
+                toast.error('Lỗi in', 'Không thể khởi tạo trình in bộ nhớ tạm.');
                 return;
             }
 
@@ -1945,7 +2005,7 @@ export default function POSPage() {
                                                     <span style={{ fontSize: '13px', fontWeight: 600, width: '20px', textAlign: 'center' }}>{c.quantity}</span>
                                                     <button onClick={() => {
                                                         if (c.type === 'PRODUCT' && c.quantity + 1 > c.item.stock_quantity) {
-                                                            alert(`Sản phẩm chỉ còn ${c.item.stock_quantity} trong kho!`);
+                                                            toast.warning('Hết hàng', `Sản phẩm chỉ còn ${c.item.stock_quantity} trong kho!`);
                                                             return;
                                                         }
                                                         setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: x.quantity + 1, subtotal: (x.quantity + 1) * x.unitPrice } : x));
@@ -1967,7 +2027,7 @@ export default function POSPage() {
                                 onClick={() => {
                                     const hasAdvanced = cart.some(c => c.type === 'TICKET' && c.item.category !== 'DAILY');
                                     if (hasAdvanced && (!cardCode.trim() || !customerPhone.trim())) {
-                                        alert('Vui lòng nhập thông tin khách hàng (Mã thẻ, SĐT) trước khi thanh toán vé gói/thẻ tháng/khóa học.\n\nBấm F3 để tìm khách cũ hoặc bấm "+" để thêm khách mới.');
+                                        toast.warning('Thiếu khách hàng', 'Vui lòng nhập thông tin khách hàng trước khi thanh toán vé gói/thẻ tháng.');
                                         customerSearchRef.current?.focus();
                                         return;
                                     }
@@ -2120,16 +2180,16 @@ export default function POSPage() {
                                             <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Nhân viên</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
+<tbody>
                                         {checkinHistory.map((h, idx) => {
                                             const time = new Date(h.sold_at);
                                             const timeStr = time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
                                             const dateStr = historyMode === 'SEARCH'
                                                 ? time.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
                                                 : '';
-                                            const ticketTypeName = (h.ticket_types as any)?.name || 'N/A';
+                                            const ticketTypeName = h.ticket_type_name || 'N/A';
                                             const staffName = (h.profiles as any)?.full_name || '—';
-                                            const sportType = (h.ticket_types as any)?.sport_type;
+                                            const sportType = h.sport_type;
                                             const sportIcon = sportType === 'BASKETBALL' ? '🏀' : '🏊';
 
                                             return (
@@ -2229,7 +2289,11 @@ export default function POSPage() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
                                 <span style={{ color: '#64748b', fontSize: '14px' }}>Gói thẻ</span>
                                 <span style={{ fontWeight: 700, color: '#3b82f6', textAlign: 'right', fontSize: '15px' }}>
-                                    {previewTicket.ticket_types?.category === 'LESSON' ? '📚 Học Bơi' : '🏊 ' + previewTicket.ticket_types?.name}
+                                    {previewTicket.ticket_types?.sport_type === 'BASKETBALL'
+                                        ? '🏀 ' + previewTicket.ticket_types?.name
+                                        : previewTicket.ticket_types?.category === 'LESSON'
+                                            ? '📚 Học Bơi'
+                                            : '🏊 ' + previewTicket.ticket_types?.name}
                                 </span>
                             </div>
 
@@ -2301,23 +2365,62 @@ export default function POSPage() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
                                 <span style={{ color: 'var(--text-secondary)' }}>Số lượt bơi:</span>
                                 <span>
-                                    {validatedVoucher ? (() => {
+                                    {(() => {
                                         let sess = selectedAdvancedType.session_count;
-                                        if (validatedVoucher.promo_type === 'BONUS_SESSION' && sess) {
+                                        let bonusSessions = 0;
+                                        // Auto-applied promo bonus
+                                        if (autoAppliedPromo && autoAppliedPromo.type === 'BONUS_SESSION' && sess) {
+                                            bonusSessions += autoAppliedPromo.value;
+                                        }
+                                        // Voucher bonus (only if combinable or no auto-apply)
+                                        if (validatedVoucher && validatedVoucher.promo_type === 'BONUS_SESSION' && sess) {
+                                            bonusSessions += validatedVoucher.promo_value;
+                                        }
+                                        if (bonusSessions > 0 && sess) {
                                             return (
                                                 <>
                                                     <span style={{ textDecoration: 'line-through', color: '#999', marginRight: '8px', fontSize: '13px' }}>{sess}</span>
-                                                    <strong style={{ color: 'var(--accent-blue)' }}>{sess + validatedVoucher.promo_value} lượt</strong>
+                                                    <strong style={{ color: 'var(--accent-blue)' }}>{sess + bonusSessions} lượt</strong>
                                                 </>
-                                            )
+                                            );
                                         }
-                                        return <strong>{sess || 'Không giới hạn'}</strong>
-                                    })() : (
-                                        <strong>{selectedAdvancedType.session_count || 'Không giới hạn'}</strong>
-                                    )}
+                                        return <strong>{sess || 'Không giới hạn'}</strong>;
+                                    })()}
                                 </span>
                             </div>
                         </div>
+
+                        {/* Auto-applied promotion banner */}
+                        {autoAppliedPromo && (
+                            <div style={{
+                                background: 'linear-gradient(135deg, #dbeafe, #ede9fe)',
+                                border: '1px solid #93c5fd',
+                                borderRadius: '10px',
+                                padding: '12px 16px',
+                                marginBottom: '16px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '8px',
+                            }}>
+                                <div>
+                                    <div style={{ fontSize: '12px', color: '#4338ca', fontWeight: 700, marginBottom: '2px' }}>🎯 Khuyến mãi tự động</div>
+                                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e40af' }}>
+                                        {autoAppliedPromo.name}
+                                        <span style={{ marginLeft: '8px', fontWeight: 700, color: '#059669' }}>
+                                            {autoAppliedPromo.type === 'AMOUNT' && `-${autoAppliedPromo.value.toLocaleString('vi-VN')}đ`}
+                                            {autoAppliedPromo.type === 'PERCENT' && `-${autoAppliedPromo.value}%`}
+                                            {autoAppliedPromo.type === 'BONUS_SESSION' && `+${autoAppliedPromo.value} buổi`}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => { setAutoAppliedPromo(null); setSelectedPromoId(''); }}
+                                    style={{ background: 'rgba(0,0,0,0.08)', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', cursor: 'pointer', color: '#64748b', fontWeight: 600 }}
+                                >✕ Bỏ KM</button>
+                            </div>
+                        )}
 
                         {/* PRIVATE LESSON (1:1 / 1:2) — Staff enters sessions & duration */}
                         <form onSubmit={handleAdvancedSubmit}>
@@ -2624,69 +2727,113 @@ export default function POSPage() {
                 </div>
             )}
 
-            {/* MODAL LỰA CHỌN GÓI VÉ CHECK-IN */}
+            {/* MODAL LỰA CHỌN GÓI VÉ CHECK-IN (Grouped by Service) */}
             {showPackageSelectModal && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
                     onClick={() => setShowPackageSelectModal(false)}>
-                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '500px', width: '90%', boxShadow: 'var(--shadow-lg)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '520px', width: '90%', boxShadow: 'var(--shadow-lg)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
                         onClick={e => e.stopPropagation()}>
 
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <h2 style={{ fontSize: '18px', margin: 0 }}>🗂️ Chọn gói vé sử dụng</h2>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>🗂️ Chọn dịch vụ sử dụng</h2>
                             <button onClick={() => setShowPackageSelectModal(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
                         </div>
 
                         <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '14px' }}>
-                            Thẻ này đang chứa nhiều gói khả dụng. Vui lòng hỏi khách muốn dùng gói nào hôm nay:
+                            Khách có nhiều loại dịch vụ. Vui lòng hỏi khách hôm nay sử dụng dịch vụ nào:
                         </p>
 
-                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {availablePackages.map((pkg, idx) => {
-                                const isLesson = pkg.category === 'LESSON';
-                                const isActive = pkg.is_active;
-                                return (
-                                    <button
-                                        key={idx}
-                                        onClick={() => handleSelectPackage(pkg.id)}
-                                        style={{
-                                            display: 'flex', flexDirection: 'column', gap: '8px',
-                                            padding: '16px', borderRadius: '12px',
-                                            background: isLesson ? '#f0fdf4' : '#f8fafc',
-                                            border: `1px solid ${isLesson ? '#bbf7d0' : '#e2e8f0'}`,
-                                            cursor: 'pointer', textAlign: 'left',
-                                            transition: 'all 0.2s', position: 'relative', overflow: 'hidden'
-                                        }}
-                                        onMouseEnter={e => e.currentTarget.style.borderColor = isLesson ? '#22c55e' : '#3b82f6'}
-                                        onMouseLeave={e => e.currentTarget.style.borderColor = isLesson ? '#bbf7d0' : '#e2e8f0'}
-                                    >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <span style={{ fontSize: '20px' }}>{isLesson ? '📚' : '🏊'}</span>
-                                                <strong style={{ fontSize: '15px', color: '#1e293b' }}>{pkg.type_name}</strong>
-                                            </div>
-                                            {!isActive && (
-                                                <span style={{ fontSize: '11px', background: '#fef08a', color: '#854d0e', padding: '4px 8px', borderRadius: '12px', fontWeight: 600 }}>
-                                                    Chưa kích hoạt
-                                                </span>
-                                            )}
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {(() => {
+                                // Group packages by service type
+                                const groups: Record<string, { label: string; icon: string; color: string; bg: string; border: string; hoverBorder: string; packages: any[] }> = {};
+                                
+                                for (const pkg of availablePackages) {
+                                    const sport = pkg.sport_type || 'SWIMMING';
+                                    const cat = pkg.category || 'MULTI';
+                                    
+                                    let groupKey: string;
+                                    let groupConfig: { label: string; icon: string; color: string; bg: string; border: string; hoverBorder: string };
+                                    
+                                    if (sport === 'BASKETBALL') {
+                                        groupKey = 'BASKETBALL';
+                                        groupConfig = { label: 'Bóng Rổ', icon: '🏀', color: '#c2410c', bg: '#fff7ed', border: '#fed7aa', hoverBorder: '#f97316' };
+                                    } else if (cat === 'LESSON') {
+                                        groupKey = 'SWIM_LESSON';
+                                        groupConfig = { label: 'Học Bơi', icon: '📚', color: '#166534', bg: '#f0fdf4', border: '#bbf7d0', hoverBorder: '#22c55e' };
+                                    } else {
+                                        groupKey = 'SWIM_PASS';
+                                        groupConfig = { label: 'Bơi Lội', icon: '🏊', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', hoverBorder: '#3b82f6' };
+                                    }
+                                    
+                                    if (!groups[groupKey]) {
+                                        groups[groupKey] = { ...groupConfig, packages: [] };
+                                    }
+                                    groups[groupKey].packages.push(pkg);
+                                }
+
+                                const groupOrder = ['SWIM_PASS', 'SWIM_LESSON', 'BASKETBALL'];
+                                const sortedGroups = groupOrder.filter(k => groups[k]).map(k => ({ key: k, ...groups[k] }));
+
+                                return sortedGroups.map(group => (
+                                    <div key={group.key}>
+                                        {/* Group header */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                            <span style={{ fontSize: '22px' }}>{group.icon}</span>
+                                            <span style={{ fontWeight: 700, fontSize: '15px', color: group.color }}>{group.label}</span>
+                                            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>({group.packages.length} gói)</span>
                                         </div>
 
-                                        <div style={{ fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                            <div>👤 <span style={{ fontWeight: 500 }}>{pkg.customer_name || 'Khách'}</span></div>
-                                            <div>
-                                                🎟️ Còn lại: <strong style={{ color: '#0f172a' }}>{pkg.remaining_sessions !== null ? `${pkg.remaining_sessions} buổi` : 'Không giới hạn'}</strong>
-                                                <span style={{ color: '#94a3b8', margin: '0 4px' }}>/</span>
-                                                {pkg.total_sessions !== null ? pkg.total_sessions : '∞'} buổi
-                                            </div>
-                                            {(pkg.valid_from || pkg.valid_until) && (
-                                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                                                    Hạn: {pkg.valid_from ? new Date(pkg.valid_from).toLocaleDateString('vi-VN') : '---'} → {pkg.valid_until ? new Date(pkg.valid_until).toLocaleDateString('vi-VN') : 'Không giới hạn'}
-                                                </div>
-                                            )}
+                                        {/* Packages in this group */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {group.packages.map((pkg: any, idx: number) => {
+                                                const isActive = pkg.is_active;
+                                                return (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => handleSelectPackage(pkg.id)}
+                                                        style={{
+                                                            display: 'flex', flexDirection: 'column', gap: '6px',
+                                                            padding: '14px 16px', borderRadius: '12px',
+                                                            background: group.bg,
+                                                            border: `2px solid ${group.border}`,
+                                                            cursor: 'pointer', textAlign: 'left',
+                                                            transition: 'all 0.2s', position: 'relative', overflow: 'hidden'
+                                                        }}
+                                                        onMouseEnter={e => { e.currentTarget.style.borderColor = group.hoverBorder; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.borderColor = group.border; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+                                                    >
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                                            <strong style={{ fontSize: '15px', color: '#1e293b' }}>{pkg.type_name}</strong>
+                                                            {!isActive ? (
+                                                                <span style={{ fontSize: '11px', background: '#fef08a', color: '#854d0e', padding: '3px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                                                                    Chưa kích hoạt
+                                                                </span>
+                                                            ) : (
+                                                                <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '3px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                                                                    🟢 Đang dùng
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        <div style={{ fontSize: '13px', color: '#475569', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                                                            <span>👤 {pkg.customer_name || 'Khách'}</span>
+                                                            <span>
+                                                                🎟️ Còn <strong style={{ color: '#0f172a' }}>{pkg.remaining_sessions !== null ? `${pkg.remaining_sessions}` : '∞'}</strong>/{pkg.total_sessions !== null ? pkg.total_sessions : '∞'} buổi
+                                                            </span>
+                                                        </div>
+                                                        {(pkg.valid_from || pkg.valid_until) && (
+                                                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                                                                📅 {pkg.valid_from ? new Date(pkg.valid_from).toLocaleDateString('vi-VN') : '---'} → {pkg.valid_until ? new Date(pkg.valid_until).toLocaleDateString('vi-VN') : 'Không giới hạn'}
+                                                            </div>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
-                                    </button>
-                                );
-                            })}
+                                    </div>
+                                ));
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -2854,6 +3001,7 @@ export default function POSPage() {
                     </div>
                 </div>
             )}
+            <ToastProvider />
         </div>
     );
 }
