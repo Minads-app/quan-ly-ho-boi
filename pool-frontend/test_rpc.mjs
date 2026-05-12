@@ -1,9 +1,38 @@
 import { createClient } from '@supabase/supabase-js';
-const supabase = createClient('https://klpayzugfmjvgzshbgch.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtscGF5enVnZm1qdmd6c2hiZ2NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMjQ2MzAsImV4cCI6MjA4NzYwMDYzMH0.sM09bom4hlvJqgFSRrWAiGWRW788QP5q9ODb45nmuAg');
 
-async function run() {
-    const { data, error } = await supabase.from('tickets').select('*').limit(1);
-    console.log(data);
-    const { data: cols } = await supabase.rpc('get_tickets_schema'); // This might not exist
+// We need the service_role key to create functions.
+// Let's try to find it in the project or use an alternative approach.
+
+// Check StaffPage for any admin client configuration
+import { readFileSync } from 'fs';
+
+const staffContent = readFileSync('src/pages/StaffPage.tsx', 'utf8');
+
+// Look for service role key or admin client
+const serviceKeyMatch = staffContent.match(/service_role['":\s]*([A-Za-z0-9._-]+)/);
+const adminClientMatch = staffContent.match(/createClient\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/);
+
+if (serviceKeyMatch) {
+    console.log('Found service key pattern:', serviceKeyMatch[1].substring(0, 30) + '...');
 }
-run();
+if (adminClientMatch) {
+    console.log('Found admin client URL:', adminClientMatch[1]);
+    console.log('Found admin client Key:', adminClientMatch[2].substring(0, 30) + '...');
+}
+
+// Also check for any environment variable references
+const envMatches = staffContent.match(/import\.meta\.env\.\w+/g);
+if (envMatches) {
+    console.log('Env vars used:', [...new Set(envMatches)]);
+}
+
+// Check for supabaseAdmin or service role references
+const adminRefs = staffContent.match(/supabaseAdmin|service_role|serviceRole|SUPABASE_SERVICE/gi);
+if (adminRefs) {
+    console.log('Admin references:', [...new Set(adminRefs)]);
+}
+
+// Check lib/supabase.ts
+const libContent = readFileSync('src/lib/supabase.ts', 'utf8');
+console.log('\n=== src/lib/supabase.ts ===');
+console.log(libContent);

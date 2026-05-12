@@ -14,6 +14,9 @@ import CustomerPage from './pages/CustomerPage';
 import InventoryPage from './pages/InventoryPage';
 import CashPage from './pages/CashPage';
 import OrdersPage from './pages/OrdersPage';
+import CoachManagementPage from './pages/CoachManagementPage';
+import CoachDashboardPage from './pages/CoachDashboardPage';
+import CoachPayrollPage from './pages/CoachPayrollPage';
 import './index.css';
 
 function AppRoutes() {
@@ -195,6 +198,26 @@ function AppRoutes() {
               <span>Cài Đặt</span>
             </NavLink>
           )}
+
+          {/* Coach Menu */}
+          {profile.role === 'ADMIN' && (
+            <>
+              <NavLink to="/coaches" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+                <span className="nav-icon">🏊</span>
+                <span>Quản lý HLV</span>
+              </NavLink>
+              <NavLink to="/coach-payroll" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+                <span className="nav-icon">💰</span>
+                <span>Lương HLV</span>
+              </NavLink>
+            </>
+          )}
+          {profile.role === 'COACH' && (
+            <NavLink to="/my-students" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
+              <span className="nav-icon">🧑‍🏫</span>
+              <span>Học viên của tôi</span>
+            </NavLink>
+          )}
         </nav>
 
         <div className="sidebar-footer">
@@ -274,9 +297,21 @@ function AppRoutes() {
             profile.role === 'ADMIN' ? <OrdersPage /> : <Navigate to="/pos" />
           } />
 
+          {/* Coach Routes */}
+          <Route path="/coaches" element={
+            profile.role === 'ADMIN' ? <CoachManagementPage /> : <Navigate to="/pos" />
+          } />
+          <Route path="/coach-payroll" element={
+            profile.role === 'ADMIN' ? <CoachPayrollPage /> : <Navigate to="/pos" />
+          } />
+          <Route path="/my-students" element={
+            (profile.role === 'COACH' || profile.role === 'ADMIN') ? <CoachDashboardPage /> : <Navigate to="/pos" />
+          } />
+
           {/* Mặc định Redirect */}
           <Route path="*" element={
             <Navigate to={
+              profile.role === 'COACH' ? "/my-students" :
               canView('reports') ? "/dashboard" :
                 canView('gate') ? "/gate" :
                   canView('pos') ? "/pos" : "/pos"

@@ -57,6 +57,8 @@ interface PackageRow {
     promo_type: string | null;
     promo_value: number | null;
     validity_days: number | null;
+    coach_id: string | null;
+    coach_name: string | null;
 }
 
 interface CustomerSummary {
@@ -81,6 +83,7 @@ export default function CustomerPage() {
     const [subTab, setSubTab] = useState<SubTab>('CUSTOMERS');
     const [allPackages, setAllPackages] = useState<PackageRow[]>([]);
     const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+    const [coaches, setCoaches] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -88,6 +91,7 @@ export default function CustomerPage() {
     const [dateRange, setDateRange] = useState<DateRange>('THIS_MONTH');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
+    const [filterExpiring, setFilterExpiring] = useState(false);
 
     // Expanded customer / detail modal
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -126,6 +130,7 @@ export default function CustomerPage() {
     useEffect(() => {
         fetchAllData();
         fetchBusinessInfo();
+        fetchCoaches();
         // Fetch ticket types for import mapping
         supabase.from('ticket_types').select('id, name, category').in('category', ['MULTI', 'LESSON']).eq('is_active', true)
             .then(({ data }) => { if (data) setTicketTypesForImport(data); });
@@ -138,6 +143,11 @@ export default function CustomerPage() {
             .order('full_name');
         setAllCustomers((custData || []) as Customer[]);
         await fetchAllPackages();
+    }
+
+    async function fetchCoaches() {
+        const { data } = await supabase.from('coaches').select('*').eq('is_active', true).order('full_name');
+        if (data) setCoaches(data);
     }
 
     async function fetchBusinessInfo() {
@@ -166,11 +176,12 @@ export default function CustomerPage() {
             .select(`
                 id, customer_name, customer_phone, card_code, customer_id, status,
                 valid_from, valid_until, remaining_sessions, total_sessions,
-                price_paid, sold_at, package_code,
+                price_paid, sold_at, package_code, coach_id,
                 customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
                 ticket_types!inner (name, category, price, session_count, validity_days),
                 profiles:sold_by (full_name),
-                promotions:promotion_id (name, type, value)
+                promotions:promotion_id (name, type, value),
+                coaches:coach_id (full_name)
             `)
             .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .neq('source', 'CHECKIN')
@@ -205,6 +216,8 @@ export default function CustomerPage() {
             promo_type: t.promotions?.type || null,
             promo_value: t.promotions?.value || null,
             validity_days: t.ticket_types?.validity_days || null,
+            coach_id: t.coach_id || null,
+            coach_name: t.coaches?.full_name || null,
         }));
 
         setAllPackages(mapped);
@@ -763,12 +776,32 @@ export default function CustomerPage() {
         c.card_code.toLowerCase().includes(searchTerm.toLowerCase())
     );
     const filteredPackages = filterPackagesByDate(allPackages).filter(p =>
-        !searchTerm ||
+        (!filterExpiring || p.status === 'EXPIRING') &&
+        (!searchTerm ||
         (p.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (p.customer_phone || '').includes(searchTerm) ||
         (p.card_code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (p.package_code || '').toLowerCase().includes(searchTerm.toLowerCase())
+        (p.package_code || '').toLowerCase().includes(searchTerm.toLowerCase()))
     );
+
+    function exportPackagesExcel(pkgs: PackageRow[]) {
+        const data = pkgs.map(p => ({
+            'Mã gói': p.package_code || '—',
+            'Khách hàng': p.customer_name || '—',
+            'SĐT': p.customer_phone || '—',
+            'Mã thẻ': p.card_code || '—',
+            'Loại gói': p.type_name || '—',
+            'Lượt còn': p.remaining_sessions !== null ? `${p.remaining_sessions}/${p.total_sessions || p.remaining_sessions}` : 'Không giới hạn',
+            'Hiệu lực': `${fmtDate(p.valid_from)} → ${fmtDate(p.valid_until)}`,
+            'Giá bán': p.price_paid,
+            'Trạng thái': getStatusBadge(p.status).text,
+            'Ngày mua': new Date(p.sold_at).toLocaleString('vi-VN')
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'GoiThe');
+        XLSX.writeFile(wb, `Danh_sach_goi_the_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
 
     return (
         <div className="page-container" style={{ maxWidth: '1100px' }}>
@@ -955,6 +988,17 @@ export default function CustomerPage() {
                                 <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' }} />
                             </>
                         )}
+                        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }}></div>
+                        <button className={`btn ${filterExpiring ? 'btn-primary' : 'btn-outline'}`}
+                            style={{ padding: '6px 14px', fontSize: '13px', background: filterExpiring ? '' : '#fef3c7', color: filterExpiring ? '' : '#92400e', borderColor: filterExpiring ? '' : '#fde68a' }}
+                            onClick={() => setFilterExpiring(!filterExpiring)}>
+                            ⚠️ Sắp hết hạn
+                        </button>
+                        <button className="btn btn-outline"
+                            style={{ padding: '6px 14px', fontSize: '13px', marginLeft: 'auto' }}
+                            onClick={() => exportPackagesExcel(filteredPackages)}>
+                            ⬇️ Xuất Excel
+                        </button>
                     </div>
 
                     {/* Stats */}
@@ -1063,6 +1107,7 @@ export default function CustomerPage() {
                                 isEditingPkg ? { label: 'Giá bán', value: <input type="number" min="0" step="1000" value={editPricePaid} onChange={e => setEditPricePaid(e.target.value === '' ? '' : Number(e.target.value))} style={{ width: '120px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', textAlign: 'right' }} /> } : { label: 'Giá bán', value: fmt(selectedPkg.price_paid) },
                                 isEditingPkg ? { label: 'Ngày mua', value: <input type="date" value={editSoldAt} onChange={e => setEditSoldAt(e.target.value)} style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }} /> } : { label: 'Ngày mua', value: fmtDate(selectedPkg.sold_at) },
                                 { label: 'Người bán', value: selectedPkg.sold_by_name || '—' },
+                                ...(selectedPkg.category === 'LESSON' ? [{ label: '🏊 HLV phụ trách', value: selectedPkg.coach_name || 'Chưa gán' }] : []),
                             ].map(row => (
                                 <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border-color)', fontSize: '14px' }}>
                                     <span style={{ color: 'var(--text-secondary)' }}>{row.label}</span>
@@ -1108,6 +1153,34 @@ export default function CustomerPage() {
                                 )}
                             </div>
                         </div>
+
+                        {/* Cập nhật HLV */}
+                        {selectedPkg.category === 'LESSON' && (
+                            <div style={{ marginTop: '16px', padding: '14px', borderRadius: '10px', background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px', color: '#1e40af' }}>🏊 Cập nhật Huấn luyện viên</div>
+                                <select
+                                    value={selectedPkg.coach_id || ''}
+                                    onChange={async (e) => {
+                                        const newCoachId = e.target.value || null;
+                                        const { error } = await supabase.from('tickets').update({ coach_id: newCoachId }).eq('id', selectedPkg.id);
+                                        if (error) {
+                                            alert('Lỗi cập nhật HLV: ' + error.message);
+                                        } else {
+                                            const coachObj = coaches.find(c => c.id === newCoachId);
+                                            setSelectedPkg({ ...selectedPkg, coach_id: newCoachId, coach_name: coachObj?.full_name || null });
+                                            fetchAllPackages();
+                                            alert('✅ Đã cập nhật HLV thành công!');
+                                        }
+                                    }}
+                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #93c5fd', outline: 'none', background: '#fff', boxSizing: 'border-box' }}
+                                >
+                                    <option value="">-- Chưa gán HLV --</option>
+                                    {coaches.map(c => (
+                                        <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}{c.phone ? ` (${c.phone})` : ''}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
 
                         {/* Admin Action Buttons */}
                         {isAdmin && !isEditingPkg && (

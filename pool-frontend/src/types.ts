@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER';
+export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER' | 'COACH';
 export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
 export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED' | 'CANCELLED';
 export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | 'PRIVATE';
@@ -68,6 +68,7 @@ export interface Ticket {
     last_scan_direction: 'IN' | 'OUT' | null;
     last_scan_at: string | null;
     source?: 'POS' | 'IMPORT';
+    coach_id?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -161,4 +162,29 @@ export interface InventoryAuditItem {
     difference: number;
     created_at: string;
     products?: { name: string; unit: string; sku: string | null };
+}
+
+export interface Coach {
+    id: string;
+    profile_id: string | null;
+    full_name: string;
+    phone: string | null;
+    specialty: string | null;
+    is_active: boolean;
+    note: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface CoachAttendance {
+    id: string;
+    coach_id: string;
+    class_name: string;
+    teaching_date: string;
+    amount: number;
+    note: string | null;
+    created_by: string | null;
+    created_at: string;
+    coaches?: { full_name: string };
+    profiles?: { full_name: string };
 }

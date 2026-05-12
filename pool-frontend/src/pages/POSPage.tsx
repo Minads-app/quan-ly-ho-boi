@@ -29,6 +29,7 @@ export interface CartItem {
     cardCode?: string;
     guardianName?: string;
     guardianPhone?: string;
+    coachId?: string;
 }
 
 interface SoldTicket extends Ticket {
@@ -98,6 +99,8 @@ export default function POSPage() {
     // Cart & Products state
     const [cart, setCart] = useState<CartItem[]>([]);
     const [products, setProducts] = useState<RetailProduct[]>([]);
+    const [coaches, setCoaches] = useState<any[]>([]);
+    const [selectedCoachId, setSelectedCoachId] = useState('');
 
     // Daily tickets quantity mapping
     const [dailyQuantities, setDailyQuantities] = useState<Record<string, number>>({});
@@ -128,6 +131,8 @@ export default function POSPage() {
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [hotkeyCustomers, setHotkeyCustomers] = useState<Customer[]>([]);
     const [newCustHotkey, setNewCustHotkey] = useState('');
+    const [duplicatePhoneCustomer, setDuplicatePhoneCustomer] = useState<any>(null);
+    const checkPhoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Promotions & Voucher
     const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -274,6 +279,12 @@ export default function POSPage() {
         fetchProducts();
         fetchBusinessInfo();
         fetchHotkeyCustomers();
+        fetchCoaches();
+
+        async function fetchCoaches() {
+            const { data } = await supabase.from('coaches').select('*').eq('is_active', true).order('full_name');
+            if (data) setCoaches(data);
+        }
 
         async function fetchProducts() {
             const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
@@ -506,9 +517,50 @@ export default function POSPage() {
     }
 
     // --- Save new customer to customers table ---
+    async function handleNewCustPhoneChange(phone: string) {
+        setNewCustPhone(phone);
+        setDuplicatePhoneCustomer(null);
+        if (checkPhoneTimer.current) clearTimeout(checkPhoneTimer.current);
+        const trimmed = phone.trim();
+        if (trimmed.length >= 9) {
+            checkPhoneTimer.current = setTimeout(async () => {
+                const { data } = await supabase.from('customers').select('*').eq('phone', trimmed).maybeSingle();
+                if (data) {
+                    setDuplicatePhoneCustomer(data);
+                    // Auto-fill thông tin khách cũ
+                    setNewCustName(data.full_name || '');
+                    setNewCustCardCode(data.card_code || '');
+                    setNewCustEmail(data.email || '');
+                    setNewCustBirthDate(data.birth_date || '');
+                    setNewCustGender(data.gender || '');
+                    setNewCustAddress(data.address || '');
+                    setNewCustNote(data.note || '');
+                    setSelectedCustomerId(data.id);
+                    toast.info('Khách hàng đã tồn tại', `SĐT ${trimmed} đã đăng ký cho "${data.full_name}". Thông tin đã được tải lại.`);
+                }
+            }, 400);
+        }
+    }
+
     async function handleSaveNewCustomer() {
         if (!newCustCardCode.trim() || !newCustName.trim() || !newCustPhone.trim()) {
             toast.warning('Thông tin thiếu', 'Vui lòng nhập đầy đủ: Mã thẻ, Họ tên, Số điện thoại!');
+            return;
+        }
+
+        // Nếu KH đã tồn tại (trùng SĐT) → chỉ cần load thông tin, không tạo mới
+        if (duplicatePhoneCustomer) {
+            setCustomerName(duplicatePhoneCustomer.full_name);
+            setCustomerPhone(duplicatePhoneCustomer.phone);
+            setCardCode(duplicatePhoneCustomer.card_code);
+            setSelectedCustomerId(duplicatePhoneCustomer.id);
+            setSelectedCustomerBirthDate(duplicatePhoneCustomer.birth_date || null);
+            setShowNewCustomerModal(false);
+            setDuplicatePhoneCustomer(null);
+            setNewCustCardCode(''); setNewCustName(''); setNewCustPhone('');
+            setNewCustEmail(''); setNewCustBirthDate(''); setNewCustGender('');
+            setNewCustNote(''); setNewCustAddress(''); setNewCustHotkey('');
+            toast.success('Đã chọn KH', `Đã chọn khách hàng "${duplicatePhoneCustomer.full_name}" từ hệ thống.`);
             return;
         }
         setSavingCustomer(true);
@@ -779,6 +831,16 @@ export default function POSPage() {
         };
 
         if (data.ticket_ids && data.ticket_ids.length > 0) {
+            // Gán HLV cho các ticket loại LESSON
+            for (const c of cart) {
+                if (c.type === 'TICKET' && c.item.category === 'LESSON' && c.coachId) {
+                    await supabase.from('tickets')
+                        .update({ coach_id: c.coachId })
+                        .in('id', data.ticket_ids)
+                        .eq('ticket_type_id', c.item.id);
+                }
+            }
+
             const { data: generatedTickets } = await supabase.from('tickets').select('*').in('id', data.ticket_ids);
             if (generatedTickets) {
                 const dailyTickets = generatedTickets.filter(t => {
@@ -858,6 +920,11 @@ export default function POSPage() {
                     toast.warning('Cần giám hộ', 'Học viên dưới 18 tuổi bắt buộc phải có thông tin người giám hộ (Họ tên, SĐT)!');
                     return;
                 }
+            }
+
+            if (!selectedCoachId) {
+                toast.warning('Thiếu HLV', 'Vui lòng chọn Huấn Luyện Viên cho khóa kèm riêng!');
+                return;
             }
 
             if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
@@ -946,7 +1013,8 @@ export default function POSPage() {
             customerPhone: customerPhone || undefined,
             cardCode: cardCode.trim() || undefined,
             guardianName: guardianName.trim() || undefined,
-            guardianPhone: guardianPhone.trim() || undefined
+            guardianPhone: guardianPhone.trim() || undefined,
+            coachId: selectedCoachId || undefined
         } as any]);
 
         setSelectedAdvancedType(null);
@@ -2430,12 +2498,51 @@ export default function POSPage() {
                                 </>
                             )}
 
+                            {/* HLV cho Lớp nhóm (GROUP) */}
+                            {selectedAdvancedType.category === 'LESSON' && !isPrivateLesson(selectedAdvancedType) && (
+                                <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bfdbfe' }}>
+                                    <div className="form-group" style={{ marginBottom: '0' }}>
+                                        <label>🏊 Huấn luyện viên (HLV)</label>
+                                        <select
+                                            value={selectedCoachId}
+                                            onChange={e => setSelectedCoachId(e.target.value)}
+                                            style={{ fontSize: '15px', width: '100%' }}
+                                        >
+                                            <option value="">-- Chọn HLV --</option>
+                                            {coaches
+                                                .filter(c => !c.specialty || (selectedAdvancedType.sport_type === 'SWIMMING' ? c.specialty === 'Bơi lội' : selectedAdvancedType.sport_type === 'BASKETBALL' ? c.specialty === 'Bóng rổ' : true))
+                                                .map(c => (
+                                                    <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}{c.phone ? ` (${c.phone})` : ''}</option>
+                                                ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
+
                             {isPrivateLesson(selectedAdvancedType) && (() => {
                                 const sc = getStudentCount(selectedAdvancedType);
                                 return (
                                     <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bbf7d0' }}>
                                         <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '12px', color: '#166534' }}>
                                             🧑‍🏫 Thông tin đăng ký lớp 1:{sc}
+                                        </div>
+
+                                        {/* Chọn Huấn Luyện Viên */}
+                                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                                            <label>🏊 Huấn luyện viên (HLV) <span style={{ color: 'red' }}>*</span></label>
+                                            <select
+                                                required
+                                                value={selectedCoachId}
+                                                onChange={e => setSelectedCoachId(e.target.value)}
+                                                style={{ fontSize: '15px', width: '100%' }}
+                                            >
+                                                <option value="">-- Chọn HLV --</option>
+                                                {coaches
+                                                    .filter(c => !c.specialty || (selectedAdvancedType.sport_type === 'SWIMMING' ? c.specialty === 'Bơi lội' : selectedAdvancedType.sport_type === 'BASKETBALL' ? c.specialty === 'Bóng rổ' : true))
+                                                    .map(c => (
+                                                        <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}{c.phone ? ` (${c.phone})` : ''}</option>
+                                                    ))}
+                                            </select>
                                         </div>
 
                                         {/* Học viên 1 (chính) */}
@@ -2869,8 +2976,14 @@ export default function POSPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                 <div>
                                     <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Số điện thoại <span style={{ color: '#ef4444' }}>*</span></label>
-                                    <input type="tel" value={newCustPhone} onChange={e => setNewCustPhone(e.target.value)} placeholder="Số điện thoại"
-                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                                    <input type="tel" value={newCustPhone} onChange={e => handleNewCustPhoneChange(e.target.value)} placeholder="Số điện thoại"
+                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: duplicatePhoneCustomer ? '2px solid #f59e0b' : '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box', background: duplicatePhoneCustomer ? '#fffbeb' : '' }} />
+                                    {duplicatePhoneCustomer && (
+                                        <div style={{ marginTop: '6px', padding: '8px 12px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '8px', fontSize: '12px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <span>⚠️</span>
+                                            <span>SĐT đã đăng ký cho: <strong>{duplicatePhoneCustomer.full_name}</strong> ({duplicatePhoneCustomer.card_code}) — Thông tin đã được tải lại. Bấm <strong>Lưu</strong> để chọn KH này.</span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div>
                                     <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Email</label>

@@ -24,7 +24,7 @@ const tempSupabase = createClient(
 interface Profile {
     id: string;
     full_name: string;
-    role: 'ADMIN' | 'CASHIER' | 'GATE_KEEPER' | 'STAFF';
+    role: 'ADMIN' | 'CASHIER' | 'GATE_KEEPER' | 'STAFF' | 'COACH';
     created_at: string;
     is_active?: boolean;
     can_use_camera?: boolean;
@@ -201,6 +201,16 @@ export default function StaffPage() {
 
             if (updateError) throw new Error('Cập nhật quyền thất bại: ' + updateError.message);
 
+            // 3. If role is COACH, auto-create a coaches record
+            if (newRole === 'COACH') {
+                await supabase.from('coaches').insert({
+                    profile_id: authData.user.id,
+                    full_name: newFullName,
+                    phone: null,
+                    is_active: true
+                });
+            }
+
             alert('Tạo tài khoản thành công!');
             setShowModal(false);
             setNewEmail('');
@@ -365,10 +375,11 @@ export default function StaffPage() {
                                         </span>
                                     </td>
                                     <td>
-                                        <span className={`badge ${staff.role === 'ADMIN' ? 'badge-error' : staff.role === 'CASHIER' ? 'badge-success' : staff.role === 'GATE_KEEPER' ? 'badge-warning' : ''}`} style={{ marginBottom: '4px', display: 'inline-block' }}>
+                                        <span className={`badge ${staff.role === 'ADMIN' ? 'badge-error' : staff.role === 'CASHIER' ? 'badge-success' : staff.role === 'GATE_KEEPER' ? 'badge-warning' : staff.role === 'COACH' ? 'badge-info' : ''}`} style={{ marginBottom: '4px', display: 'inline-block' }}>
                                             {staff.role === 'ADMIN' ? 'Quản trị viên' :
                                                 staff.role === 'CASHIER' ? 'NV Bán vé' :
-                                                    staff.role === 'GATE_KEEPER' ? 'NV Soát vé' : 'Nhân viên mới'}
+                                                    staff.role === 'GATE_KEEPER' ? 'NV Soát vé' :
+                                                        staff.role === 'COACH' ? '🏊 HLV' : 'Nhân viên mới'}
                                         </span>
                                         <br />
                                         <select
@@ -381,6 +392,7 @@ export default function StaffPage() {
                                             <option value="STAFF">Chưa phân quyền</option>
                                             <option value="CASHIER">NV Bán vé</option>
                                             <option value="GATE_KEEPER">NV Soát vé</option>
+                                            <option value="COACH">Huấn luyện viên (HLV)</option>
                                             <option value="ADMIN">Quản trị viên</option>
                                         </select>
                                     </td>
@@ -485,6 +497,7 @@ export default function StaffPage() {
                                     <option value="STAFF">Chưa phân quyền (STAFF)</option>
                                     <option value="CASHIER">Nhân viên Bán vé</option>
                                     <option value="GATE_KEEPER">Nhân viên Soát vé</option>
+                                    <option value="COACH">Huấn luyện viên (HLV)</option>
                                     <option value="ADMIN">Quản trị viên</option>
                                 </select>
                             </div>
