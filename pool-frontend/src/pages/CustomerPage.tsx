@@ -59,6 +59,7 @@ interface PackageRow {
     validity_days: number | null;
     coach_id: string | null;
     coach_name: string | null;
+    sport_type: string | null;
 }
 
 interface CustomerSummary {
@@ -178,7 +179,7 @@ export default function CustomerPage() {
                 valid_from, valid_until, remaining_sessions, total_sessions,
                 price_paid, sold_at, package_code, coach_id,
                 customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
-                ticket_types!inner (name, category, price, session_count, validity_days),
+                ticket_types!inner (name, category, price, session_count, validity_days, sport_type),
                 profiles:sold_by (full_name),
                 promotions:promotion_id (name, type, value),
                 coaches:coach_id (full_name)
@@ -218,6 +219,7 @@ export default function CustomerPage() {
             validity_days: t.ticket_types?.validity_days || null,
             coach_id: t.coach_id || null,
             coach_name: t.coaches?.full_name || null,
+            sport_type: t.ticket_types?.sport_type || null,
         }));
 
         setAllPackages(mapped);
@@ -1175,8 +1177,10 @@ export default function CustomerPage() {
                                     style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #93c5fd', outline: 'none', background: '#fff', boxSizing: 'border-box' }}
                                 >
                                     <option value="">-- Chưa gán HLV --</option>
-                                    {coaches.map(c => (
-                                        <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}{c.phone ? ` (${c.phone})` : ''}</option>
+                                    {coaches
+                                        .filter(c => !c.specialty || (selectedPkg.sport_type === 'BASKETBALL' ? c.specialty === 'Bóng rổ' : c.specialty === 'Bơi lội'))
+                                        .map(c => (
+                                        <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}</option>
                                     ))}
                                 </select>
                             </div>

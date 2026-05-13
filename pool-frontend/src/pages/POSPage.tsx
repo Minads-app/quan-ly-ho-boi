@@ -2512,7 +2512,7 @@ export default function POSPage() {
                                             {coaches
                                                 .filter(c => !c.specialty || (selectedAdvancedType.sport_type === 'SWIMMING' ? c.specialty === 'Bơi lội' : selectedAdvancedType.sport_type === 'BASKETBALL' ? c.specialty === 'Bóng rổ' : true))
                                                 .map(c => (
-                                                    <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}{c.phone ? ` (${c.phone})` : ''}</option>
+                                                    <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}</option>
                                                 ))}
                                         </select>
                                     </div>
@@ -2540,7 +2540,7 @@ export default function POSPage() {
                                                 {coaches
                                                     .filter(c => !c.specialty || (selectedAdvancedType.sport_type === 'SWIMMING' ? c.specialty === 'Bơi lội' : selectedAdvancedType.sport_type === 'BASKETBALL' ? c.specialty === 'Bóng rổ' : true))
                                                     .map(c => (
-                                                        <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}{c.phone ? ` (${c.phone})` : ''}</option>
+                                                        <option key={c.id} value={c.id}>{c.full_name}{c.specialty ? ` - ${c.specialty}` : ''}</option>
                                                     ))}
                                             </select>
                                         </div>
