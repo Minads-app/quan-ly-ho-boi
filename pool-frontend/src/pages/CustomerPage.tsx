@@ -32,6 +32,7 @@ type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 interface PackageRow {
     id: string;
     package_code: string | null;
+    ticket_type_id: string;
     type_name: string;
     category: string;
     customer_name: string | null;
@@ -50,6 +51,7 @@ interface PackageRow {
     price_paid: number;
     sold_at: string;
     sold_by_name: string | null;
+    source: string | null;
     // Promotion & original info
     original_price: number;
     original_sessions: number | null;
@@ -122,6 +124,12 @@ export default function CustomerPage() {
     const [ticketTypesForImport, setTicketTypesForImport] = useState<{ id: string; name: string; category: string }[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // Bulk edit
+    const [bulkMode, setBulkMode] = useState(false);
+    const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+    const [showBulkModal, setShowBulkModal] = useState(false);
+    const [bulkTargetTypeId, setBulkTargetTypeId] = useState('');
+    const [bulkProcessing, setBulkProcessing] = useState(false);
 
     // Check-in history for a package
     const [pkgCheckinHistory, setPkgCheckinHistory] = useState<any[]>([]);
@@ -204,7 +212,7 @@ export default function CustomerPage() {
         const { data, error } = await supabase
             .from('tickets')
             .select(`
-                id, customer_name, customer_phone, card_code, customer_id, status,
+                id, ticket_type_id, source, customer_name, customer_phone, card_code, customer_id, status,
                 valid_from, valid_until, remaining_sessions, total_sessions,
                 price_paid, sold_at, package_code, coach_id,
                 customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
@@ -222,7 +230,9 @@ export default function CustomerPage() {
         const mapped: PackageRow[] = (data || []).map((t: Record<string, any>) => ({
             id: t.id,
             package_code: t.package_code,
+            ticket_type_id: t.ticket_type_id || '',
             type_name: t.ticket_types?.name || '',
+            source: t.source || null,
             category: t.ticket_types?.category || '',
             customer_name: t.customer_name,
             customer_phone: t.customer_phone,
@@ -752,11 +762,34 @@ export default function CustomerPage() {
                 }
 
                 // 2. Find matching ticket type (by name if provided, else by category)
-                let matchType = row.pkg_name
-                    ? ticketTypesForImport.find(t => t.name.toLowerCase() === row.pkg_name.toLowerCase() && t.category === row.package_type)
-                    : null;
-                if (!matchType) matchType = ticketTypesForImport.find(t => t.category === row.package_type);
-                if (!matchType) { errors.push(`${row.card_code}: Không tìm thấy loại gói ${row.pkg_name || row.package_type}`); continue; }
+                let matchType: typeof ticketTypesForImport[0] | undefined = undefined;
+                if (row.pkg_name) {
+                    // a. Exact match by name + category
+                    matchType = ticketTypesForImport.find(t => t.name.toLowerCase() === row.pkg_name.toLowerCase() && t.category === row.package_type);
+                    // b. Partial match (tên gói chứa từ khóa hoặc ngược lại)
+                    if (!matchType) {
+                        matchType = ticketTypesForImport.find(t =>
+                            t.category === row.package_type && (
+                                t.name.toLowerCase().includes(row.pkg_name.toLowerCase()) ||
+                                row.pkg_name.toLowerCase().includes(t.name.toLowerCase())
+                            )
+                        );
+                    }
+                    // c. Match by name only (bỏ qua category)
+                    if (!matchType) {
+                        matchType = ticketTypesForImport.find(t => t.name.toLowerCase() === row.pkg_name.toLowerCase());
+                    }
+                    // d. Nếu vẫn không tìm thấy → BÁO LỖI, không tự gán gói khác
+                    if (!matchType) {
+                        const availableNames = ticketTypesForImport.filter(t => t.category === row.package_type).map(t => `"${t.name}"`).join(', ');
+                        errors.push(`${row.card_code}: Tên gói "${row.pkg_name}" không khớp gói nào trong hệ thống. Các gói ${row.package_type} hiện có: ${availableNames || 'chưa có'}`);
+                        continue;
+                    }
+                } else {
+                    // Không ghi tên gói → lấy gói đầu tiên theo category
+                    matchType = ticketTypesForImport.find(t => t.category === row.package_type);
+                    if (!matchType) { errors.push(`${row.card_code}: Không tìm thấy loại gói nào thuộc category ${row.package_type}`); continue; }
+                }
 
                 // 3. Create ticket with price_paid=0, source='IMPORT'
                 const ticketStatus = (row.valid_from && row.remaining < row.total_sessions && row.total_sessions > 0) ? 'IN_USE' : 'UNUSED';
@@ -1034,6 +1067,13 @@ export default function CustomerPage() {
                             onClick={() => setFilterExpiring(!filterExpiring)}>
                             ⚠️ Sắp hết hạn
                         </button>
+                        {isAdmin && (
+                            <button className={`btn ${bulkMode ? 'btn-primary' : 'btn-outline'}`}
+                                style={{ padding: '6px 14px', fontSize: '13px' }}
+                                onClick={() => { setBulkMode(!bulkMode); setBulkSelected(new Set()); }}>
+                                {bulkMode ? '✕ Thoát chọn' : '☑️ Sửa hàng loạt'}
+                            </button>
+                        )}
                         <button className="btn btn-outline"
                             style={{ padding: '6px 14px', fontSize: '13px', marginLeft: 'auto' }}
                             onClick={() => exportPackagesExcel(filteredPackages)}>
@@ -1055,11 +1095,49 @@ export default function CustomerPage() {
                         ))}
                     </div>
 
+                    {/* Bulk action bar */}
+                    {bulkMode && (
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '12px 16px', background: 'linear-gradient(135deg, #eff6ff, #eef2ff)', border: '1px solid #bfdbfe', borderRadius: '10px', marginBottom: '16px' }}>
+                            <input type="checkbox"
+                                checked={filteredPackages.length > 0 && bulkSelected.size === filteredPackages.length}
+                                onChange={e => {
+                                    if (e.target.checked) setBulkSelected(new Set(filteredPackages.map(p => p.id)));
+                                    else setBulkSelected(new Set());
+                                }}
+                                style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e40af' }}>
+                                Đã chọn <b style={{ color: '#2563eb', fontSize: '15px' }}>{bulkSelected.size}</b> / {filteredPackages.length} gói
+                            </span>
+                            <div style={{ flex: 1 }} />
+                            <button className="btn btn-primary" disabled={bulkSelected.size === 0}
+                                style={{ padding: '8px 18px', fontSize: '13px' }}
+                                onClick={() => { setBulkTargetTypeId(''); setShowBulkModal(true); }}>
+                                ✏️ Đổi loại gói ({bulkSelected.size})
+                            </button>
+                            <button className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: '13px', color: '#ef4444' }}
+                                disabled={bulkSelected.size === 0}
+                                onClick={async () => {
+                                    if (!confirm(`⚠️ CẢNH BÁO: Bạn sắp XÓA VĨNH VIỄN ${bulkSelected.size} gói thẻ đã chọn cùng toàn bộ lịch sử quẹt thẻ liên quan.\n\nHành động này KHÔNG THỂ hoàn tác. Bạn có chắc chắn?`)) return;
+                                    if (!confirm('Hỏi lại lần cuối: Bạn thực sự muốn XÓA VĨNH VIỄN các gói đã chọn?')) return;
+                                    const ids = Array.from(bulkSelected);
+                                    await supabase.from('scan_logs').delete().in('ticket_id', ids);
+                                    const { error } = await supabase.from('tickets').delete().in('id', ids);
+                                    if (error) { alert('Lỗi xóa: ' + error.message); return; }
+                                    alert(`✅ Đã xóa ${ids.length} gói thành công!`);
+                                    setBulkSelected(new Set());
+                                    fetchAllPackages();
+                                }}>
+                                🗑️ Xóa ({bulkSelected.size})
+                            </button>
+                        </div>
+                    )}
+
                     {/* Package Table */}
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', background: 'var(--bg-card)', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
                             <thead>
                                 <tr>
+                                    {bulkMode && <th style={{ ...thS, width: '40px', textAlign: 'center' }}></th>}
                                     <th style={thS}>Mã gói</th>
                                     <th style={thS}>Khách hàng</th>
                                     <th style={thS}>SĐT</th>
@@ -1074,14 +1152,30 @@ export default function CustomerPage() {
                             </thead>
                             <tbody>
                                 {filteredPackages.length === 0 ? (
-                                    <tr><td colSpan={isAdmin ? 10 : 9} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có gói thẻ nào trong khoảng thời gian này.</td></tr>
+                                    <tr><td colSpan={isAdmin ? (bulkMode ? 11 : 10) : (bulkMode ? 10 : 9)} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có gói thẻ nào trong khoảng thời gian này.</td></tr>
                                 ) : filteredPackages.map(t => {
                                     const st = getStatusBadge(t.status);
+                                    const isChecked = bulkSelected.has(t.id);
                                     return (
-                                        <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)', background: 'var(--bg-card)', transition: 'background 0.15s', cursor: 'pointer' }}
-                                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                                            onMouseLeave={e => (e.currentTarget.style.background = '')}
-                                            onClick={() => setSelectedPkg(t)}>
+                                        <tr key={t.id}
+                                            style={{ borderBottom: '1px solid var(--border-color)', background: isChecked ? '#eff6ff' : 'var(--bg-card)', transition: 'background 0.15s', cursor: 'pointer' }}
+                                            onMouseEnter={e => (e.currentTarget.style.background = isChecked ? '#dbeafe' : 'var(--bg-hover)')}
+                                            onMouseLeave={e => (e.currentTarget.style.background = isChecked ? '#eff6ff' : '')}
+                                            onClick={() => {
+                                                if (bulkMode) {
+                                                    const next = new Set(bulkSelected);
+                                                    if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
+                                                    setBulkSelected(next);
+                                                } else {
+                                                    setSelectedPkg(t);
+                                                }
+                                            }}>
+                                            {bulkMode && (
+                                                <td style={{ ...tdS, textAlign: 'center' }}>
+                                                    <input type="checkbox" checked={isChecked} readOnly
+                                                        style={{ width: '16px', height: '16px', accentColor: '#3b82f6', cursor: 'pointer' }} />
+                                                </td>
+                                            )}
                                             <td style={{ ...tdS, fontWeight: 700, minWidth: '80px' }}>{t.package_code || '—'}</td>
                                             <td style={{ ...tdS, fontWeight: 600 }}>{t.customer_name || '—'}</td>
                                             <td style={tdS}>{t.customer_phone || '—'}</td>
@@ -1556,6 +1650,89 @@ export default function CustomerPage() {
                                 </button>
                             </>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ===== BULK EDIT MODAL ===== */}
+            {showBulkModal && (
+                <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', maxWidth: '600px', width: '95%', maxHeight: '80vh', overflow: 'auto' }}>
+                        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>✏️ Đổi loại gói hàng loạt</h2>
+
+                        <div style={{ padding: '12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#1e40af' }}>
+                            Đang chọn <b>{bulkSelected.size}</b> gói thẻ để đổi loại gói.
+                        </div>
+
+                        {/* Hiển thị danh sách gói đã chọn (tóm tắt) */}
+                        <div style={{ marginBottom: '16px' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>Gói hiện tại của các thẻ đã chọn:</div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {(() => {
+                                    const typeCounts = new Map<string, number>();
+                                    allPackages.filter(p => bulkSelected.has(p.id)).forEach(p => {
+                                        typeCounts.set(p.type_name, (typeCounts.get(p.type_name) || 0) + 1);
+                                    });
+                                    return Array.from(typeCounts.entries()).map(([name, count]) => (
+                                        <span key={name} style={{ background: '#fee2e2', color: '#991b1b', padding: '4px 10px', borderRadius: '16px', fontSize: '12px', fontWeight: 600 }}>
+                                            {name} × {count}
+                                        </span>
+                                    ));
+                                })()}
+                            </div>
+                        </div>
+
+                        {/* Chọn loại gói mới */}
+                        <div style={{ marginBottom: '16px' }}>
+                            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)' }}>Chọn loại gói MỚI:</label>
+                            <select value={bulkTargetTypeId} onChange={e => setBulkTargetTypeId(e.target.value)}
+                                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '14px', background: 'var(--bg-card)' }}>
+                                <option value="">— Chọn loại gói —</option>
+                                {ticketTypesForImport.map(t => (
+                                    <option key={t.id} value={t.id}>{t.name} ({t.category === 'LESSON' ? 'Học bơi' : t.category === 'MULTI' ? 'Nhiều buổi' : t.category})</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Preview */}
+                        {bulkTargetTypeId && (
+                            <div style={{ padding: '12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', marginBottom: '16px' }}>
+                                <div style={{ fontSize: '13px', color: '#166534' }}>
+                                    ✅ Sẽ đổi <b>{bulkSelected.size}</b> gói sang: <b style={{ color: '#15803d' }}>{ticketTypesForImport.find(t => t.id === bulkTargetTypeId)?.name}</b>
+                                </div>
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button className="btn btn-primary" style={{ flex: 1 }}
+                                disabled={!bulkTargetTypeId || bulkProcessing}
+                                onClick={async () => {
+                                    if (!bulkTargetTypeId) return;
+                                    const targetType = ticketTypesForImport.find(t => t.id === bulkTargetTypeId);
+                                    if (!targetType) return;
+                                    if (!confirm(`Xác nhận đổi ${bulkSelected.size} gói sang "${targetType.name}"?`)) return;
+
+                                    setBulkProcessing(true);
+                                    const ids = Array.from(bulkSelected);
+                                    const { error } = await supabase.from('tickets').update({ ticket_type_id: bulkTargetTypeId, updated_at: new Date().toISOString() }).in('id', ids);
+
+                                    if (error) {
+                                        alert('❌ Lỗi cập nhật: ' + error.message);
+                                    } else {
+                                        alert(`✅ Đã đổi ${ids.length} gói sang "${targetType.name}" thành công!`);
+                                        setShowBulkModal(false);
+                                        setBulkSelected(new Set());
+                                        setBulkMode(false);
+                                        fetchAllPackages();
+                                    }
+                                    setBulkProcessing(false);
+                                }}>
+                                {bulkProcessing ? '⏳ Đang xử lý...' : `✅ Xác nhận đổi ${bulkSelected.size} gói`}
+                            </button>
+                            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowBulkModal(false)} disabled={bulkProcessing}>
+                                Hủy
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
