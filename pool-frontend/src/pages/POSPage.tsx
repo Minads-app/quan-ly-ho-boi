@@ -2365,11 +2365,37 @@ export default function POSPage() {
                                 </span>
                             </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
                                 <span style={{ color: '#64748b', fontSize: '14px' }}>Số buổi còn lại</span>
                                 <strong style={{ fontSize: '16px', color: previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 3 ? '#ef4444' : '#10b981' }}>
                                     {previewTicket.remaining_sessions !== null ? `${previewTicket.remaining_sessions} buổi` : 'Không giới hạn'}
                                 </strong>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ color: '#64748b', fontSize: '14px' }}>Trạng thái</span>
+                                {(() => {
+                                    let finalStatus = previewTicket.status;
+                                    if (finalStatus !== 'EXPIRED' && finalStatus !== 'CANCELLED') {
+                                        const today = new Date().toLocaleDateString('en-CA');
+                                        if (previewTicket.valid_until && previewTicket.valid_until < today) finalStatus = 'EXPIRED';
+                                        else if (previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 0) finalStatus = 'EXPIRED';
+                                        else if (previewTicket.valid_until && (new Date(previewTicket.valid_until).getTime() - Date.now()) / 86400000 <= 7 && (new Date(previewTicket.valid_until).getTime() - Date.now()) / 86400000 > 0) finalStatus = 'EXPIRING';
+                                        else if (previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 3 && previewTicket.remaining_sessions > 0) finalStatus = 'EXPIRING';
+                                        else if (previewTicket.remaining_sessions !== null && previewTicket.total_sessions !== null && previewTicket.remaining_sessions < previewTicket.total_sessions) finalStatus = 'IN_USE';
+                                        else if (['IN', 'OUT', 'IN_USE'].includes(finalStatus)) finalStatus = 'IN_USE';
+                                        else finalStatus = 'UNUSED';
+                                    }
+                                    let badge = { text: 'Chưa sử dụng', bg: '#dbeafe', color: '#1d4ed8' };
+                                    if (['IN_USE', 'ACTIVE'].includes(finalStatus)) badge = { text: 'Đang sử dụng', bg: '#dcfce7', color: '#166534' };
+                                    else if (finalStatus === 'EXPIRING') badge = { text: 'Sắp hết hạn', bg: '#fef3c7', color: '#92400e' };
+                                    else if (finalStatus === 'EXPIRED') badge = { text: 'Hết hạn', bg: '#fee2e2', color: '#991b1b' };
+                                    return (
+                                        <span style={{ background: badge.bg, color: badge.color, padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 }}>
+                                            {badge.text}
+                                        </span>
+                                    );
+                                })()}
                             </div>
                         </div>
 

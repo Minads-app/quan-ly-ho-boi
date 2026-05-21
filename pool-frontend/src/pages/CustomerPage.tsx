@@ -118,9 +118,15 @@ export default function CustomerPage() {
     const [importData, setImportData] = useState<{ name: string; phone: string; card_code: string; package_type: string; pkg_name: string; total_sessions: number; remaining: number; valid_from: string; valid_until: string; sold_at: string }[]>([]); const [importing, setImporting] = useState(false);
     const [importResult, setImportResult] = useState<{ success: number; skipped: number; errors: string[] } | null>(null);
     const [importWarnings, setImportWarnings] = useState<{ row: number; field: string; message: string }[]>([]);
+    const [importErrors, setImportErrors] = useState<{ row: number; field: string; message: string }[]>([]);
     const [ticketTypesForImport, setTicketTypesForImport] = useState<{ id: string; name: string; category: string }[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+
+    // Check-in history for a package
+    const [pkgCheckinHistory, setPkgCheckinHistory] = useState<any[]>([]);
+    const [loadingPkgHistory, setLoadingPkgHistory] = useState(false);
+    const [showPkgHistory, setShowPkgHistory] = useState(false);
 
     // Print functionality
     const [printTicket, setPrintTicket] = useState<PrintTicketData | null>(null);
@@ -149,6 +155,29 @@ export default function CustomerPage() {
     async function fetchCoaches() {
         const { data } = await supabase.from('coaches').select('*').eq('is_active', true).order('full_name');
         if (data) setCoaches(data);
+    }
+
+    async function fetchPkgCheckinHistory(ticketId: string) {
+        setLoadingPkgHistory(true);
+        setShowPkgHistory(true);
+        try {
+            const { data, error } = await supabase
+                .from('checkin_logs')
+                .select(`
+                    id, checked_in_at, status, remaining_sessions,
+                    is_new_activation, sport_type,
+                    profiles:checked_in_by (full_name)
+                `)
+                .eq('source_ticket_id', ticketId)
+                .order('checked_in_at', { ascending: false })
+                .limit(200);
+            if (error) { console.error(error); setPkgCheckinHistory([]); }
+            else setPkgCheckinHistory(data || []);
+        } catch (err) {
+            console.error(err);
+            setPkgCheckinHistory([]);
+        }
+        setLoadingPkgHistory(false);
     }
 
     async function fetchBusinessInfo() {
@@ -643,7 +672,9 @@ export default function CustomerPage() {
             }
 
             const warnings: { row: number; field: string; message: string }[] = [];
-            const parsed = rows.map((r: any, idx: number) => {
+            const criticalErrors: { row: number; field: string; message: string }[] = [];
+
+            const allParsed = rows.map((r: any, idx: number) => {
                 const rowNum = idx + 2; // Excel row (header=1)
                 const name = String(r['Tên KH'] || r['ten_kh'] || r['Tên'] || r['name'] || r['Ho ten'] || '').trim();
                 const phone = String(r['SĐT'] || r['sdt'] || r['Số điện thoại'] || r['phone'] || r['SDT'] || '').trim();
@@ -656,29 +687,34 @@ export default function CustomerPage() {
                 const validFrom = parseDateDDMMYYYY(r['Ngày bắt đầu'] || r['Ngay bat dau'] || r['valid_from'] || '');
                 const validUntil = parseDateDDMMYYYY(r['Ngày kết thúc'] || r['Ngay ket thuc'] || r['valid_until'] || '');
 
-                // Validate
-                if (!name) warnings.push({ row: rowNum, field: 'Tên KH', message: 'Thiếu tên khách hàng → dòng sẽ bị bỏ qua' });
-                if (!card) warnings.push({ row: rowNum, field: 'Mã thẻ', message: 'Thiếu mã thẻ → dòng sẽ bị bỏ qua' });
-                if (name && card && !phone) warnings.push({ row: rowNum, field: 'SĐT', message: 'Không có SĐT — nên bổ sung' });
+                // --- Lỗi nghiêm trọng (chặn import) ---
+                if (!name) criticalErrors.push({ row: rowNum, field: 'Tên KH', message: 'Thiếu tên khách hàng — bắt buộc phải có' });
+                if (!card) criticalErrors.push({ row: rowNum, field: 'Mã thẻ', message: 'Thiếu mã thẻ — bắt buộc phải có' });
+                if (name && card && remaining > totalSessions && totalSessions > 0) criticalErrors.push({ row: rowNum, field: 'Buổi còn lại', message: `Buổi còn lại (${remaining}) lớn hơn Tổng buổi (${totalSessions})` });
+                if (validFrom && validUntil && validFrom > validUntil) criticalErrors.push({ row: rowNum, field: 'Ngày', message: 'Ngày bắt đầu lớn hơn Ngày kết thúc' });
+
+                // --- Cảnh báo (cho phép bỏ qua) ---
+                if (name && card && !phone) warnings.push({ row: rowNum, field: 'SĐT', message: 'Không có SĐT — nên bổ sung để dễ tìm kiếm' });
                 if (name && card && totalSessions <= 0) warnings.push({ row: rowNum, field: 'Tổng buổi', message: 'Tổng buổi = 0 → sẽ không giới hạn lượt' });
-                if (name && card && remaining > totalSessions && totalSessions > 0) warnings.push({ row: rowNum, field: 'Buổi còn lại', message: `Buổi còn lại (${remaining}) > Tổng buổi (${totalSessions})` });
-                if (validFrom && validUntil && validFrom > validUntil) warnings.push({ row: rowNum, field: 'Ngày', message: 'Ngày bắt đầu > Ngày kết thúc' });
 
                 return { name, phone, card_code: card, package_type: pkgType.includes('LESSON') ? 'LESSON' : 'MULTI', pkg_name: pkgName, total_sessions: totalSessions, remaining, valid_from: validFrom, valid_until: validUntil, sold_at: soldAtStr };
-            }).filter(r => r.name && r.card_code);
+            });
+
+            const parsed = allParsed.filter(r => r.name && r.card_code);
 
             // Check for duplicate card codes in file
             const cardCounts = new Map<string, number>();
             parsed.forEach(r => cardCounts.set(r.card_code, (cardCounts.get(r.card_code) || 0) + 1));
             cardCounts.forEach((count, code) => {
-                if (count > 1) warnings.push({ row: 0, field: 'Mã thẻ', message: `Mã thẻ "${code}" bị trùng ${count} lần trong file` });
+                if (count > 1) criticalErrors.push({ row: 0, field: 'Mã thẻ', message: `Mã thẻ "${code}" bị trùng ${count} lần trong file — mỗi mã thẻ chỉ được xuất hiện 1 lần` });
             });
 
-            if (parsed.length === 0) {
-                alert('❌ Không tìm thấy dòng dữ liệu hợp lệ nào!\n\nMỗi dòng cần có ít nhất "Tên KH" và "Mã thẻ".\nBấm "Tải Template" để lấy file mẫu.');
+            if (allParsed.length === 0) {
+                alert('❌ Không tìm thấy dòng dữ liệu nào trong file!\n\nMỗi dòng cần có ít nhất "Tên KH" và "Mã thẻ".\nBấm "Tải Template" để lấy file mẫu.');
                 return;
             }
 
+            setImportErrors(criticalErrors);
             setImportWarnings(warnings);
             setImportData(parsed);
             setImportResult(null);
@@ -742,8 +778,8 @@ export default function CustomerPage() {
                 });
                 if (tickErr) { errors.push(`${row.card_code}: Lỗi tạo vé - ${tickErr.message}`); continue; }
 
-                // 4. Add card to card_bank (source='MANUAL')
-                const { data: existingCard } = await supabase.from('card_bank').select('id').eq('card_code', row.card_code).maybeSingle();
+                // 4. Add card to card_bank (source='MANUAL') or update status to USED
+                const { data: existingCard } = await supabase.from('card_bank').select('id, status').eq('card_code', row.card_code).maybeSingle();
                 if (!existingCard) {
                     await supabase.from('card_bank').insert({
                         card_code: row.card_code,
@@ -755,6 +791,8 @@ export default function CustomerPage() {
                         status: 'USED',
                         created_by: profile?.id,
                     });
+                } else if (existingCard.status !== 'USED') {
+                    await supabase.from('card_bank').update({ status: 'USED' }).eq('id', existingCard.id);
                 }
 
                 success++;
@@ -1072,12 +1110,12 @@ export default function CustomerPage() {
             {/* Detail Modal */}
             {selectedPkg && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-                    onClick={() => { setSelectedPkg(null); setIsEditingPkg(false); }}>
-                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '28px', maxWidth: '440px', width: '90%', boxShadow: 'var(--shadow-lg)', maxHeight: '85vh', overflowY: 'auto' }}
+                    onClick={() => { setSelectedPkg(null); setIsEditingPkg(false); setShowPkgHistory(false); setPkgCheckinHistory([]); }}>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '28px', maxWidth: '500px', width: '95%', boxShadow: 'var(--shadow-lg)', maxHeight: '85vh', overflowY: 'auto' }}
                         onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                             <h2 style={{ fontSize: '18px' }}>{isEditingPkg ? '✏️ Chỉnh sửa Gói' : '📋 Chi tiết Gói Bơi'}</h2>
-                            <button onClick={() => { setSelectedPkg(null); setIsEditingPkg(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
+                            <button onClick={() => { setSelectedPkg(null); setIsEditingPkg(false); setShowPkgHistory(false); setPkgCheckinHistory([]); }} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {[
@@ -1154,6 +1192,90 @@ export default function CustomerPage() {
                                     <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>Không áp dụng khuyến mãi</div>
                                 )}
                             </div>
+                        </div>
+
+                        {/* Tra cứu lịch sử check-in */}
+                        <div style={{ marginTop: '16px' }}>
+                            {!showPkgHistory ? (
+                                <button
+                                    className="btn btn-outline"
+                                    style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 600, color: '#0369a1', background: '#e0f2fe', border: '1px solid #7dd3fc', borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    onClick={() => fetchPkgCheckinHistory(selectedPkg.id)}
+                                    disabled={loadingPkgHistory}
+                                >
+                                    📋 {loadingPkgHistory ? 'Đang tải...' : 'Tra cứu lịch sử Check-in'}
+                                </button>
+                            ) : (
+                                <div style={{ padding: '14px', borderRadius: '10px', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            📋 Lịch sử Check-in
+                                            <span style={{ background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
+                                                {pkgCheckinHistory.filter(h => h.status !== 'CANCELLED').length} lượt
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => { setShowPkgHistory(false); setPkgCheckinHistory([]); }}
+                                            style={{ background: 'none', border: 'none', fontSize: '14px', cursor: 'pointer', color: '#94a3b8', padding: '2px 6px' }}
+                                        >✕</button>
+                                    </div>
+                                    {loadingPkgHistory ? (
+                                        <div style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: '13px' }}>⏳ Đang tải...</div>
+                                    ) : pkgCheckinHistory.length === 0 ? (
+                                        <div style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: '13px' }}>
+                                            <div style={{ fontSize: '24px', marginBottom: '6px' }}>📭</div>
+                                            Chưa có lượt check-in nào cho gói thẻ này.
+                                        </div>
+                                    ) : (
+                                        <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                                <thead>
+                                                    <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                                                        <th style={{ textAlign: 'left', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>#</th>
+                                                        <th style={{ textAlign: 'left', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>Thời gian</th>
+                                                        <th style={{ textAlign: 'center', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>Trạng thái</th>
+                                                        <th style={{ textAlign: 'left', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>NV</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {pkgCheckinHistory.map((h, idx) => {
+                                                        const t = new Date(h.checked_in_at);
+                                                        const isCancelled = h.status === 'CANCELLED';
+                                                        const staffName = (h.profiles as any)?.full_name || '—';
+                                                        const displayIdx = pkgCheckinHistory.filter((x, i) => i >= idx && x.status !== 'CANCELLED').length;
+                                                        return (
+                                                            <tr key={h.id} style={{
+                                                                borderBottom: '1px solid #f1f5f9',
+                                                                background: isCancelled ? '#fef2f2' : (idx % 2 === 0 ? '#fff' : '#f8fafc'),
+                                                            }}>
+                                                                <td style={{ padding: '6px 4px', color: isCancelled ? '#94a3b8' : '#475569', fontWeight: 600 }}>
+                                                                    {isCancelled ? '—' : displayIdx}
+                                                                </td>
+                                                                <td style={{ padding: '6px 4px', whiteSpace: 'nowrap' }}>
+                                                                    <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                                                                        {t.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                                                    </span>
+                                                                    <span style={{ color: '#94a3b8', marginLeft: '4px', fontSize: '10px' }}>
+                                                                        {t.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                                                                    {isCancelled ? (
+                                                                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700 }}>🔄 Đã hủy</span>
+                                                                    ) : (
+                                                                        <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700 }}>✅</span>
+                                                                    )}
+                                                                </td>
+                                                                <td style={{ padding: '6px 4px', color: '#64748b', fontSize: '11px' }}>{staffName}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* Cập nhật HLV */}
@@ -1277,75 +1399,140 @@ export default function CustomerPage() {
 
                         {!importResult ? (
                             <>
-                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                                    Tìm thấy <b>{importData.length}</b> khách hàng hợp lệ từ file Excel. Xem lại trước khi import:
-                                </div>
+                                {/* === CÓ LỖI NGHIÊM TRỌNG — CHẶN IMPORT === */}
+                                {importErrors.length > 0 ? (
+                                    <>
+                                        <div style={{ padding: '16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', marginBottom: '16px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                                <span style={{ fontSize: '22px' }}>🚫</span>
+                                                <div>
+                                                    <div style={{ fontWeight: 700, color: '#991b1b', fontSize: '15px' }}>File có {importErrors.length} lỗi — không thể import</div>
+                                                    <div style={{ fontSize: '12px', color: '#b91c1c' }}>Vui lòng sửa các lỗi bên dưới trong file Excel rồi tải lại.</div>
+                                                </div>
+                                            </div>
+                                            <div style={{ maxHeight: '200px', overflowY: 'auto', background: '#fff', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                    <thead>
+                                                        <tr style={{ background: '#fef2f2' }}>
+                                                            <th style={{ ...thS, color: '#991b1b', fontSize: '11px' }}>Dòng</th>
+                                                            <th style={{ ...thS, color: '#991b1b', fontSize: '11px' }}>Cột</th>
+                                                            <th style={{ ...thS, color: '#991b1b', fontSize: '11px' }}>Mô tả lỗi</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {importErrors.map((err, i) => (
+                                                            <tr key={i} style={{ borderBottom: '1px solid #fecaca' }}>
+                                                                <td style={{ ...tdS, fontSize: '12px', color: '#991b1b', fontWeight: 700 }}>{err.row > 0 ? `Dòng ${err.row}` : 'Toàn file'}</td>
+                                                                <td style={{ ...tdS, fontSize: '12px', color: '#991b1b' }}>{err.field}</td>
+                                                                <td style={{ ...tdS, fontSize: '12px', color: '#991b1b' }}>{err.message}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
 
-                                {importWarnings.length > 0 && (
-                                    <div style={{ padding: '12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', marginBottom: '12px' }}>
-                                        <div style={{ fontWeight: 700, color: '#92400e', fontSize: '13px', marginBottom: '6px' }}>⚠️ Cảnh báo ({importWarnings.length}):</div>
-                                        <ul style={{ fontSize: '12px', color: '#92400e', paddingLeft: '20px', margin: 0, maxHeight: '120px', overflowY: 'auto' }}>
-                                            {importWarnings.map((w, i) => (
-                                                <li key={i}>{w.row > 0 ? `Dòng ${w.row}` : 'File'} — <b>{w.field}</b>: {w.message}</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
+                                        {importWarnings.length > 0 && (
+                                            <div style={{ padding: '12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', marginBottom: '12px' }}>
+                                                <div style={{ fontWeight: 700, color: '#92400e', fontSize: '13px', marginBottom: '6px' }}>⚠️ Cảnh báo thêm ({importWarnings.length}):</div>
+                                                <ul style={{ fontSize: '12px', color: '#92400e', paddingLeft: '20px', margin: 0, maxHeight: '80px', overflowY: 'auto' }}>
+                                                    {importWarnings.map((w, i) => (
+                                                        <li key={i}>{w.row > 0 ? `Dòng ${w.row}` : 'File'} — <b>{w.field}</b>: {w.message}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
 
-                                <div style={{ maxHeight: '350px', overflowY: 'auto', marginBottom: '16px' }}>
-                                    <table className="data-table" style={{ width: '100%' }}>
-                                        <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
-                                            <tr>
-                                                <th style={{ ...thS, width: '30px' }}>#</th>
-                                                <th style={thS}>Tên KH</th>
-                                                <th style={thS}>SĐT</th>
-                                                <th style={thS}>Mã Thẻ</th>
-                                                <th style={thS}>Loại</th>
-                                                <th style={thS}>Tên gói</th>
-                                                <th style={thS}>Tổng</th>
-                                                <th style={thS}>Còn</th>
-                                                <th style={thS}>Bắt đầu</th>
-                                                <th style={thS}>Kết thúc</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {importData.map((r, i) => {
-                                                const rowWarnings = importWarnings.filter(w => w.row === i + 2);
-                                                const hasWarn = rowWarnings.length > 0;
-                                                return (
-                                                    <tr key={i} style={{ background: hasWarn ? '#fffbeb' : '' }}>
-                                                        <td style={tdS}>{i + 1}</td>
-                                                        <td style={tdS}>{r.name}</td>
-                                                        <td style={{ ...tdS, color: !r.phone ? '#dc2626' : '' }}>{r.phone || '⚠️'}</td>
-                                                        <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold', fontSize: '11px' }}>{r.card_code}</td>
-                                                        <td style={tdS}>
-                                                            <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`} style={{ fontSize: '10px' }}>
-                                                                {r.package_type === 'LESSON' ? 'HB' : 'MT'}
-                                                            </span>
-                                                        </td>
-                                                        <td style={{ ...tdS, fontSize: '11px' }}>{r.pkg_name || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>auto</span>}</td>
-                                                        <td style={tdS}>{r.total_sessions || '∞'}</td>
-                                                        <td style={tdS}>{r.remaining || '∞'}</td>
-                                                        <td style={{ ...tdS, fontSize: '11px' }}>{r.valid_from || '—'}</td>
-                                                        <td style={{ ...tdS, fontSize: '11px' }}>{r.valid_until || '—'}</td>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} style={{ flex: 1, borderColor: '#3b82f6', color: '#2563eb' }}>
+                                                📂 Tải lại file đã sửa
+                                            </button>
+                                            <button className="btn btn-ghost" onClick={downloadImportTemplate} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                                                📋 Tải Template mẫu
+                                            </button>
+                                            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowImportModal(false); setImportData([]); setImportWarnings([]); setImportErrors([]); }}>
+                                                Đóng
+                                            </button>
+                                        </div>
+                                    </>
+                                ) : (
+                                    /* === KHÔNG CÓ LỖI — CHO PHÉP IMPORT === */
+                                    <>
+                                        <div style={{ padding: '14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '22px' }}>✅</span>
+                                            <div>
+                                                <div style={{ fontWeight: 700, color: '#166534', fontSize: '15px' }}>File hợp lệ — Sẵn sàng import</div>
+                                                <div style={{ fontSize: '12px', color: '#15803d' }}>Tìm thấy <b>{importData.length}</b> khách hàng hợp lệ. Xem lại trước khi xác nhận.</div>
+                                            </div>
+                                        </div>
+
+                                        {importWarnings.length > 0 && (
+                                            <div style={{ padding: '12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', marginBottom: '12px' }}>
+                                                <div style={{ fontWeight: 700, color: '#92400e', fontSize: '13px', marginBottom: '6px' }}>⚠️ Lưu ý ({importWarnings.length}):</div>
+                                                <ul style={{ fontSize: '12px', color: '#92400e', paddingLeft: '20px', margin: 0, maxHeight: '100px', overflowY: 'auto' }}>
+                                                    {importWarnings.map((w, i) => (
+                                                        <li key={i}>{w.row > 0 ? `Dòng ${w.row}` : 'File'} — <b>{w.field}</b>: {w.message}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+
+                                        <div style={{ maxHeight: '350px', overflowY: 'auto', marginBottom: '16px' }}>
+                                            <table className="data-table" style={{ width: '100%' }}>
+                                                <thead style={{ position: 'sticky', top: 0, background: '#fff' }}>
+                                                    <tr>
+                                                        <th style={{ ...thS, width: '30px' }}>#</th>
+                                                        <th style={thS}>Tên KH</th>
+                                                        <th style={thS}>SĐT</th>
+                                                        <th style={thS}>Mã Thẻ</th>
+                                                        <th style={thS}>Loại</th>
+                                                        <th style={thS}>Tên gói</th>
+                                                        <th style={thS}>Tổng</th>
+                                                        <th style={thS}>Còn</th>
+                                                        <th style={thS}>Bắt đầu</th>
+                                                        <th style={thS}>Kết thúc</th>
                                                     </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                                </thead>
+                                                <tbody>
+                                                    {importData.map((r, i) => {
+                                                        const rowWarnings = importWarnings.filter(w => w.row === i + 2);
+                                                        const hasWarn = rowWarnings.length > 0;
+                                                        return (
+                                                            <tr key={i} style={{ background: hasWarn ? '#fffbeb' : '' }}>
+                                                                <td style={tdS}>{i + 1}</td>
+                                                                <td style={tdS}>{r.name}</td>
+                                                                <td style={{ ...tdS, color: !r.phone ? '#dc2626' : '' }}>{r.phone || '⚠️'}</td>
+                                                                <td style={{ ...tdS, fontFamily: 'monospace', fontWeight: 'bold', fontSize: '11px' }}>{r.card_code}</td>
+                                                                <td style={tdS}>
+                                                                    <span className={`badge ${r.package_type === 'LESSON' ? 'badge-primary' : 'badge-success'}`} style={{ fontSize: '10px' }}>
+                                                                        {r.package_type === 'LESSON' ? 'HB' : 'MT'}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ ...tdS, fontSize: '11px' }}>{r.pkg_name || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>auto</span>}</td>
+                                                                <td style={tdS}>{r.total_sessions || '∞'}</td>
+                                                                <td style={tdS}>{r.remaining || '∞'}</td>
+                                                                <td style={{ ...tdS, fontSize: '11px' }}>{r.valid_from || '—'}</td>
+                                                                <td style={{ ...tdS, fontSize: '11px' }}>{r.valid_until || '—'}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
 
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirmImport} disabled={importing || importData.length === 0}>
-                                        {importing ? '⏳ Đang import...' : `✅ Xác nhận Import ${importData.length} khách`}
-                                    </button>
-                                    <button className="btn btn-ghost" onClick={downloadImportTemplate} disabled={importing} style={{ padding: '8px 16px', fontSize: '13px' }}>
-                                        📋 Tải Template
-                                    </button>
-                                    <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowImportModal(false); setImportData([]); setImportWarnings([]); }} disabled={importing}>
-                                        Hủy
-                                    </button>
-                                </div>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirmImport} disabled={importing || importData.length === 0}>
+                                                {importing ? '⏳ Đang import...' : `✅ Xác nhận Import ${importData.length} khách`}
+                                            </button>
+                                            <button className="btn btn-ghost" onClick={downloadImportTemplate} disabled={importing} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                                                📋 Tải Template
+                                            </button>
+                                            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { setShowImportModal(false); setImportData([]); setImportWarnings([]); setImportErrors([]); }} disabled={importing}>
+                                                Hủy
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
                             </>
                         ) : (
                             <>
@@ -1364,7 +1551,7 @@ export default function CustomerPage() {
                                         </div>
                                     )}
                                 </div>
-                                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => { setShowImportModal(false); setImportData([]); setImportResult(null); }}>
+                                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => { setShowImportModal(false); setImportData([]); setImportResult(null); setImportErrors([]); }}>
                                     Đóng
                                 </button>
                             </>
