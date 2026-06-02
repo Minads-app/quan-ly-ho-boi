@@ -62,6 +62,7 @@ interface PackageRow {
     coach_id: string | null;
     coach_name: string | null;
     sport_type: string | null;
+    extension_logs?: any[];
 }
 
 interface CustomerSummary {
@@ -219,7 +220,8 @@ export default function CustomerPage() {
                 ticket_types!inner (name, category, price, session_count, validity_days, sport_type),
                 profiles:sold_by (full_name),
                 promotions:promotion_id (name, type, value),
-                coaches:coach_id (full_name)
+                coaches:coach_id (full_name),
+                ticket_extension_logs (id, old_valid_until, new_valid_until, bulk_extensions(closed_start, days_extended))
             `)
             .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
             .neq('source', 'CHECKIN')
@@ -259,6 +261,7 @@ export default function CustomerPage() {
             coach_id: t.coach_id || null,
             coach_name: t.coaches?.full_name || null,
             sport_type: t.ticket_types?.sport_type || null,
+            extension_logs: t.ticket_extension_logs || [],
         }));
 
         setAllPackages(mapped);
@@ -996,6 +999,11 @@ export default function CustomerPage() {
                                                                     </div>
                                                                     <span style={{ background: p.category === 'MONTHLY' ? '#dbeafe' : p.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: p.category === 'MONTHLY' ? '#1d4ed8' : p.category === 'LESSON' ? '#166534' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{p.type_name}</span>
                                                                     <span style={{ background: pst.bg, color: pst.color, padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{pst.text}</span>
+                                                                    {p.extension_logs && p.extension_logs.length > 0 && (
+                                                                        <span style={{ background: '#dcfce7', color: '#166534', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                                            🔄 Đã gia hạn +{p.extension_logs.reduce((acc, log) => acc + (log.bulk_extensions?.days_extended || 0), 0)} ngày
+                                                                        </span>
+                                                                    )}
                                                                     {p.remaining_sessions !== null && (
                                                                         <span style={{ fontWeight: 700, fontSize: '13px', color: p.remaining_sessions <= 3 ? '#ef4444' : '' }}>
                                                                             {p.remaining_sessions}/{p.total_sessions ?? p.remaining_sessions} lượt
@@ -1182,6 +1190,13 @@ export default function CustomerPage() {
                                             {isAdmin && <td style={tdS}>{t.card_code || '—'}</td>}
                                             <td style={tdS}>
                                                 <span style={{ background: t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#166534' : '#92400e', padding: '4px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{t.type_name}</span>
+                                                {t.extension_logs && t.extension_logs.length > 0 && (
+                                                    <div style={{ marginTop: '4px' }}>
+                                                        <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                            🔄 +{t.extension_logs.reduce((acc, log) => acc + (log.bulk_extensions?.days_extended || 0), 0)} ngày
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td style={tdS}>
                                                 <span style={{ background: st.bg, color: st.color, padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{st.text}</span>

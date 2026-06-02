@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
-import type { CardBank, CardBatchView } from '../types';
+import type { CardBank, CardBatchView, BulkExtension } from '../types';
 
 interface Settings {
     gate_control_mode: string;
@@ -106,7 +106,112 @@ export default function SettingsPage() {
     const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>(defaultSchedule);
 
     // active tab state
-    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons' | 'cards'>('system');
+    const [activeTab, setActiveTab] = useState<'system' | 'business' | 'tickets' | 'promotions' | 'lessons' | 'cards' | 'bulk_extend'>('system');
+
+    // Bulk extend states
+    const [beStartDate, setBeStartDate] = useState('');
+    const [beEndDate, setBeEndDate] = useState('');
+    const [bePreviewData, setBePreviewData] = useState<any[]>([]);
+    const [bePreviewLoading, setBePreviewLoading] = useState(false);
+    const [beHistory, setBeHistory] = useState<BulkExtension[]>([]);
+    
+    // History details modal
+    const [beSelectedHistory, setBeSelectedHistory] = useState<BulkExtension | null>(null);
+    const [beHistoryDetails, setBeHistoryDetails] = useState<any[]>([]);
+    const [beHistoryDetailsLoading, setBeHistoryDetailsLoading] = useState(false);
+
+    const handleViewHistoryDetails = async (history: BulkExtension) => {
+        setBeSelectedHistory(history);
+        setBeHistoryDetailsLoading(true);
+        const { data } = await supabase
+            .from('ticket_extension_logs')
+            .select(`
+                old_valid_until, new_valid_until,
+                tickets (customer_name, customer_phone, ticket_types(name), customers(full_name, phone))
+            `)
+            .eq('bulk_extension_id', history.id);
+            
+        if (data) setBeHistoryDetails(data);
+        setBeHistoryDetailsLoading(false);
+    };
+    
+    const fetchBulkExtensions = async () => {
+        const { data, error } = await supabase.from('bulk_extensions').select('*, profiles(full_name)').order('created_at', { ascending: false });
+        if (error) console.error('fetchBulkExtensions error:', error);
+        if (data) setBeHistory(data as any[]);
+    };
+
+    const handlePreviewBulkExtend = async () => {
+        if (!beStartDate || !beEndDate) {
+            alert('Vui lòng chọn Ngày bắt đầu và Ngày kết thúc đóng cửa!');
+            return;
+        }
+        if (new Date(beEndDate) < new Date(beStartDate)) {
+            alert('Ngày kết thúc không được nhỏ hơn ngày bắt đầu!');
+            return;
+        }
+        setBePreviewLoading(true);
+        const days = Math.floor((new Date(beEndDate).getTime() - new Date(beStartDate).getTime()) / (1000 * 3600 * 24)) + 1;
+        
+        const { data, error } = await supabase
+            .from('tickets')
+            .select(`
+                id, valid_until, customer_name, customer_phone, 
+                ticket_types(name), customers(full_name, phone)
+            `)
+            .not('valid_from', 'is', null)
+            .not('valid_until', 'is', null)
+            .neq('status', 'CANCELLED')
+            .gte('valid_until', beStartDate);
+            
+        setBePreviewLoading(false);
+        if (error) {
+            alert('Lỗi preview: ' + error.message);
+            return;
+        }
+        
+        const previewList = (data || []).map((t: any) => {
+            const oldDate = new Date(t.valid_until);
+            const newDate = new Date(t.valid_until);
+            newDate.setDate(oldDate.getDate() + days);
+            return {
+                id: t.id,
+                customer_name: t.customers?.full_name || t.customer_name || 'Không tên',
+                type_name: t.ticket_types?.name || 'Không rõ',
+                old_valid_until: t.valid_until,
+                new_valid_until: newDate.toISOString().split('T')[0]
+            };
+        });
+        setBePreviewData(previewList);
+    };
+
+    const handleExecuteBulkExtend = async () => {
+        if (!beStartDate || !beEndDate) return;
+        if (bePreviewData.length === 0) {
+            alert('Không có vé nào để gia hạn!');
+            return;
+        }
+        if (!window.confirm(`Xác nhận gia hạn cho ${bePreviewData.length} vé? Hành động này không thể hoàn tác!`)) return;
+        
+        setSaving(true);
+        const { data, error } = await supabase.rpc('execute_bulk_extend', {
+            p_start_date: beStartDate,
+            p_end_date: beEndDate,
+            p_user_id: profile?.id
+        });
+        
+        setSaving(false);
+        if (error) {
+            alert('Lỗi thực hiện: ' + error.message);
+        } else {
+            alert(`Đã gia hạn thành công ${data} vé!`);
+            setBePreviewData([]);
+            setBeStartDate('');
+            setBeEndDate('');
+            fetchBulkExtensions();
+        }
+    };
+
 
     // Card Bank state
     const [cards, setCards] = useState<CardBank[]>([]);
@@ -222,9 +327,19 @@ export default function SettingsPage() {
     const dayNames: Record<number, string> = { 0: 'Chủ nhật', 1: 'Thứ 2', 2: 'Thứ 3', 3: 'Thứ 4', 4: 'Thứ 5', 5: 'Thứ 6', 6: 'Thứ 7' };
 
     useEffect(() => {
+        if (activeTab === 'tickets') fetchTicketTypes();
+        if (activeTab === 'promotions') {
+            fetchTicketTypes();
+            fetchLessonTypes();
+            fetchPromotions();
+        }
+        if (activeTab === 'lessons') fetchLessonTypes();
         if (activeTab === 'cards') {
             fetchCards();
             fetchCardBatches();
+        }
+        if (activeTab === 'bulk_extend') {
+            fetchBulkExtensions();
         }
     }, [activeTab]);
 
@@ -1047,6 +1162,13 @@ export default function SettingsPage() {
                 >
                     💳 Ngân Hàng Thẻ
                 </button>
+                <button
+                    className={`btn ${activeTab === 'bulk_extend' ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
+                    onClick={() => setActiveTab('bulk_extend')}
+                >
+                    🛠️ Gia Hạn Hàng Loạt
+                </button>
 
             </div>
 
@@ -1468,6 +1590,149 @@ export default function SettingsPage() {
                                     )}
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {activeTab === 'bulk_extend' && (
+                <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
+                    <div className="dashboard-content-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>🛠️ Gia hạn vé hàng loạt</h2>
+                            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Bù ngày sử dụng do đóng cửa / bảo trì</p>
+                        </div>
+                        
+                        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '24px' }}>
+                            <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                                <label>Ngày đóng cửa (Từ ngày)</label>
+                                <input type="date" className="form-control" value={beStartDate} onChange={e => setBeStartDate(e.target.value)} />
+                            </div>
+                            <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                                <label>Mở cửa lại (Đến ngày)</label>
+                                <input type="date" className="form-control" value={beEndDate} onChange={e => setBeEndDate(e.target.value)} />
+                            </div>
+                            <div className="form-group">
+                                <button className="btn btn-primary" onClick={handlePreviewBulkExtend} disabled={bePreviewLoading}>
+                                    {bePreviewLoading ? 'Đang tính toán...' : '🔍 Kiểm tra (Preview)'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {bePreviewData.length > 0 && (
+                            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                    <h3 style={{ margin: 0, color: '#1e293b' }}>⚠️ Có {bePreviewData.length} vé sẽ được gia hạn thêm {Math.floor((new Date(beEndDate).getTime() - new Date(beStartDate).getTime()) / (1000 * 3600 * 24)) + 1} ngày</h3>
+                                    <button className="btn btn-primary" style={{ background: '#10b981', borderColor: '#10b981' }} onClick={handleExecuteBulkExtend} disabled={saving}>
+                                        {saving ? 'Đang chạy...' : '🚀 Xác nhận & Thực hiện'}
+                                    </button>
+                                </div>
+                                <div className="table-responsive" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                    <table className="data-table" style={{ fontSize: '14px' }}>
+                                        <thead>
+                                            <tr>
+                                                <th>Khách hàng</th>
+                                                <th>Gói / Vé</th>
+                                                <th>Ngày hết hạn (Cũ)</th>
+                                                <th>Ngày hết hạn (Mới)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {bePreviewData.map(t => (
+                                                <tr key={t.id}>
+                                                    <td>
+                                                        <strong>{t.customer_name}</strong>
+                                                        {t.customer_phone && <div style={{ fontSize: '11px', color: '#64748b' }}>{t.customer_phone}</div>}
+                                                    </td>
+                                                    <td>{t.type_name}</td>
+                                                    <td><span style={{ color: '#ef4444', textDecoration: 'line-through' }}>{new Date(t.old_valid_until).toLocaleDateString('vi-VN')}</span></td>
+                                                    <td><strong style={{ color: '#10b981' }}>{new Date(t.new_valid_until).toLocaleDateString('vi-VN')}</strong></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        <h3 style={{ marginTop: '32px', marginBottom: '16px' }}>Lịch sử gia hạn hàng loạt</h3>
+                        <div className="table-responsive">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Thời gian thực hiện</th>
+                                        <th>Người thực hiện</th>
+                                        <th>Giai đoạn nghỉ</th>
+                                        <th>Cộng thêm</th>
+                                        <th>Số vé ảnh hưởng</th>
+                                        <th style={{ textAlign: 'right' }}>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {beHistory.map(h => (
+                                        <tr key={h.id}>
+                                            <td>{new Date(h.created_at).toLocaleString('vi-VN')}</td>
+                                            <td>{h.profiles?.full_name || 'Hệ thống'}</td>
+                                            <td>{new Date(h.closed_start).toLocaleDateString('vi-VN')} → {new Date(h.closed_end).toLocaleDateString('vi-VN')}</td>
+                                            <td><strong style={{ color: '#10b981' }}>+{h.days_extended} ngày</strong></td>
+                                            <td>{h.total_tickets} vé</td>
+                                            <td style={{ textAlign: 'right' }}>
+                                                <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleViewHistoryDetails(h)}>
+                                                    👀 Chi tiết
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {beHistory.length === 0 && (
+                                        <tr><td colSpan={6} style={{ textAlign: 'center', color: '#64748b' }}>Chưa có lịch sử gia hạn hàng loạt nào.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {beSelectedHistory && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '700px', width: '90%' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h3 style={{ margin: 0, fontSize: '18px' }}>Chi tiết phiếu gia hạn</h3>
+                            <button className="btn btn-ghost" onClick={() => setBeSelectedHistory(null)}>✕</button>
+                        </div>
+                        <div style={{ marginBottom: '16px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                            Đã gia hạn <strong>{beSelectedHistory.total_tickets}</strong> vé thêm <strong>{beSelectedHistory.days_extended} ngày</strong>.
+                        </div>
+                        
+                        {beHistoryDetailsLoading ? (
+                            <div style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>Đang tải dữ liệu...</div>
+                        ) : (
+                            <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                <table className="data-table" style={{ fontSize: '14px' }}>
+                                    <thead>
+                                        <tr>
+                                            <th>Khách hàng</th>
+                                            <th>Gói / Vé</th>
+                                            <th>Ngày hết hạn (Cũ)</th>
+                                            <th>Ngày hết hạn (Mới)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {beHistoryDetails.map((log, i) => (
+                                            <tr key={i}>
+                                                <td>
+                                                    <strong>{log.tickets?.customers?.full_name || log.tickets?.customer_name || 'Không tên'}</strong>
+                                                </td>
+                                                <td>{log.tickets?.ticket_types?.name || 'Không rõ'}</td>
+                                                <td><span style={{ color: '#ef4444', textDecoration: 'line-through' }}>{new Date(log.old_valid_until).toLocaleDateString('vi-VN')}</span></td>
+                                                <td><strong style={{ color: '#10b981' }}>{new Date(log.new_valid_until).toLocaleDateString('vi-VN')}</strong></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                            <button className="btn btn-ghost" onClick={() => setBeSelectedHistory(null)}>Đóng</button>
                         </div>
                     </div>
                 </div>

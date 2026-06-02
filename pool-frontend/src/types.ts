@@ -188,3 +188,24 @@ export interface CoachAttendance {
     coaches?: { full_name: string };
     profiles?: { full_name: string };
 }
+
+export interface BulkExtension {
+    id: string;
+    closed_start: string;
+    closed_end: string;
+    days_extended: number;
+    total_tickets: number;
+    created_at: string;
+    created_by: string;
+    profiles?: { full_name: string };
+}
+
+export interface TicketExtensionLog {
+    id: string;
+    ticket_id: string;
+    bulk_extension_id: string;
+    old_valid_until: string;
+    new_valid_until: string;
+    created_at: string;
+    bulk_extensions?: BulkExtension;
+}
