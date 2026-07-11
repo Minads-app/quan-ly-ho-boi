@@ -446,8 +446,8 @@ export default function OrdersPage() {
                                 </td>
                                 <td style={{ ...tdS, fontWeight: 700 }}>{fmt(o.total_amount)}</td>
                                 <td style={tdS}>
-                                    <span style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '4px', background: o.payment_method === 'CASH' ? '#dcfce7' : o.payment_method === 'TRANSFER' ? '#dbeafe' : '#f3e8ff' }}>
-                                        {o.payment_method === 'CASH' ? '💵 Tiền mặt' : o.payment_method === 'TRANSFER' ? '🏦 Chuyển khoản' : '💳 Quẹt thẻ'}
+                                    <span style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '4px', background: o.payment_method === 'CASH' ? '#dcfce7' : o.payment_method === 'TRANSFER' ? '#dbeafe' : o.payment_method === 'TRANSFER_COMPANY' ? '#e0f2fe' : '#f3e8ff' }}>
+                                        {o.payment_method === 'CASH' ? '💵 Tiền mặt' : o.payment_method === 'TRANSFER' ? '🏦 Chuyển khoản' : o.payment_method === 'TRANSFER_COMPANY' ? '🏢 CK Công ty' : '💳 Quẹt thẻ'}
                                     </span>
                                 </td>
                                 <td style={{ ...tdS, color: 'var(--text-secondary)' }}>{o.created_by_name}</td>

@@ -38,7 +38,7 @@ interface SoldTicket extends Ticket {
     remaining_sessions?: number | null;
     customer_phone: string | null;
     sold_by: string | null;
-    payment_method: 'CASH' | 'TRANSFER' | 'CARD';
+    payment_method: 'CASH' | 'TRANSFER' | 'CARD' | 'TRANSFER_COMPANY';
     pass_category?: string | null;
     pass_remaining_sessions?: number | null;
 }
@@ -147,7 +147,7 @@ export default function POSPage() {
     // Business Info & Payment Options
     const [bizInfo, setBizInfo] = useState<BusinessInfo>({});
     const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'TRANSFER' | 'CARD'>('CASH');
+    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'TRANSFER' | 'CARD' | 'TRANSFER_COMPANY'>('CASH');
 
     // Active Tab (Bán Vé | Check-in Thẻ)
     const [activeTab, setActiveTab] = useState<'SELL' | 'CHECKIN'>('SELL');
@@ -1657,7 +1657,7 @@ export default function POSPage() {
                         </div>
                         <div className="row" style={{ fontSize: '13px', marginTop: '8px' }}>
                             <span>Thanh toán:</span>
-                            <span>{checkoutReceipt.paymentMethod === 'CASH' ? 'Tiền mặt' : checkoutReceipt.paymentMethod === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS'}</span>
+                            <span>{checkoutReceipt.paymentMethod === 'CASH' ? 'Tiền mặt' : checkoutReceipt.paymentMethod === 'TRANSFER' ? 'Chuyển khoản' : checkoutReceipt.paymentMethod === 'TRANSFER_COMPANY' ? 'Chuyển khoản công ty' : 'Thẻ POS'}</span>
                         </div>
 
                         <div className="text-center" style={{ marginTop: '24px' }}>
@@ -2839,6 +2839,11 @@ export default function POSPage() {
                                             <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CARD' ? 'var(--bg-hover)' : 'transparent' }}>
                                                 <input type="radio" name="payment" value="CARD" checked={selectedPaymentMethod === 'CARD'} onChange={() => setSelectedPaymentMethod('CARD')} />
                                                 <span style={{ fontSize: '16px', fontWeight: 500 }}>💳 Quẹt thẻ (POS)</span>
+                                            </label>
+
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER_COMPANY' ? 'var(--bg-hover)' : 'transparent' }}>
+                                                <input type="radio" name="payment" value="TRANSFER_COMPANY" checked={selectedPaymentMethod === 'TRANSFER_COMPANY'} onChange={() => setSelectedPaymentMethod('TRANSFER_COMPANY')} />
+                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>🏢 Chuyển khoản công ty</span>
                                             </label>
                                         </div>
                                     ) : (

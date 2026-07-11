@@ -593,6 +593,7 @@ export default function DashboardPage() {
 
     const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CASH').reduce((s, r) => s + r.subtotal, 0);
     const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER').reduce((s, r) => s + r.subtotal, 0);
+    const revTransferCompany = tickets.filter(t => t.payment_method === 'TRANSFER_COMPANY').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER_COMPANY').reduce((s, r) => s + r.subtotal, 0);
     const revCard = tickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CARD').reduce((s, r) => s + r.subtotal, 0);
 
     // --- PRINT A4 Landscape ---
@@ -773,6 +774,7 @@ export default function DashboardPage() {
                     <div style="display:flex; justify-content:space-between; color: #64748b;"><span>Thu tiền mặt:</span> <span>${fmt(revCash)}</span></div>
                     <div style="display:flex; justify-content:space-between; color: #d97706;"><span>Thu chuyển khoản:</span> <span>${fmt(revTransfer)}</span></div>
                     <div style="display:flex; justify-content:space-between; color: #8b5cf6;"><span>Thu quẹt thẻ POS:</span> <span>${fmt(revCard)}</span></div>
+                    <div style="display:flex; justify-content:space-between; color: #0284c7;"><span>Thu CK Công ty:</span> <span>${fmt(revTransferCompany)}</span></div>
                     <div style="display:flex; justify-content:space-between; color: #ef4444; border-top: 1px dashed #ccc; margin-top: 4px; padding-top: 4px;"><span>Chi tiền mặt:</span> <span>-${fmt(totalExpenses)}</span></div>
                     <div style="display:flex; justify-content:space-between; color: #10b981; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px;"><span>TỔNG THU (ĐÃ TRỪ CHI):</span> <span>${fmt(totalRevenue - totalExpenses)}</span></div>
                 </div>
@@ -786,7 +788,7 @@ export default function DashboardPage() {
                     { label: 'Doanh thu Vé', value: fmt(totalTicketRevenue), color: '#3b82f6' },
                     { label: 'Doanh thu SP', value: fmt(totalRetailRevenue), color: '#8b5cf6' },
                     { label: 'Thu tiền mặt', value: fmt(revCash), color: '#64748b' },
-                    { label: 'Thu CK & Thẻ', value: fmt(revTransfer + revCard), color: '#d97706' },
+                    { label: 'Thu CK & Thẻ', value: fmt(revTransfer + revTransferCompany + revCard), color: '#d97706' },
                     { label: 'Chi tiền mặt', value: `-${fmt(totalExpenses)}`, color: '#ef4444' }
                     ].map(k => (
                         <div key={k.label} style={{ flex: 1, minWidth: '120px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
@@ -1205,6 +1207,7 @@ export default function DashboardPage() {
         const myRevenue = mySalesTickets.reduce((s, t) => s + t.price_paid, 0);
         const myCash = mySalesTickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0);
         const myTransfer = mySalesTickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0);
+        const myTransferCompany = mySalesTickets.filter(t => t.payment_method === 'TRANSFER_COMPANY').reduce((s, t) => s + t.price_paid, 0);
         const myCard = mySalesTickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0);
 
         const tableHtml = `
@@ -1213,6 +1216,7 @@ export default function DashboardPage() {
                 <span style="color:#10b981">Tổng Thu: ${fmt(myRevenue)}</span>
                 <span style="color:#64748b">Tiền mặt: ${fmt(myCash)}</span>
                 <span style="color:#f59e0b">Chuyển khoản: ${fmt(myTransfer)}</span>
+                <span style="color:#0284c7">CK Công ty: ${fmt(myTransferCompany)}</span>
                 <span style="color:#8b5cf6">Quẹt thẻ: ${fmt(myCard)}</span>
             </div>
             <table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Thời gian</th></tr></thead><tbody>
