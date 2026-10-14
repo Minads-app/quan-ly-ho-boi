@@ -12,12 +12,12 @@ rem Show git status (optional)
 echo Checking git status...
 git status
 
-rem Stage all changes
+rem Stage all changes across the repository (including ../supabase)
 echo Adding changes...
-git add .
+git add -A
 
 rem Commit with a default message (edit as needed)
-set "COMMIT_MSG=Integrate Basketball course management"
+set "COMMIT_MSG=Update financial PnL system"
 git commit -m "%COMMIT_MSG%"
 
 rem Push to remote (default branch assumed main)
