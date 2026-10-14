@@ -4,8 +4,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
+import PnLReportTab from '../components/PnLReportTab';
 
-type ReportTab = 'REVENUE' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES' | 'BASKETBALL';
+type ReportTab = 'REVENUE' | 'PNL' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES' | 'BASKETBALL';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
 interface TicketRow {
@@ -1372,6 +1373,7 @@ export default function DashboardPage() {
 
     const tabs: { key: ReportTab; label: string; icon: string; adminOnly?: boolean }[] = [
         { key: 'REVENUE', label: 'Doanh thu', icon: '💰' },
+        { key: 'PNL', label: 'Kết Quả Kinh Doanh', icon: '📊', adminOnly: true },
         { key: 'SESSIONS', label: 'Lượt khách (Scan)', icon: '🏊', adminOnly: true },
         { key: 'DAILY_PASSES', label: 'Vé hôm nay', icon: '🎫', adminOnly: true },
         { key: 'LESSON_PACKAGES', label: 'Gói Học Bơi', icon: '📚', adminOnly: true },
@@ -1385,7 +1387,7 @@ export default function DashboardPage() {
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                     <h1>📈 Báo Cáo</h1>
-                    <p>Xem doanh thu, danh sách vé và cảnh báo</p>
+                    <p>Xem doanh thu, kết quả kinh doanh, danh sách vé và cảnh báo</p>
                 </div>
                 <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '12px', flexWrap: 'wrap' }}>
                     {tabs.filter(t => !t.adminOnly || isAdmin).map(t => (
@@ -1399,9 +1401,10 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {loading && <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>Đang tải dữ liệu...</div>}
+            {loading && activeTab !== 'PNL' && <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>Đang tải dữ liệu...</div>}
 
             {!loading && activeTab === 'REVENUE' && renderRevenueTab()}
+            {activeTab === 'PNL' && isAdmin && <PnLReportTab bizInfo={bizInfo} onPrintReport={handlePrintReport} />}
             {!loading && activeTab === 'SESSIONS' && renderSessionsTab()}
             {!loading && activeTab === 'DAILY_PASSES' && renderDailyPassesTab()}
             {!loading && activeTab === 'LESSON_PACKAGES' && renderLessonPackagesTab()}

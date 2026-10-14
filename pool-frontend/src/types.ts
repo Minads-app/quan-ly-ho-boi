@@ -209,3 +209,55 @@ export interface TicketExtensionLog {
     created_at: string;
     bulk_extensions?: BulkExtension;
 }
+
+
+export type FinancialType = 'INCOME' | 'EXPENSE';
+export type CostType = 'FIXED' | 'VARIABLE' | null;
+export type PaymentMethodType = 'CASH' | 'TRANSFER' | 'TRANSFER_COMPANY' | 'CARD';
+export type FundSourceType = 'SHIFT_CASH' | 'COMPANY_FUND';
+
+export interface FinancialCategory {
+    id: string;
+    name: string;
+    type: FinancialType;
+    cost_type: CostType;
+    description: string | null;
+    sort_order: number;
+    is_system: boolean;
+    is_active: boolean;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface FixedCostTemplate {
+    id: string;
+    name: string;
+    category_id: string | null;
+    default_amount: number;
+    default_payment_method: PaymentMethodType;
+    day_of_month: number;
+    note: string | null;
+    is_active: boolean;
+    created_by?: string | null;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface FinancialTransaction {
+    id: string;
+    transaction_date: string; // YYYY-MM-DD (cho phép chọn ngày quá khứ)
+    accounting_month: string; // YYYY-MM
+    type: FinancialType;
+    cost_type: CostType;
+    category_id: string | null;
+    category_name: string;
+    amount: number;
+    payment_method: PaymentMethodType;
+    fund_source: FundSourceType;
+    description: string;
+    template_id?: string | null;
+    created_by?: string | null;
+    created_by_name?: string | null;
+    created_at: string;
+    updated_at?: string;
+}
