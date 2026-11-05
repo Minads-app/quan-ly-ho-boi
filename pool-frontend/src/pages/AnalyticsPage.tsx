@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { fetchAllSupabaseRows } from '../utils/financialService';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
 type DateRange = '7_DAYS' | '30_DAYS' | 'THIS_MONTH' | 'LAST_MONTH';
@@ -45,26 +46,38 @@ export default function AnalyticsPage() {
         setLoading(true);
         const { from, to } = getDateBounds();
 
-        // 1. Fetch Tickets for Revenue calculation
-        let ticketQuery = supabase
-            .from('tickets')
-            .select(`id, price_paid, sold_at, ticket_types (category)`)
-            .gte('sold_at', from + 'T00:00:00+07:00')
-            .lte('sold_at', to + 'T23:59:59+07:00');
+        // 1. Fetch Tickets for Revenue calculation (all pages)
+        const { data: ticketsData } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) => {
+            let ticketQuery = supabase
+                .from('tickets')
+                .select(`id, price_paid, sold_at, status, ticket_types (category)`)
+                .neq('status', 'CANCELLED')
+                .gt('price_paid', 0)
+                .gte('sold_at', from + 'T00:00:00+07:00')
+                .lte('sold_at', to + 'T23:59:59+07:00')
+                .order('sold_at', { ascending: false })
+                .order('id', { ascending: true });
 
-        if (!isAdmin && profile) { // Lễ tân chỉ xem doanh thu của họ
-            ticketQuery = ticketQuery.eq('sold_by', profile.id);
-        }
+            if (!isAdmin && profile) { // Lễ tân chỉ xem doanh thu của họ
+                ticketQuery = ticketQuery.eq('sold_by', profile.id);
+            }
 
-        const { data: ticketsData } = await ticketQuery;
+            return ticketQuery.range(fromIdx, toIdx);
+        });
 
-        // 2. Fetch Scan Logs for Session calculation (actual check-ins)
-        const { data: scanData } = await supabase
-            .from('scan_logs')
-            .select('scanned_at, status')
-            .eq('status', 'IN')
-            .gte('scanned_at', from + 'T00:00:00+07:00')
-            .lte('scanned_at', to + 'T23:59:59+07:00');
+        // 2. Fetch Scan Logs for Session calculation (actual check-ins - all pages)
+        const { data: scanData } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('scan_logs')
+                .select('id, scanned_at, direction, success')
+                .eq('direction', 'IN')
+                .eq('success', true)
+                .gte('scanned_at', from + 'T00:00:00+07:00')
+                .lte('scanned_at', to + 'T23:59:59+07:00')
+                .order('scanned_at', { ascending: false })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
 
         // Process Daily Sessions (Line Chart)
         const sessionMap: Record<string, number> = {};

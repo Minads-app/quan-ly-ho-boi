@@ -257,6 +257,32 @@ export const DEFAULT_FIXED_COST_TEMPLATES: FixedCostTemplate[] = [
     },
 ];
 
+export async function fetchAllSupabaseRows<T = any>(
+    buildQuery: (fromIdx: number, toIdx: number) => PromiseLike<{ data: T[] | null; error: any }>
+): Promise<{ data: T[]; error: any }> {
+    const pageSize = 1000;
+    let offset = 0;
+    const allRows: T[] = [];
+
+    while (true) {
+        const { data, error } = await buildQuery(offset, offset + pageSize - 1);
+        if (error) {
+            return { data: allRows, error };
+        }
+        if (!data || data.length === 0) {
+            break;
+        }
+        allRows.push(...data);
+        if (data.length < pageSize) {
+            break;
+        }
+        offset += pageSize;
+        if (offset >= 100000) break; // safety cap 100k rows
+    }
+
+    return { data: allRows, error: null };
+}
+
 function generateUUID(): string {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
@@ -502,13 +528,17 @@ export async function fetchFinancialTransactions(
     fromDate: string,
     toDate: string
 ): Promise<FinancialTransaction[]> {
-    const { data, error } = await supabase
-        .from('financial_transactions')
-        .select(`*, profiles:created_by(full_name)`)
-        .gte('transaction_date', fromDate)
-        .lte('transaction_date', toDate)
-        .order('transaction_date', { ascending: false })
-        .order('created_at', { ascending: false });
+    const { data, error } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+        supabase
+            .from('financial_transactions')
+            .select(`*, profiles:created_by(full_name)`)
+            .gte('transaction_date', fromDate)
+            .lte('transaction_date', toDate)
+            .order('transaction_date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: true })
+            .range(fromIdx, toIdx)
+    );
 
     if (!error && data) {
         return data.map((row: any) => ({

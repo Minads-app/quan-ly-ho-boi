@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
 import PnLReportTab from '../components/PnLReportTab';
+import { fetchAllSupabaseRows } from '../utils/financialService';
 
 type ReportTab = 'REVENUE' | 'PNL' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES' | 'BASKETBALL';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
@@ -319,20 +320,22 @@ export default function DashboardPage() {
         setLoading(true);
         const { from, to } = getDateBounds();
 
-        const query = supabase
-            .from('tickets')
-            .select(`
-                id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
-                valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by, source,
-                ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type, student_count),
-                profiles:sold_by (full_name),
-                customers:customer_id (full_name)
-            `)
-            .gte('sold_at', from + 'T00:00:00+07:00')
-            .lte('sold_at', to + 'T23:59:59+07:00')
-            .order('sold_at', { ascending: false });
-
-        const { data, error } = await query;
+        const { data, error } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('tickets')
+                .select(`
+                    id, customer_name, customer_phone, card_code, price_paid, sold_at, status,
+                    valid_from, valid_until, remaining_sessions, total_sessions, payment_method, sold_by, source,
+                    ticket_types!inner (name, category, price, lesson_class_type, lesson_schedule_type, student_count),
+                    profiles:sold_by (full_name),
+                    customers:customer_id (full_name)
+                `)
+                .gte('sold_at', from + 'T00:00:00+07:00')
+                .lte('sold_at', to + 'T23:59:59+07:00')
+                .order('sold_at', { ascending: false })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
 
         if (error) {
             console.error('Error:', error);
@@ -381,18 +384,20 @@ export default function DashboardPage() {
     async function fetchRetailItems() {
         const { from, to } = getDateBounds();
 
-        const query = supabase
-            .from('orders')
-            .select(`
-                id, created_at, payment_method, created_by,
-                profiles:created_by(full_name),
-                order_items!inner(id, quantity, subtotal, products!inner(name))
-            `)
-            .gte('created_at', from + 'T00:00:00+07:00')
-            .lte('created_at', to + 'T23:59:59+07:00')
-            .order('created_at', { ascending: false });
-
-        const { data, error } = await query;
+        const { data, error } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('orders')
+                .select(`
+                    id, created_at, payment_method, created_by,
+                    profiles:created_by(full_name),
+                    order_items!inner(id, quantity, subtotal, products!inner(name))
+                `)
+                .gte('created_at', from + 'T00:00:00+07:00')
+                .lte('created_at', to + 'T23:59:59+07:00')
+                .order('created_at', { ascending: false })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
         if (error) {
             console.error('Error fetching retail:', error);
             setRetailItems([]);
@@ -424,15 +429,19 @@ export default function DashboardPage() {
     async function fetchExpenses() {
         const { from, to } = getDateBounds();
 
-        const { data, error } = await supabase
-            .from('expenses')
-            .select(`
-                id, amount, reason, created_at,
-                profiles:created_by (full_name)
-            `)
-            .gte('created_at', from + 'T00:00:00+07:00')
-            .lte('created_at', to + 'T23:59:59+07:00')
-            .order('created_at', { ascending: false });
+        const { data, error } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('expenses')
+                .select(`
+                    id, amount, reason, created_at,
+                    profiles:created_by (full_name)
+                `)
+                .gte('created_at', from + 'T00:00:00+07:00')
+                .lte('created_at', to + 'T23:59:59+07:00')
+                .order('created_at', { ascending: false })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
 
         if (error) {
             console.error('Error fetching expenses:', error);
@@ -454,21 +463,25 @@ export default function DashboardPage() {
         setLoading(true);
         const { from, to } = getDateBounds();
 
-        const { data, error } = await supabase
-            .from('scan_logs')
-            .select(`
-                id, scanned_at, direction, success, ticket_id, device_id,
-                tickets (
-                    customer_name, customer_phone, card_code, price_paid,
-                    ticket_types (name, category, sport_type),
-                    customers:customer_id (full_name)
-                )
-            `)
-            .eq('direction', 'IN')
-            .eq('success', true)
-            .gte('scanned_at', from + 'T00:00:00+07:00')
-            .lte('scanned_at', to + 'T23:59:59+07:00')
-            .order('scanned_at', { ascending: false });
+        const { data, error } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('scan_logs')
+                .select(`
+                    id, scanned_at, direction, success, ticket_id, device_id,
+                    tickets (
+                        customer_name, customer_phone, card_code, price_paid,
+                        ticket_types (name, category, sport_type),
+                        customers:customer_id (full_name)
+                    )
+                `)
+                .eq('direction', 'IN')
+                .eq('success', true)
+                .gte('scanned_at', from + 'T00:00:00+07:00')
+                .lte('scanned_at', to + 'T23:59:59+07:00')
+                .order('scanned_at', { ascending: false })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
 
         if (error) {
             console.error('Error fetching scan logs:', error);
@@ -553,14 +566,18 @@ export default function DashboardPage() {
 
     async function fetchDailyScanMap() {
         const { from, to } = getDateBounds();
-        const { data } = await supabase
-            .from('scan_logs')
-            .select('ticket_id, scanned_at')
-            .eq('direction', 'IN')
-            .eq('success', true)
-            .gte('scanned_at', from + 'T00:00:00+07:00')
-            .lte('scanned_at', to + 'T23:59:59+07:00')
-            .order('scanned_at', { ascending: true });
+        const { data } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('scan_logs')
+                .select('id, ticket_id, scanned_at')
+                .eq('direction', 'IN')
+                .eq('success', true)
+                .gte('scanned_at', from + 'T00:00:00+07:00')
+                .lte('scanned_at', to + 'T23:59:59+07:00')
+                .order('scanned_at', { ascending: true })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
 
         if (data) {
             const map: Record<string, string> = {};
@@ -587,15 +604,16 @@ export default function DashboardPage() {
 
     // --- Computed data ---
     const dailyTickets = tickets.filter(t => t.category === 'DAILY');
+    const activeRevenueTickets = tickets.filter(t => t.status !== 'CANCELLED');
 
-    const totalTicketRevenue = tickets.reduce((s, t) => s + t.price_paid, 0);
+    const totalTicketRevenue = activeRevenueTickets.reduce((s, t) => s + t.price_paid, 0);
     const totalRetailRevenue = retailItems.reduce((s, r) => s + r.subtotal, 0);
     const totalRevenue = totalTicketRevenue + totalRetailRevenue;
 
-    const revCash = tickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CASH').reduce((s, r) => s + r.subtotal, 0);
-    const revTransfer = tickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER').reduce((s, r) => s + r.subtotal, 0);
-    const revTransferCompany = tickets.filter(t => t.payment_method === 'TRANSFER_COMPANY').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER_COMPANY').reduce((s, r) => s + r.subtotal, 0);
-    const revCard = tickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CARD').reduce((s, r) => s + r.subtotal, 0);
+    const revCash = activeRevenueTickets.filter(t => t.payment_method === 'CASH').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CASH').reduce((s, r) => s + r.subtotal, 0);
+    const revTransfer = activeRevenueTickets.filter(t => t.payment_method === 'TRANSFER').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER').reduce((s, r) => s + r.subtotal, 0);
+    const revTransferCompany = activeRevenueTickets.filter(t => t.payment_method === 'TRANSFER_COMPANY').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'TRANSFER_COMPANY').reduce((s, r) => s + r.subtotal, 0);
+    const revCard = activeRevenueTickets.filter(t => t.payment_method === 'CARD').reduce((s, t) => s + t.price_paid, 0) + retailItems.filter(r => r.payment_method === 'CARD').reduce((s, r) => s + r.subtotal, 0);
 
     // --- PRINT A4 Landscape ---
     function handlePrintReport(title: string, tableHtml: string) {
@@ -727,21 +745,21 @@ export default function DashboardPage() {
     function renderRevenueTab() {
         const { from, to } = getDateBounds();
 
-        const countDaily = tickets.filter(t => t.category === 'DAILY').length;
-        const countMultiMonthly = tickets.filter(t => t.category === 'MULTI' || t.category === 'MONTHLY').length;
-        const countLesson = tickets.filter(t => t.category === 'LESSON').length;
+        const countDaily = activeRevenueTickets.filter(t => t.category === 'DAILY').length;
+        const countMultiMonthly = activeRevenueTickets.filter(t => t.category === 'MULTI' || t.category === 'MONTHLY').length;
+        const countLesson = activeRevenueTickets.filter(t => t.category === 'LESSON').length;
         const countRetail = retailItems.reduce((s, r) => s + r.quantity, 0);
         const countExpenses = expenses.length;
 
         const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
 
         const tableHtml = `<table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
-            ${tickets.map((t, i) => {
+            ${activeRevenueTickets.map((t, i) => {
             const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
             return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
-            <tr class="total-row"><td colspan="6">TỔNG CỘNG VÉ (${tickets.length} vé)</td><td style="text-align:right">${fmt(totalTicketRevenue)}</td><td colspan="2"></td></tr>
+            <tr class="total-row"><td colspan="6">TỔNG CỘNG VÉ (${activeRevenueTickets.length} vé)</td><td style="text-align:right">${fmt(totalTicketRevenue)}</td><td colspan="2"></td></tr>
             </tbody></table>
             
             ${retailItems.length > 0 ? `
@@ -767,7 +785,7 @@ export default function DashboardPage() {
                     <div style="display:flex; justify-content:space-between; color: #f59e0b;"><span>Gói Bơi (Tháng/Lượt):</span> <span>${countMultiMonthly} vé</span></div>
                     <div style="display:flex; justify-content:space-between; color: #ec4899;"><span>Khách Học Bơi:</span> <span>${countLesson} vé</span></div>
                     <div style="display:flex; justify-content:space-between; color: #8b5cf6;"><span>Sản Phẩm Bán Lẻ:</span> <span>${countRetail} món</span></div>
-                    <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #000;"><span>TỔNG VÉ BÁN:</span> <span>${tickets.length} vé</span></div>
+                    <div style="display:flex; justify-content:space-between; border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; color: #000;"><span>TỔNG VÉ BÁN:</span> <span>${activeRevenueTickets.length} vé</span></div>
                 </div>
 
                 <div style="padding: 16px; border: 1px solid #999; flex: 1; font-weight: bold; line-height: 1.8;">
@@ -801,7 +819,7 @@ export default function DashboardPage() {
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport(`Báo cáo Doanh thu (${from} → ${to})`, tableHtml)}>🖨️ In A4</button>
                     <button className="btn btn-secondary" onClick={() => exportExcel(`doanh_thu_${from}_${to}`, ['STT', 'Loại vé', 'Khách hàng', 'SĐT', 'Mã thẻ', 'H/T Thanh toán', 'Giá bán', 'Người bán', 'Thời gian'],
-                        tickets.map((t, i) => {
+                        activeRevenueTickets.map((t, i) => {
                             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
                             return [
                                 String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.customer_phone || '', maskCardCode(t.card_code, isAdmin || false) || '',
@@ -811,7 +829,7 @@ export default function DashboardPage() {
                         })
                     )}>📊 Xuất Excel</button>
                 </div>
-                <TicketTable data={tickets} title="Danh sách Vé đã Bán" isAdmin={isAdmin} bizInfo={bizInfo} />
+                <TicketTable data={activeRevenueTickets} title="Danh sách Vé đã Bán" isAdmin={isAdmin} bizInfo={bizInfo} />
                 {retailItems.length > 0 && (
                     <div style={{ marginTop: '32px' }}>
                         <RetailTable data={retailItems} />

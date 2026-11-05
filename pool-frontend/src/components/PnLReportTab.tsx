@@ -34,6 +34,7 @@ import {
     deleteFinancialTransaction,
     applyFixedCostsForPeriod,
     getMonthsInRange,
+    fetchAllSupabaseRows,
 } from '../utils/financialService';
 
 type PnLPeriodMode = 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_QUARTER' | 'THIS_YEAR' | 'MONTH_RANGE' | 'DATE_RANGE';
@@ -238,21 +239,32 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
                 return next;
             });
 
-            // 1. Tickets sold in period
-            const { data: tData } = await supabase
-                .from('tickets')
-                .select(`id, price_paid, sold_at, status, payment_method, ticket_types!inner(name, category)`)
-                .neq('status', 'CANCELLED')
-                .gte('sold_at', `${from}T00:00:00+07:00`)
-                .lte('sold_at', `${to}T23:59:59+07:00`);
+            // 1. Tickets sold in period (all pages, only paid & non-cancelled tickets)
+            const { data: tData } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+                supabase
+                    .from('tickets')
+                    .select(`id, price_paid, sold_at, status, payment_method, ticket_types!inner(name, category)`)
+                    .neq('status', 'CANCELLED')
+                    .gt('price_paid', 0)
+                    .gte('sold_at', `${from}T00:00:00+07:00`)
+                    .lte('sold_at', `${to}T23:59:59+07:00`)
+                    .order('sold_at', { ascending: false })
+                    .order('id', { ascending: true })
+                    .range(fromIdx, toIdx)
+            );
             setTicketsData(tData || []);
 
-            // 2. Retail orders in period
-            const { data: oData } = await supabase
-                .from('orders')
-                .select(`id, created_at, payment_method, order_items!inner(id, quantity, subtotal, products!inner(name))`)
-                .gte('created_at', `${from}T00:00:00+07:00`)
-                .lte('created_at', `${to}T23:59:59+07:00`);
+            // 2. Retail orders in period (all pages)
+            const { data: oData } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+                supabase
+                    .from('orders')
+                    .select(`id, created_at, payment_method, order_items!inner(id, quantity, subtotal, products!inner(name))`)
+                    .gte('created_at', `${from}T00:00:00+07:00`)
+                    .lte('created_at', `${to}T23:59:59+07:00`)
+                    .order('created_at', { ascending: false })
+                    .order('id', { ascending: true })
+                    .range(fromIdx, toIdx)
+            );
 
             const rItems: any[] = [];
             (oData || []).forEach((order: any) => {
@@ -271,27 +283,41 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
             });
             setRetailData(rItems);
 
-            // 3. Shift cash expenses (from cashier `expenses` table)
-            const { data: expData } = await supabase
-                .from('expenses')
-                .select(`id, amount, reason, created_at, profiles:created_by(full_name)`)
-                .gte('created_at', `${from}T00:00:00+07:00`)
-                .lte('created_at', `${to}T23:59:59+07:00`)
-                .order('created_at', { ascending: false });
+            // 3. Shift cash expenses (from cashier `expenses` table - all pages)
+            const { data: expData } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+                supabase
+                    .from('expenses')
+                    .select(`id, amount, reason, created_at, profiles:created_by(full_name)`)
+                    .gte('created_at', `${from}T00:00:00+07:00`)
+                    .lte('created_at', `${to}T23:59:59+07:00`)
+                    .order('created_at', { ascending: false })
+                    .order('id', { ascending: true })
+                    .range(fromIdx, toIdx)
+            );
             setShiftExpenses(expData || []);
 
-            // 4. Coach Payroll in period (group + private check-ins)
+            // 4. Coach Payroll in period (group + private check-ins - all pages)
             const [{ data: gAtt }, { data: pCheckins }] = await Promise.all([
-                supabase
-                    .from('coach_attendances')
-                    .select('teaching_date, amount')
-                    .gte('teaching_date', from)
-                    .lte('teaching_date', to),
-                supabase
-                    .from('coach_checkin_summary')
-                    .select('checked_in_at, per_session_amount')
-                    .gte('checked_in_at', `${from}T00:00:00`)
-                    .lte('checked_in_at', `${to}T23:59:59`),
+                fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+                    supabase
+                        .from('coach_attendances')
+                        .select('id, teaching_date, amount')
+                        .gte('teaching_date', from)
+                        .lte('teaching_date', to)
+                        .order('teaching_date', { ascending: false })
+                        .order('id', { ascending: true })
+                        .range(fromIdx, toIdx)
+                ),
+                fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+                    supabase
+                        .from('coach_checkin_summary')
+                        .select('checkin_log_id, checked_in_at, per_session_amount')
+                        .gte('checked_in_at', `${from}T00:00:00`)
+                        .lte('checked_in_at', `${to}T23:59:59`)
+                        .order('checked_in_at', { ascending: false })
+                        .order('checkin_log_id', { ascending: true })
+                        .range(fromIdx, toIdx)
+                ),
             ]);
 
             let coachSum = 0;
