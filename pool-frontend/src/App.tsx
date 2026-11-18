@@ -1,7 +1,30 @@
-import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, Link } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { ThemeToggleButton } from './components/ui';
+import { fetchBusinessSettings, hasPermission } from './utils/helpers';
+import type { PermissionsMatrix } from './types';
+import {
+  AwardIcon,
+  BanknoteIcon,
+  BoxIcon,
+  ChartBarIcon,
+  GraduationCapIcon,
+  KeyIcon,
+  LogOutIcon,
+  MenuIcon,
+  PanelLeftIcon,
+  QrScanIcon,
+  ReceiptIcon,
+  SettingsIcon,
+  ShieldUserIcon,
+  TicketIcon,
+  TrendingUpIcon,
+  UsersIcon,
+  WalletIcon,
+} from './components/ui/Icons';
 
 import LoginPage from './pages/LoginPage';
 import POSPage from './pages/POSPage';
@@ -19,47 +42,103 @@ import CoachDashboardPage from './pages/CoachDashboardPage';
 import CoachPayrollPage from './pages/CoachPayrollPage';
 import './index.css';
 
+interface NavItemConfig {
+  to: string;
+  label: string;
+  icon: ReactNode;
+  kbd?: string;
+  visible: boolean;
+}
+
+interface NavGroupConfig {
+  title: string;
+  items: NavItemConfig[];
+}
+
+const ROUTE_TITLES: Record<string, string> = {
+  '/pos': 'Bán Vé & Bán Hàng (POS)',
+  '/gate': 'Soát Vé Cổng Kiểm Soát',
+  '/customers': 'Khách Hàng & Gói Thẻ',
+  '/dashboard': 'Báo Cáo Hoạt Động',
+  '/analytics': 'Biểu Đồ Phân Tích',
+  '/inventory': 'Quản Lý Kho Hàng',
+  '/orders': 'Danh Sách Hóa Đơn',
+  '/cash': 'Quỹ & Phiếu Chi',
+  '/staff': 'Tài Khoản Nhân Sự',
+  '/settings': 'Cài Đặt Hệ Thống',
+  '/coaches': 'Quản Lý Huấn Luyện Viên',
+  '/coach-payroll': 'Bảng Lương HLV',
+  '/my-students': 'Học Viên Của Tôi',
+};
+
+function getInitialCollapsed(): boolean {
+  try {
+    return localStorage.getItem('pool_sidebar_collapsed') === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function getInitials(name?: string | null): string {
+  if (!name) return 'NV';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function AppRoutes() {
   const { user, profile, loading, signOut } = useAuth();
+  const location = useLocation();
   const [bizName, setBizName] = useState('Vé Bơi');
   const [bizLogo, setBizLogo] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialCollapsed);
 
   // Change password state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+
+  function toggleSidebarCollapse() {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('pool_sidebar_collapsed', String(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  }
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (newPassword.length < 6) return alert('Mật khẩu phải từ 6 ký tự trở lên');
+    setPasswordFeedback(null);
+    if (newPassword.length < 6) {
+      setPasswordFeedback({ type: 'error', text: 'Mật khẩu phải từ 6 ký tự trở lên.' });
+      return;
+    }
     setIsChangingPassword(true);
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setIsChangingPassword(false);
     if (error) {
-      alert('Lỗi đổi mật khẩu: ' + error.message);
+      setPasswordFeedback({ type: 'error', text: 'Lỗi đổi mật khẩu: ' + error.message });
     } else {
-      alert('Đổi mật khẩu thành công!');
-      setShowPasswordModal(false);
+      setPasswordFeedback({ type: 'success', text: 'Đổi mật khẩu thành công!' });
       setNewPassword('');
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordFeedback(null);
+      }, 900);
     }
   }
 
   useEffect(() => {
     async function loadBiz() {
-      const { data } = await supabase.from('system_settings').select('key, value').in('key', ['business_name', 'business_logo']);
-      if (data) {
-        data.forEach(r => {
-          let val = '';
-          try {
-            val = typeof r.value === 'string' ? r.value.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(r.value)).replace(/^"|"$/g, '');
-          } catch {
-            val = typeof r.value === 'string' ? r.value : String(r.value);
-          }
-          if (r.key === 'business_name' && val) setBizName(val);
-          if (r.key === 'business_logo' && val) setBizLogo(val);
-        });
-      }
+      const info = await fetchBusinessSettings();
+      if (info.business_name) setBizName(info.business_name);
+      if (info.business_logo) setBizLogo(info.business_logo);
     }
     loadBiz();
   }, []);
@@ -68,7 +147,7 @@ function AppRoutes() {
     return (
       <div className="app-loading">
         <div className="spinner"></div>
-        <p>Đang tải...</p>
+        <p>Đang tải hệ thống...</p>
       </div>
     );
   }
@@ -77,254 +156,241 @@ function AppRoutes() {
     return <LoginPage />;
   }
 
-  // Helper check for admin bypass or specific module view access
-  const canView = (module: string) => {
-    try {
-      if (profile.role === 'ADMIN') return true;
-      const perms = profile.permissions as unknown as Record<string, { view?: boolean } | undefined>;
-      // Nếu chưa có permissions trong DB → cho xem POS mặc định
-      if (!perms || typeof perms !== 'object') {
-        return module === 'pos'; // Mặc định: chỉ cho xem POS
-      }
-      if (!perms[module] || typeof perms[module] !== 'object') {
-        return module === 'pos'; // Module chưa thiết lập → POS mặc định true
-      }
-      return !!perms[module].view;
-    } catch {
-      return module === 'pos';
-    }
-  };
+  const canView = (module: keyof PermissionsMatrix) => hasPermission(profile, module, 'view');
+
+  const navGroups: NavGroupConfig[] = [
+    {
+      title: 'Quầy & Cổng',
+      items: [
+        { to: '/pos', label: 'Bán Vé & POS', icon: <TicketIcon size={18} />, kbd: 'F4', visible: canView('pos') },
+        { to: '/gate', label: 'Soát Vé Cổng', icon: <QrScanIcon size={18} />, visible: canView('gate') },
+      ],
+    },
+    {
+      title: 'Khách & Đào tạo',
+      items: [
+        { to: '/customers', label: 'Khách Hàng', icon: <UsersIcon size={18} />, visible: canView('customers') },
+        { to: '/coaches', label: 'Quản lý HLV', icon: <AwardIcon size={18} />, visible: profile.role === 'ADMIN' },
+        { to: '/coach-payroll', label: 'Lương HLV', icon: <BanknoteIcon size={18} />, visible: profile.role === 'ADMIN' },
+        { to: '/my-students', label: 'Học viên của tôi', icon: <GraduationCapIcon size={18} />, visible: profile.role === 'COACH' },
+      ],
+    },
+    {
+      title: 'Tài chính & Kho',
+      items: [
+        { to: '/dashboard', label: 'Báo Cáo', icon: <ChartBarIcon size={18} />, visible: canView('reports') },
+        { to: '/analytics', label: 'Biểu Đồ', icon: <TrendingUpIcon size={18} />, visible: canView('reports') },
+        { to: '/orders', label: 'Hóa Đơn', icon: <ReceiptIcon size={18} />, visible: profile.role === 'ADMIN' },
+        { to: '/cash', label: 'Quỹ & Phiếu Chi', icon: <WalletIcon size={18} />, visible: Boolean(profile.can_create_expense || profile.role === 'ADMIN') },
+        { to: '/inventory', label: 'Quản lý Kho', icon: <BoxIcon size={18} />, visible: Boolean(profile.can_manage_inventory || profile.role === 'ADMIN') },
+      ],
+    },
+    {
+      title: 'Hệ thống',
+      items: [
+        { to: '/staff', label: 'Nhân Sự', icon: <ShieldUserIcon size={18} />, visible: canView('staff') },
+        { to: '/settings', label: 'Cài Đặt', icon: <SettingsIcon size={18} />, visible: canView('settings') },
+      ],
+    },
+  ];
+
+  const currentPageTitle = ROUTE_TITLES[location.pathname] || bizName;
 
   return (
     <div className="app-layout">
-      {/* Mobile Header */}
-      <div className="mobile-header">
-        <button className="menu-btn" onClick={() => setIsSidebarOpen(true)}>
-          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
-        </button>
-        <span className="mobile-brand">{bizName}</span>
-      </div>
-
       {/* Sidebar Overlay for Mobile */}
       {isSidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)}></div>
       )}
 
       {/* Sidebar */}
-      <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-brand" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '16px 0' }}>
-          {bizLogo ? (
-            <img src={bizLogo} alt="Logo" style={{ height: '64px', width: 'auto', maxWidth: '80%', objectFit: 'contain', borderRadius: '4px' }} />
-          ) : (
-            <span className="brand-icon" style={{ fontSize: '32px' }}>🏊</span>
+      <aside className={`sidebar ${isSidebarOpen ? 'open' : ''} ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-brand" title={bizName}>
+          <div className="brand-logo-wrap">
+            {bizLogo ? (
+              <img src={bizLogo} alt="Logo" className="brand-logo-img" />
+            ) : (
+              <span className="brand-icon">🏊</span>
+            )}
+          </div>
+          {!isSidebarCollapsed && (
+            <div className="brand-meta">
+              <span className="brand-text">{bizName}</span>
+              <span className="brand-subtext">Minads Pool OS</span>
+            </div>
           )}
-          <span className="brand-text" style={{ fontSize: bizName.length > 15 ? '14px' : '16px', textAlign: 'center', lineHeight: 1.3 }}>{bizName}</span>
         </div>
 
         <nav className="sidebar-nav">
-          {/* Bán Vé */}
-          {canView('pos') && (
-            <NavLink to="/pos" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">🎫</span>
-              <span>Bán Vé</span>
-            </NavLink>
-          )}
-
-          {/* Soát Vé */}
-          {canView('gate') && (
-            <NavLink to="/gate" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">🔍</span>
-              <span>Soát Vé</span>
-            </NavLink>
-          )}
-
-          {canView('customers') && (
-            <NavLink to="/customers" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">👥</span>
-              <span>Khách Hàng</span>
-            </NavLink>
-          )}
-
-          {canView('reports') && (
-            <>
-              <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">📊</span>
-                <span>Báo Cáo</span>
-              </NavLink>
-              <NavLink to="/analytics" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">📈</span>
-                <span>Biểu Đồ</span>
-              </NavLink>
-            </>
-          )}
-
-          {/* New Retail & Cash Modules */}
-          {(profile.can_manage_inventory || profile.role === 'ADMIN') && (
-            <NavLink to="/inventory" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">📦</span>
-              <span>Quản lý Kho</span>
-            </NavLink>
-          )}
-
-          {profile.role === 'ADMIN' && (
-            <NavLink to="/orders" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">🧾</span>
-              <span>Hóa Đơn</span>
-            </NavLink>
-          )}
-
-          {(profile.can_create_expense || profile.role === 'ADMIN') && (
-            <NavLink to="/cash" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">💵</span>
-              <span>Quỹ & Phiếu Chi</span>
-            </NavLink>
-          )}
-
-          {/* Management Menu */}
-          {canView('staff') && (
-            <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">👥</span>
-              <span>Nhân Sự</span>
-            </NavLink>
-          )}
-
-          {canView('settings') && (
-            <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">⚙️</span>
-              <span>Cài Đặt</span>
-            </NavLink>
-          )}
-
-          {/* Coach Menu */}
-          {profile.role === 'ADMIN' && (
-            <>
-              <NavLink to="/coaches" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">🏊</span>
-                <span>Quản lý HLV</span>
-              </NavLink>
-              <NavLink to="/coach-payroll" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-                <span className="nav-icon">💰</span>
-                <span>Lương HLV</span>
-              </NavLink>
-            </>
-          )}
-          {profile.role === 'COACH' && (
-            <NavLink to="/my-students" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setIsSidebarOpen(false)}>
-              <span className="nav-icon">🧑‍🏫</span>
-              <span>Học viên của tôi</span>
-            </NavLink>
-          )}
+          {navGroups.map(group => {
+            const visibleItems = group.items.filter(item => item.visible);
+            if (visibleItems.length === 0) return null;
+            return (
+              <div key={group.title} className="nav-group">
+                <div className="nav-group-label">{group.title}</div>
+                {visibleItems.map(item => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    title={isSidebarCollapsed ? item.label : undefined}
+                    className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                    onClick={() => setIsSidebarOpen(false)}
+                  >
+                    <span className="nav-icon">{item.icon}</span>
+                    <span className="nav-label">{item.label}</span>
+                    {item.kbd && <span className="nav-kbd">{item.kbd}</span>}
+                  </NavLink>
+                ))}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">
-          <div className="user-info">
-            <div className="user-name">{profile.full_name}</div>
-            <div className="user-role">{profile.role}</div>
-            {profile.role === 'ADMIN' && (
-              <button
-                className="btn btn-ghost"
-                style={{ marginTop: '8px', padding: '4px 8px', fontSize: '11px', width: '100%' }}
-                onClick={() => setShowPasswordModal(true)}
-              >
-                🔑 Đổi mật khẩu
-              </button>
-            )}
+          <div className="sidebar-user-card">
+            <div className="user-avatar">{getInitials(profile.full_name)}</div>
+            <div className="user-info">
+              <div className="user-name">{profile.full_name}</div>
+              <div className="user-role">{profile.role}</div>
+            </div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={signOut}>
-            Đăng xuất
-          </button>
 
-          {/* Copyright Info */}
-          <div className="copyright-info" style={{
-            marginTop: '8px',
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-            textAlign: 'center',
-            borderTop: '1px dotted #2a2e3b',
-            paddingTop: '12px'
-          }}>
-            &copy; {new Date().getFullYear()} <strong>Minads Soft</strong><br />
-            All rights reserved.
+          <div className="sidebar-footer-actions">
+            <button
+              type="button"
+              className="sidebar-action-btn"
+              title="Đổi mật khẩu cá nhân"
+              onClick={() => {
+                setNewPassword('');
+                setPasswordFeedback(null);
+                setShowPasswordModal(true);
+              }}
+            >
+              <KeyIcon size={14} />
+              <span>Mật khẩu</span>
+            </button>
+            <button
+              type="button"
+              className="sidebar-action-btn"
+              title="Đăng xuất"
+              onClick={signOut}
+            >
+              <LogOutIcon size={14} />
+              <span>Đăng xuất</span>
+            </button>
+          </div>
+
+          <div className="copyright-info">
+            &copy; {new Date().getFullYear()} <strong>Minads Soft</strong>
           </div>
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="main-content">
-        <Routes>
-          {/* Default POS Route for anyone logged in (Gate keepers get redirected internally or UI is restricted) */}
-          <Route path="/pos" element={
-            canView('pos') ? <POSPage /> : <Navigate to="/gate" />
-          } />
+      {/* Main Column: Top Bar + Route Content */}
+      <div className="app-main-wrap">
+        <header className="app-topbar">
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="topbar-icon-btn mobile-menu-btn"
+              onClick={() => setIsSidebarOpen(true)}
+              aria-label="Mở menu"
+            >
+              <MenuIcon size={18} />
+            </button>
+            <button
+              type="button"
+              className="topbar-icon-btn desktop-collapse-btn"
+              onClick={toggleSidebarCollapse}
+              title={isSidebarCollapsed ? 'Mở rộng Sidebar' : 'Thu gọn Sidebar'}
+              aria-label={isSidebarCollapsed ? 'Mở rộng Sidebar' : 'Thu gọn Sidebar'}
+            >
+              <PanelLeftIcon size={17} />
+            </button>
+            <span className="topbar-title">{currentPageTitle}</span>
+          </div>
 
-          <Route path="/customers" element={
-            canView('customers') ? <CustomerPage /> : <Navigate to="/pos" />
-          } />
+          <div className="topbar-right">
+            {canView('pos') && location.pathname !== '/pos' && (
+              <Link to="/pos" className="topbar-quick-link">
+                <TicketIcon size={15} />
+                <span>Bán Vé</span>
+              </Link>
+            )}
+            {canView('gate') && location.pathname !== '/gate' && (
+              <Link to="/gate" className="topbar-quick-link">
+                <QrScanIcon size={15} />
+                <span>Soát Vé</span>
+              </Link>
+            )}
+            <ThemeToggleButton />
+          </div>
+        </header>
 
-          {/* Gate Scan */}
-          <Route path="/gate" element={
-            canView('gate') ? <GateCheckPage /> : <Navigate to="/pos" />
-          } />
+        <main className="main-content">
+          <Routes>
+            <Route path="/pos" element={canView('pos') ? <POSPage /> : <Navigate to="/gate" />} />
+            <Route path="/customers" element={canView('customers') ? <CustomerPage /> : <Navigate to="/pos" />} />
+            <Route path="/gate" element={canView('gate') ? <GateCheckPage /> : <Navigate to="/pos" />} />
+            <Route path="/dashboard" element={canView('reports') ? <DashboardPage /> : <Navigate to="/pos" />} />
+            <Route path="/analytics" element={canView('reports') ? <AnalyticsPage /> : <Navigate to="/pos" />} />
+            <Route path="/staff" element={canView('staff') ? <StaffPage /> : <Navigate to="/pos" />} />
+            <Route path="/settings" element={canView('settings') ? <SettingsPage /> : <Navigate to="/pos" />} />
+            <Route
+              path="/inventory"
+              element={profile.can_manage_inventory || profile.role === 'ADMIN' ? <InventoryPage /> : <Navigate to="/pos" />}
+            />
+            <Route
+              path="/cash"
+              element={profile.can_create_expense || profile.role === 'ADMIN' ? <CashPage /> : <Navigate to="/pos" />}
+            />
+            <Route path="/orders" element={profile.role === 'ADMIN' ? <OrdersPage /> : <Navigate to="/pos" />} />
+            <Route path="/coaches" element={profile.role === 'ADMIN' ? <CoachManagementPage /> : <Navigate to="/pos" />} />
+            <Route path="/coach-payroll" element={profile.role === 'ADMIN' ? <CoachPayrollPage /> : <Navigate to="/pos" />} />
+            <Route
+              path="/my-students"
+              element={profile.role === 'COACH' || profile.role === 'ADMIN' ? <CoachDashboardPage /> : <Navigate to="/pos" />}
+            />
 
-          {/* Reports & Analytics */}
-          <Route path="/dashboard" element={
-            canView('reports') ? <DashboardPage /> : <Navigate to="/pos" />
-          } />
-          <Route path="/analytics" element={
-            canView('reports') ? <AnalyticsPage /> : <Navigate to="/pos" />
-          } />
-
-          {/* Staff & Settings */}
-          <Route path="/staff" element={
-            canView('staff') ? <StaffPage /> : <Navigate to="/pos" />
-          } />
-          <Route path="/settings" element={
-            canView('settings') ? <SettingsPage /> : <Navigate to="/pos" />
-          } />
-
-          {/* Inventory & Cash */}
-          <Route path="/inventory" element={
-            profile.can_manage_inventory || profile.role === 'ADMIN' ? <InventoryPage /> : <Navigate to="/pos" />
-          } />
-          <Route path="/cash" element={
-            profile.can_create_expense || profile.role === 'ADMIN' ? <CashPage /> : <Navigate to="/pos" />
-          } />
-          <Route path="/orders" element={
-            profile.role === 'ADMIN' ? <OrdersPage /> : <Navigate to="/pos" />
-          } />
-
-          {/* Coach Routes */}
-          <Route path="/coaches" element={
-            profile.role === 'ADMIN' ? <CoachManagementPage /> : <Navigate to="/pos" />
-          } />
-          <Route path="/coach-payroll" element={
-            profile.role === 'ADMIN' ? <CoachPayrollPage /> : <Navigate to="/pos" />
-          } />
-          <Route path="/my-students" element={
-            (profile.role === 'COACH' || profile.role === 'ADMIN') ? <CoachDashboardPage /> : <Navigate to="/pos" />
-          } />
-
-          {/* Mặc định Redirect */}
-          <Route path="*" element={
-            <Navigate to={
-              profile.role === 'COACH' ? "/my-students" :
-              canView('reports') ? "/dashboard" :
-                canView('gate') ? "/gate" :
-                  canView('pos') ? "/pos" : "/pos"
-            } />
-          } />
-        </Routes>
-      </main>
+            <Route
+              path="*"
+              element={
+                <Navigate
+                  to={
+                    profile.role === 'COACH'
+                      ? '/my-students'
+                      : canView('reports')
+                        ? '/dashboard'
+                        : canView('gate')
+                          ? '/gate'
+                          : '/pos'
+                  }
+                />
+              }
+            />
+          </Routes>
+        </main>
+      </div>
 
       {/* Change Password Modal */}
       {showPasswordModal && (
-        <div className="modal-overlay">
-          <div className="modal-card" style={{ maxWidth: '400px' }}>
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (!isChangingPassword) {
+              setNewPassword('');
+              setPasswordFeedback(null);
+              setShowPasswordModal(false);
+            }
+          }}
+        >
+          <div className="modal-card" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
             <h2>Đổi mật khẩu</h2>
+            {passwordFeedback && (
+              <div className={`alert ${passwordFeedback.type === 'error' ? 'alert-error' : 'alert-success'}`}>
+                {passwordFeedback.text}
+              </div>
+            )}
             <form onSubmit={handleChangePassword}>
               <div className="form-group">
                 <label>Mật khẩu mới</label>
@@ -335,14 +401,19 @@ function AppRoutes() {
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="Nhập ít nhất 6 ký tự"
+                  autoFocus
                 />
               </div>
-              <div className="modal-actions" style={{ marginTop: '24px' }}>
+              <div className="modal-actions" style={{ marginTop: '20px' }}>
                 <button
                   type="button"
                   className="btn btn-ghost"
                   style={{ flex: 1 }}
-                  onClick={() => setShowPasswordModal(false)}
+                  onClick={() => {
+                    setNewPassword('');
+                    setPasswordFeedback(null);
+                    setShowPasswordModal(false);
+                  }}
                   disabled={isChangingPassword}
                 >
                   Hủy
@@ -366,10 +437,12 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }

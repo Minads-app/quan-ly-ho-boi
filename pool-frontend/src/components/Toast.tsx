@@ -47,10 +47,10 @@ export const toast = {
 
 // ===== STYLES =====
 const TOAST_COLORS: Record<ToastType, { bg: string; border: string; icon: string; iconBg: string; accent: string }> = {
-    success: { bg: '#f0fdf4', border: '#86efac', icon: '✅', iconBg: '#dcfce7', accent: '#16a34a' },
-    error: { bg: '#fef2f2', border: '#fca5a5', icon: '❌', iconBg: '#fee2e2', accent: '#dc2626' },
-    warning: { bg: '#fffbeb', border: '#fcd34d', icon: '⚠️', iconBg: '#fef3c7', accent: '#d97706' },
-    info: { bg: '#eff6ff', border: '#93c5fd', icon: 'ℹ️', iconBg: '#dbeafe', accent: '#2563eb' },
+    success: { bg: 'var(--bg-card)', border: '#10b981', icon: '✅', iconBg: 'var(--accent-green-soft)', accent: '#10b981' },
+    error: { bg: 'var(--bg-card)', border: '#ef4444', icon: '❌', iconBg: 'var(--accent-red-soft)', accent: '#ef4444' },
+    warning: { bg: 'var(--bg-card)', border: '#f59e0b', icon: '⚠️', iconBg: 'var(--accent-orange-soft)', accent: '#f59e0b' },
+    info: { bg: 'var(--bg-card)', border: '#0284c7', icon: 'ℹ️', iconBg: 'var(--accent-blue-soft)', accent: '#0284c7' },
 };
 
 const CONFIRM_COLORS: Record<string, { btn: string; btnHover: string }> = {
@@ -104,11 +104,11 @@ function ToastItemComponent({ item, onClose }: { item: ToastItem; onClose: () =>
                 {colors.icon}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a', marginBottom: item.message ? '4px' : 0 }}>
+                <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', marginBottom: item.message ? '4px' : 0 }}>
                     {item.title}
                 </div>
                 {item.message && (
-                    <div style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
                         {item.message}
                     </div>
                 )}
@@ -156,9 +156,10 @@ function ConfirmModal({ options, onResolve }: { options: ConfirmOptions; onResol
         }} onClick={() => resolve(false)}>
             <div
                 style={{
-                    background: '#fff', borderRadius: '20px', padding: '0',
+                    background: 'var(--bg-card)', borderRadius: '20px', padding: '0',
                     width: '420px', maxWidth: '92vw',
-                    boxShadow: '0 25px 60px rgba(0,0,0,0.2)',
+                    border: '1px solid var(--border-color)',
+                    boxShadow: 'var(--shadow-lg)',
                     animation: closing ? 'confirmScaleOut 0.2s ease forwards' : 'confirmScaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
                     overflow: 'hidden',
                 }}
@@ -166,34 +167,34 @@ function ConfirmModal({ options, onResolve }: { options: ConfirmOptions; onResol
             >
                 {/* Header */}
                 <div style={{
-                    background: 'linear-gradient(135deg, #f8fafc, #e2e8f0)',
+                    background: 'var(--bg-subtle)',
                     padding: '28px 28px 20px', textAlign: 'center',
-                    borderBottom: '1px solid #e2e8f0',
+                    borderBottom: '1px solid var(--border-color)',
                 }}>
                     <div style={{ fontSize: '44px', marginBottom: '12px', lineHeight: 1 }}>
                         {options.icon || (colorKey === 'danger' ? '🛑' : colorKey === 'warning' ? '⚡' : '❓')}
                     </div>
-                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>
+                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
                         {options.title}
                     </h3>
                 </div>
 
                 {/* Body */}
                 <div style={{ padding: '20px 28px' }}>
-                    <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#475569', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                    <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
                         {options.message}
                     </p>
 
                     {options.details && options.details.length > 0 && (
                         <div style={{
-                            background: '#f8fafc', borderRadius: '12px', padding: '14px 16px',
-                            border: '1px solid #e2e8f0',
+                            background: 'var(--bg-subtle)', borderRadius: '12px', padding: '14px 16px',
+                            border: '1px solid var(--border-color)',
                             display: 'flex', flexDirection: 'column', gap: '8px',
                         }}>
                             {options.details.map((d, i) => (
                                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                                    <span style={{ color: '#64748b' }}>{d.label}</span>
-                                    <strong style={{ color: '#0f172a' }}>{d.value}</strong>
+                                    <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
+                                    <strong style={{ color: 'var(--text-primary)' }}>{d.value}</strong>
                                 </div>
                             ))}
                         </div>
@@ -208,11 +209,9 @@ function ConfirmModal({ options, onResolve }: { options: ConfirmOptions; onResol
                         onClick={() => resolve(false)}
                         style={{
                             flex: 1, padding: '13px', fontSize: '14px', fontWeight: 600,
-                            background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0',
+                            background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)',
                             borderRadius: '12px', cursor: 'pointer', transition: 'all 0.15s',
                         }}
-                        onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; }}
                     >
                         {options.cancelText || 'Hủy (ESC)'}
                     </button>

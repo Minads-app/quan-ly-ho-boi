@@ -1,8 +1,9 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import PnLReportTab from '../components/PnLReportTab';
+import { PageHeader, SegmentedTabs, StatCard } from '../components/ui';
+import { fetchBusinessSettings, getTodayLocalVN } from '../utils/helpers';
 
 interface Expense {
     id: string;
@@ -28,6 +29,7 @@ export default function CashPage() {
 
     // Modal state
     const [showModal, setShowModal] = useState(false);
+    const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
     const [amount, setAmount] = useState<number | ''>('');
     const [reason, setReason] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -41,15 +43,17 @@ export default function CashPage() {
 
     async function fetchCashData() {
         setLoading(true);
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
+        const todayStr = getTodayLocalVN();
+        const fromIso = `${todayStr}T00:00:00+07:00`;
+        const toIso = `${todayStr}T23:59:59.999+07:00`;
 
         try {
             // 1. Fetch Expenses (Chi) for today
             const { data: expData } = await supabase
                 .from('expenses')
                 .select('*, profiles(full_name)')
-                .gte('created_at', startOfDay.toISOString())
+                .gte('created_at', fromIso)
+                .lte('created_at', toIso)
                 .order('created_at', { ascending: false });
 
             if (expData) {
@@ -57,36 +61,42 @@ export default function CashPage() {
                 setTotalChi(expData.reduce((sum, e) => sum + e.amount, 0));
             }
 
-            // 2. Fetch Tickets Revenue (Thu) for today (Cash only)
-            const { data: ticketsData } = await supabase
-                .from('tickets')
-                .select('price_paid')
-                .gte('created_at', startOfDay.toISOString());
+            // 2. Fetch Cash Revenue (Thu tiền mặt thực tế trong ngày: Vé CASH không hủy + Bán lẻ CASH)
+            const [{ data: ticketsData }, { data: retailOrdersData }] = await Promise.all([
+                supabase
+                    .from('tickets')
+                    .select('price_paid')
+                    .eq('payment_method', 'CASH')
+                    .neq('status', 'CANCELLED')
+                    .gt('price_paid', 0)
+                    .gte('sold_at', fromIso)
+                    .lte('sold_at', toIso),
+                supabase
+                    .from('orders')
+                    .select('id, order_items!inner(subtotal, product_id)')
+                    .eq('payment_method', 'CASH')
+                    .not('order_items.product_id', 'is', null)
+                    .gte('created_at', fromIso)
+                    .lte('created_at', toIso)
+            ]);
 
-            if (ticketsData) {
-                setTotalThu(ticketsData.reduce((sum, t) => sum + (t.price_paid || 0), 0));
+            const cashTicketSum = (ticketsData || []).reduce((sum, t) => sum + (t.price_paid || 0), 0);
+            let cashRetailSum = 0;
+            for (const ord of (retailOrdersData || []) as Array<{ order_items?: Array<{ subtotal: number; product_id: string | null }> }>) {
+                for (const item of ord.order_items || []) {
+                    if (item.product_id) cashRetailSum += item.subtotal || 0;
+                }
             }
+            setTotalThu(cashTicketSum + cashRetailSum);
 
             if (isAdmin) {
-                const { data: sData } = await supabase.from('system_settings').select('key, value');
-                if (sData) {
-                    const info: Record<string, string> = {};
-                    sData.forEach(r => {
-                        let val = r.value;
-                        try {
-                            val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, '');
-                        } catch {
-                            val = typeof val === 'string' ? val : String(val);
-                        }
-                        info[r.key] = val;
-                    });
-                    setBizInfo({
-                        name: info.business_name || 'Hệ Thống Vé Bơi',
-                        address: info.business_address || '',
-                        phone: info.business_phone || '',
-                        logo: info.business_logo || '',
-                    });
-                }
+                const info = await fetchBusinessSettings();
+                setBizInfo({
+                    name: info.business_name || 'Hệ Thống Vé Bơi',
+                    address: info.business_address || '',
+                    phone: info.business_phone || '',
+                    logo: info.business_logo || '',
+                });
             }
         } catch (e) {
             console.error(e);
@@ -100,9 +110,27 @@ export default function CashPage() {
     }, []);
 
     function openExpenseModal() {
+        setEditingExpense(null);
         setAmount('');
         setReason('');
         setShowModal(true);
+    }
+
+    function openEditExpenseModal(exp: Expense) {
+        setEditingExpense(exp);
+        setAmount(exp.amount);
+        setReason(exp.reason);
+        setShowModal(true);
+    }
+
+    async function handleDeleteExpense(exp: Expense) {
+        if (!confirm(`Bạn có chắc muốn xóa phiếu chi "${exp.reason}" (${exp.amount.toLocaleString('vi-VN')}đ)?`)) return;
+        const { error } = await supabase.from('expenses').delete().eq('id', exp.id);
+        if (error) {
+            alert('Lỗi khi xóa phiếu chi: ' + error.message);
+        } else {
+            fetchCashData();
+        }
     }
 
     async function handleSaveExpense(e: React.FormEvent) {
@@ -115,26 +143,43 @@ export default function CashPage() {
             return;
         }
 
-        if (chiAmount > tonTienMat) {
-            alert('Lỗi: Số tiền muốn chi vượt quá số tiền mặt tồn quỹ hiện tại trong ca! Không thể lập phiếu chi.');
+        const availableCash = editingExpense ? tonTienMat + editingExpense.amount : tonTienMat;
+        if (chiAmount > availableCash) {
+            alert('Lỗi: Số tiền muốn chi vượt quá số tiền mặt tồn quỹ hiện tại trong ca! Không thể lưu phiếu chi.');
             return;
         }
 
         setIsSaving(true);
-        const { error } = await supabase.from('expenses').insert([
-            {
-                amount: chiAmount,
-                reason: reason,
-                created_by: profile.id,
-            },
-        ]);
+        if (editingExpense) {
+            const { error } = await supabase
+                .from('expenses')
+                .update({ amount: chiAmount, reason: reason.trim() })
+                .eq('id', editingExpense.id);
 
-        if (error) {
-            alert('Lỗi khi lập phiếu chi: ' + error.message);
+            if (error) {
+                alert('Lỗi khi cập nhật phiếu chi: ' + error.message);
+            } else {
+                alert('Cập nhật phiếu chi thành công!');
+                setShowModal(false);
+                setEditingExpense(null);
+                fetchCashData();
+            }
         } else {
-            alert('Lập phiếu chi thành công!');
-            setShowModal(false);
-            fetchCashData();
+            const { error } = await supabase.from('expenses').insert([
+                {
+                    amount: chiAmount,
+                    reason: reason.trim(),
+                    created_by: profile.id,
+                },
+            ]);
+
+            if (error) {
+                alert('Lỗi khi lập phiếu chi: ' + error.message);
+            } else {
+                alert('Lập phiếu chi thành công!');
+                setShowModal(false);
+                fetchCashData();
+            }
         }
         setIsSaving(false);
     }
@@ -205,68 +250,47 @@ export default function CashPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                    <h1>💵 Quản lý Quỹ & Thu - Chi</h1>
-                    <p>
-                        {activeMode === 'SHIFT_CASH'
-                            ? 'Theo dõi luồng tiền mặt tại quầy trong ca làm việc hôm nay'
-                            : 'Hạch toán Thu khác, Định phí, Biến phí (kể cả quá khứ) & Báo cáo KQKD (Chỉ Admin)'}
-                    </p>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    {isAdmin && (
-                        <div style={{ display: 'flex', background: 'var(--bg-hover)', padding: '4px', borderRadius: '10px', gap: '4px' }}>
-                            <button
-                                className={`btn ${activeMode === 'SHIFT_CASH' ? 'btn-primary' : 'btn-ghost'} btn-sm`}
-                                onClick={() => setActiveMode('SHIFT_CASH')}
-                            >
-                                💵 Quỹ Ca Hôm Nay
+            <PageHeader
+                title="Quỹ & Thu - Chi"
+                subtitle={
+                    activeMode === 'SHIFT_CASH'
+                        ? 'Theo dõi luồng tiền mặt tại quầy trong ca làm việc hôm nay'
+                        : 'Hạch toán Thu khác, Định phí, Biến phí (kể cả quá khứ) & Báo cáo KQKD (Chỉ Admin)'
+                }
+                actions={
+                    <>
+                        {isAdmin && (
+                            <SegmentedTabs
+                                size="sm"
+                                tabs={[
+                                    { key: 'SHIFT_CASH', label: 'Quỹ Ca Hôm Nay', icon: '💵' },
+                                    { key: 'ADMIN_ACCOUNTING', label: 'Hạch Toán KQKD & Định Phí', icon: '📊' },
+                                ]}
+                                activeKey={activeMode}
+                                onChange={(k) => setActiveMode(k as 'SHIFT_CASH' | 'ADMIN_ACCOUNTING')}
+                            />
+                        )}
+                        {activeMode === 'SHIFT_CASH' && (
+                            <button type="button" className="btn btn-primary" onClick={openExpenseModal}>
+                                ✍️ Lập Phiếu Chi Tại Quầy
                             </button>
-                            <button
-                                className={`btn ${activeMode === 'ADMIN_ACCOUNTING' ? 'btn-primary' : 'btn-ghost'} btn-sm`}
-                                onClick={() => setActiveMode('ADMIN_ACCOUNTING')}
-                            >
-                                📊 Hạch Toán KQKD & Định Phí (Admin)
-                            </button>
-                        </div>
-                    )}
-
-                    {activeMode === 'SHIFT_CASH' && (
-                        <button className="btn btn-primary" onClick={openExpenseModal}>
-                            ✍️ Lập Phiếu Chi Tại Quầy
-                        </button>
-                    )}
-                </div>
-            </div>
+                        )}
+                    </>
+                }
+            />
 
             {isAdmin && activeMode === 'ADMIN_ACCOUNTING' ? (
-                <div style={{ marginTop: '16px' }}>
-                    <PnLReportTab bizInfo={bizInfo} onPrintReport={handlePrintReport} />
-                </div>
+                <PnLReportTab bizInfo={bizInfo} onPrintReport={handlePrintReport} />
             ) : (
                 <>
-                    <div className="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginTop: '24px' }}>
-                        <div className="stat-card" style={{ borderLeft: '4px solid #10b981', padding: '16px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                            <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Tổng Thu (Hôm nay)</h3>
-                            <div className="value" style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981', margin: '4px 0' }}>{totalThu.toLocaleString('vi-VN')} ₫</div>
-                            <p className="trend" style={{ opacity: 0.8, fontSize: '12px' }}>Tiền bán vé + đồ</p>
-                        </div>
-                        <div className="stat-card" style={{ borderLeft: '4px solid #ef4444', padding: '16px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                            <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Tổng Chi Tại Quầy (Hôm nay)</h3>
-                            <div className="value" style={{ fontSize: '20px', fontWeight: 'bold', color: '#ef4444', margin: '4px 0' }}>{totalChi.toLocaleString('vi-VN')} ₫</div>
-                            <p className="trend" style={{ opacity: 0.8, fontSize: '12px' }}>{expenses.length} phiếu chi</p>
-                        </div>
-                        <div className="stat-card" style={{ borderLeft: '4px solid #3b82f6', background: tonTienMat < 0 ? '#fee2e2' : 'var(--bg-card)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                            <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>TỒN QUỸ HIỆN TẠI</h3>
-                            <div className="value" style={{ fontSize: '20px', fontWeight: 'bold', color: tonTienMat < 0 ? '#ef4444' : '#3b82f6', margin: '4px 0' }}>{tonTienMat.toLocaleString('vi-VN')} ₫</div>
-                            <p className="trend" style={{ opacity: 0.8, fontSize: '12px' }}>Thu - Chi</p>
-                        </div>
+                    <div className="stats-grid">
+                        <StatCard label="Tổng Thu (Hôm nay)" value={`${totalThu.toLocaleString('vi-VN')} ₫`} tone="green" subtext="Tiền bán vé + đồ" icon="💰" />
+                        <StatCard label="Tổng Chi Tại Quầy (Hôm nay)" value={`${totalChi.toLocaleString('vi-VN')} ₫`} tone="red" subtext={`${expenses.length} phiếu chi`} icon="🧾" />
+                        <StatCard label="Tồn Quỹ Hiện Tại" value={`${tonTienMat.toLocaleString('vi-VN')} ₫`} tone={tonTienMat < 0 ? 'red' : 'blue'} subtext="Thu - Chi" icon="🏦" />
                     </div>
 
-                    <div className="dashboard-content-card" style={{ marginTop: '24px' }}>
-                        <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Lịch sử Phiếu Chi Trong Ngày</h2>
+                    <div className="dashboard-content-card">
+                        <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '14px' }}>Lịch sử Phiếu Chi Trong Ngày</h2>
                         {loading ? (
                             <div className="page-loading">Đang tải...</div>
                         ) : (
@@ -275,24 +299,38 @@ export default function CashPage() {
                                     <thead>
                                         <tr>
                                             <th>Thời gian</th>
-                                            <th>Số tiền chi</th>
+                                            <th style={{ textAlign: 'right' }}>Số tiền chi</th>
                                             <th>Lý do</th>
                                             <th>Người lập phiếu</th>
+                                            <th style={{ textAlign: 'center' }}>Thao tác</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {expenses.map(exp => (
-                                            <tr key={exp.id}>
-                                                <td>{new Date(exp.created_at).toLocaleString('vi-VN')}</td>
-                                                <td style={{ fontWeight: 600, color: 'var(--alert-red)' }}>
-                                                    -{exp.amount.toLocaleString('vi-VN')}đ
-                                                </td>
-                                                <td style={{ maxWidth: '300px' }}>{exp.reason}</td>
-                                                <td>{exp.profiles?.full_name || 'Không rõ'}</td>
-                                            </tr>
-                                        ))}
+                                        {expenses.map(exp => {
+                                            const canModify = isAdmin || exp.created_by === profile?.id;
+                                            return (
+                                                <tr key={exp.id}>
+                                                    <td className="tabular-nums">{new Date(exp.created_at).toLocaleString('vi-VN')}</td>
+                                                    <td className="tabular-nums" style={{ fontWeight: 700, color: 'var(--accent-red)', textAlign: 'right' }}>
+                                                        -{exp.amount.toLocaleString('vi-VN')}đ
+                                                    </td>
+                                                    <td style={{ maxWidth: '320px' }}>{exp.reason}</td>
+                                                    <td>{exp.profiles?.full_name || 'Không rõ'}</td>
+                                                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                                        {canModify && (
+                                                            <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                                                <button type="button" className="btn btn-outline btn-sm" onClick={() => openEditExpenseModal(exp)}>Sửa</button>
+                                                                {isAdmin && (
+                                                                    <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeleteExpense(exp)}>Xóa</button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                         {expenses.length === 0 && (
-                                            <tr><td colSpan={4} style={{ textAlign: 'center' }}>Chưa có phiếu chi nào trong hôm nay.</td></tr>
+                                            <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Chưa có phiếu chi nào trong hôm nay.</td></tr>
                                         )}
                                     </tbody>
                                 </table>
@@ -303,11 +341,11 @@ export default function CashPage() {
             )}
 
             {showModal && (
-                <div className="modal-overlay">
-                    <div className="modal-card" style={{ maxWidth: '400px' }}>
-                        <h2>Lập Phiếu Chi Tiền Mặt (Tại Quầy)</h2>
-                        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-                            Số tiền mặt tồn tại quầy hiện tại: <strong>{tonTienMat.toLocaleString('vi-VN')}đ</strong>
+                <div className="modal-overlay" onClick={() => !isSaving && setShowModal(false)}>
+                    <div className="modal-card" style={{ maxWidth: '420px' }} onClick={e => e.stopPropagation()}>
+                        <h2>{editingExpense ? 'Sửa Phiếu Chi Tiền Mặt' : 'Lập Phiếu Chi Tiền Mặt (Tại Quầy)'}</h2>
+                        <div className="ui-callout" style={{ marginBottom: '16px' }}>
+                            Số tiền mặt khả dụng tại quầy: <strong className="tabular-nums">{(editingExpense ? tonTienMat + editingExpense.amount : tonTienMat).toLocaleString('vi-VN')}đ</strong>
                         </div>
                         <form onSubmit={handleSaveExpense}>
                             <div className="form-group">
@@ -321,13 +359,13 @@ export default function CashPage() {
                                     value={reason}
                                     onChange={e => setReason(e.target.value)}
                                     placeholder="Mua nước tẩy bồn cầu, ứng lương nhân viên..."
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', minHeight: '80px', fontFamily: 'inherit' }}
+                                    style={{ minHeight: '80px' }}
                                 />
                             </div>
 
-                            <div className="modal-actions" style={{ marginTop: '24px' }}>
-                                <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowModal(false)} disabled={isSaving}>Hủy</button>
-                                <button type="submit" className="btn btn-primary" style={{ flex: 1, background: '#ef4444', borderColor: '#ef4444', color: '#fff' }} disabled={isSaving}>{isSaving ? 'Đang lưu...' : 'Lưu Phiếu Chi'}</button>
+                            <div className="modal-actions" style={{ marginTop: '20px' }}>
+                                <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={() => setShowModal(false)} disabled={isSaving}>Hủy</button>
+                                <button type="submit" className="btn btn-danger" style={{ flex: 1 }} disabled={isSaving}>{isSaving ? 'Đang lưu...' : 'Lưu Phiếu Chi'}</button>
                             </div>
                         </form>
                     </div>

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchAllSupabaseRows } from '../utils/financialService';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { PageHeader, SegmentedTabs } from '../components/ui';
 
 type DateRange = '7_DAYS' | '30_DAYS' | 'THIS_MONTH' | 'LAST_MONTH';
 
@@ -147,45 +148,47 @@ export default function AnalyticsPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                    <h1>📊 Tổng Quan Phân Tích</h1>
-                    <p>Biểu đồ theo dõi Lượt khách (Check-ins) và Doanh thu cơ sở</p>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {(['7_DAYS', '30_DAYS', 'THIS_MONTH', 'LAST_MONTH'] as DateRange[]).map(r => (
-                        <button key={r} className={`btn ${dateRange === r ? 'btn-primary' : 'btn-ghost'}`}
-                            style={{ padding: '6px 14px', fontSize: '13px' }}
-                            onClick={() => setDateRange(r)}>
-                            {r === '7_DAYS' ? '7 ngày qua' : r === '30_DAYS' ? '30 ngày qua' : r === 'THIS_MONTH' ? 'Tháng này' : 'Tháng trước'}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            <PageHeader
+                title="Tổng Quan Phân Tích"
+                subtitle="Biểu đồ theo dõi Lượt khách (Check-ins) và Doanh thu cơ sở"
+                actions={
+                    <SegmentedTabs
+                        size="sm"
+                        tabs={[
+                            { key: '7_DAYS', label: '7 ngày qua' },
+                            { key: '30_DAYS', label: '30 ngày qua' },
+                            { key: 'THIS_MONTH', label: 'Tháng này' },
+                            { key: 'LAST_MONTH', label: 'Tháng trước' },
+                        ]}
+                        activeKey={dateRange}
+                        onChange={(k) => setDateRange(k as DateRange)}
+                    />
+                }
+            />
 
             {loading ? (
                 <div className="page-loading">Đang tải dữ liệu biểu đồ...</div>
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginTop: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
                     {/* Chart Row 1 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '20px' }}>
 
                         {/* LINE CHART: SESSIONS */}
                         <div className="dashboard-content-card">
-                            <h3 style={{ marginBottom: '16px', color: 'var(--text-color)' }}>Biểu đồ Lượt khách (Người qua cổng)</h3>
+                            <h3 style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Biểu đồ Lượt khách (Người qua cổng)</h3>
                             <div style={{ width: '100%', height: 300 }}>
                                 <ResponsiveContainer>
                                     <LineChart data={dailySessions} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickMargin={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(val) => Math.round(val).toString()} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                                        <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickMargin={10} />
+                                        <YAxis stroke="var(--text-secondary)" fontSize={12} tickFormatter={(val) => Math.round(val).toString()} />
                                         <Tooltip
-                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-                                            labelStyle={{ fontWeight: 'bold', color: '#333' }}
+                                            contentStyle={{ background: 'var(--bg-card)', borderRadius: '10px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-md)', color: 'var(--text-primary)' }}
+                                            labelStyle={{ fontWeight: 'bold', color: 'var(--text-primary)' }}
                                         />
-                                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                                        <Line type="monotone" name="Lượt khách vào (IN)" dataKey="Lượt khách" stroke="#10b981" strokeWidth={3} activeDot={{ r: 8 }} />
+                                        <Legend wrapperStyle={{ paddingTop: '16px' }} />
+                                        <Line type="monotone" name="Lượt khách vào (IN)" dataKey="Lượt khách" stroke="#10b981" strokeWidth={3} activeDot={{ r: 7 }} />
                                     </LineChart>
                                 </ResponsiveContainer>
                             </div>
@@ -193,20 +196,20 @@ export default function AnalyticsPage() {
 
                         {/* BAR CHART: REVENUE */}
                         <div className="dashboard-content-card">
-                            <h3 style={{ marginBottom: '16px', color: 'var(--text-color)' }}>Biểu đồ Doanh thu (VND)</h3>
+                            <h3 style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Biểu đồ Doanh thu (VND)</h3>
                             <div style={{ width: '100%', height: 300 }}>
                                 <ResponsiveContainer>
                                     <BarChart data={dailyRevenue} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickMargin={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} width={65} tickFormatter={(val) => (val / 1000).toLocaleString('vi-VN') + 'k'} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                                        <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickMargin={10} />
+                                        <YAxis stroke="var(--text-secondary)" fontSize={12} width={65} tickFormatter={(val) => (val / 1000).toLocaleString('vi-VN') + 'k'} />
                                         <Tooltip
                                             formatter={(value: number | undefined) => [fmtCurrency(value || 0), "Doanh thu"]}
-                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-                                            labelStyle={{ fontWeight: 'bold', color: '#333' }}
+                                            contentStyle={{ background: 'var(--bg-card)', borderRadius: '10px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-md)', color: 'var(--text-primary)' }}
+                                            labelStyle={{ fontWeight: 'bold', color: 'var(--text-primary)' }}
                                         />
-                                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                                        <Bar name="Tiền thu về" dataKey="Doanh thu" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                                        <Legend wrapperStyle={{ paddingTop: '16px' }} />
+                                        <Bar name="Tiền thu về" dataKey="Doanh thu" fill="#0284c7" radius={[6, 6, 0, 0]} maxBarSize={48} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
@@ -214,12 +217,12 @@ export default function AnalyticsPage() {
                     </div>
 
                     {/* Chart Row 2 */}
-                    <div className="dashboard-content-card" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
-                        <h3 style={{ marginBottom: '16px', color: 'var(--text-color)', textAlign: 'center' }}>Cơ cấu Doanh thu theo Dịch vụ</h3>
+                    <div className="dashboard-content-card" style={{ maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+                        <h3 style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center' }}>Cơ cấu Doanh thu theo Dịch vụ</h3>
                         {revenuePie.length === 0 ? (
                             <p style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px' }}>Chưa có doanh thu trong khoảng thời gian này.</p>
                         ) : (
-                            <div style={{ width: '100%', height: 350 }}>
+                            <div style={{ width: '100%', height: 340 }}>
                                 <ResponsiveContainer>
                                     <PieChart>
                                         <Pie
@@ -237,7 +240,10 @@ export default function AnalyticsPage() {
                                                 <Cell key={`cell-${index}`} fill={entry.color} />
                                             ))}
                                         </Pie>
-                                        <Tooltip formatter={(value: number | undefined) => fmtCurrency(value || 0)} />
+                                        <Tooltip
+                                            formatter={(value: number | undefined) => fmtCurrency(value || 0)}
+                                            contentStyle={{ background: 'var(--bg-card)', borderRadius: '10px', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                                        />
                                         <Legend />
                                     </PieChart>
                                 </ResponsiveContainer>

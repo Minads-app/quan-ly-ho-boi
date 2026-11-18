@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { Badge, EmptyState, PageHeader } from '../components/ui';
 
 interface StudentTicket {
     id: string;
@@ -71,28 +72,23 @@ export default function CoachDashboardPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header">
-                <h1>🧑‍🏫 Danh sách Học viên của tôi</h1>
-                <p>Các gói học kèm riêng (1 kèm 1, 1 kèm 2, ...) được gán cho bạn</p>
-            </div>
+            <PageHeader
+                title="Danh sách Học viên của tôi"
+                subtitle="Các gói học kèm riêng (1 kèm 1, 1 kèm 2, ...) được gán cho bạn"
+            />
 
             {loading ? (
-                <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>⏳</div>
-                    <p>Đang tải dữ liệu...</p>
-                </div>
+                <div className="page-loading">⏳ Đang tải dữ liệu...</div>
             ) : !coachId ? (
-                <div className="dashboard-content-card" style={{ textAlign: 'center', padding: '60px' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '12px' }}>❌</div>
-                    <p style={{ color: '#94a3b8' }}>Tài khoản của bạn chưa được liên kết với hồ sơ HLV.<br/>Vui lòng liên hệ Admin.</p>
+                <div className="ui-card">
+                    <EmptyState icon="❌" title="Chưa liên kết hồ sơ HLV" description="Tài khoản của bạn chưa được liên kết với hồ sơ HLV. Vui lòng liên hệ Admin." />
                 </div>
             ) : students.length === 0 ? (
-                <div className="dashboard-content-card" style={{ textAlign: 'center', padding: '60px' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
-                    <p style={{ color: '#94a3b8' }}>Chưa có học viên nào được gán cho bạn.</p>
+                <div className="ui-card">
+                    <EmptyState icon="📭" title="Chưa có học viên" description="Chưa có học viên nào được gán cho bạn." />
                 </div>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px', marginTop: '24px' }}>
+                <div className="coach-student-grid">
                     {students.map(s => {
                         const isExpired = s.status === 'EXPIRED';
                         const sessionsLeft = s.remaining_sessions;
@@ -102,48 +98,46 @@ export default function CoachDashboardPage() {
                         const studentCount = (s.ticket_types as any)?.student_count || 1;
 
                         return (
-                            <div key={s.id} style={{
-                                background: '#fff', borderRadius: '16px', padding: '20px',
-                                boxShadow: '0 2px 12px rgba(0,0,0,0.06)', border: '1px solid #f1f5f9',
-                                opacity: isExpired ? 0.5 : 1, position: 'relative',
-                                borderLeft: `4px solid ${isExpired ? '#ef4444' : isLow ? '#f59e0b' : '#10b981'}`
+                            <div key={s.id} className="coach-student-card" style={{
+                                opacity: isExpired ? 0.55 : 1,
+                                borderLeft: `4px solid ${isExpired ? 'var(--accent-red)' : isLow ? 'var(--accent-orange)' : 'var(--accent-green)'}`
                             }}>
                                 {isExpired && (
-                                    <span style={{ position: 'absolute', top: '12px', right: '12px', background: '#fee2e2', color: '#dc2626', fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '10px' }}>
-                                        HẾT HẠN
-                                    </span>
+                                    <div style={{ position: 'absolute', top: '12px', right: '12px' }}>
+                                        <Badge variant="red">HẾT HẠN</Badge>
+                                    </div>
                                 )}
-                                <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '8px', color: '#1e293b' }}>
+                                <div style={{ fontSize: '15.5px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>
                                     👤 {s.customer_name || 'Chưa có tên'}
                                 </div>
                                 {s.customer_phone && (
-                                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>
+                                    <div className="tabular-nums" style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
                                         📞 {s.customer_phone}
                                     </div>
                                 )}
-                                <div style={{ fontSize: '13px', color: '#475569', marginBottom: '12px' }}>
-                                    📦 {typeName}
-                                    <span style={{ marginLeft: '8px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 600 }}>
+                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <span>📦 {typeName}</span>
+                                    <Badge variant="blue">
                                         {classType === 'ONE_ON_ONE' ? '1:1' : classType === 'ONE_ON_TWO' ? '1:2' : `1:${studentCount}`}
-                                    </span>
+                                    </Badge>
                                 </div>
 
-                                <div style={{ display: 'flex', justifyContent: 'space-between', background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', fontSize: '13px' }}>
+                                <div className="ui-callout" style={{ display: 'flex', justifyContent: 'space-between' }}>
                                     <div>
-                                        <div style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '2px' }}>Buổi còn lại</div>
-                                        <div style={{ fontWeight: 700, fontSize: '18px', color: isLow ? '#f59e0b' : '#10b981' }}>
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginBottom: '2px' }}>Buổi còn lại</div>
+                                        <div className="tabular-nums" style={{ fontWeight: 800, fontSize: '18px', color: isLow ? 'var(--accent-orange)' : 'var(--accent-green)' }}>
                                             {sessionsLeft !== null ? sessionsLeft : '∞'}
-                                            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 400 }}> / {s.total_sessions || '∞'}</span>
+                                            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 400 }}> / {s.total_sessions || '∞'}</span>
                                         </div>
                                     </div>
                                     <div style={{ textAlign: 'right' }}>
-                                        <div style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '2px' }}>Giá gói</div>
-                                        <div style={{ fontWeight: 600, color: '#1e293b' }}>{s.price_paid.toLocaleString('vi-VN')}đ</div>
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginBottom: '2px' }}>Giá gói</div>
+                                        <div className="tabular-nums" style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{s.price_paid.toLocaleString('vi-VN')}đ</div>
                                     </div>
                                 </div>
 
                                 {(s.valid_from || s.valid_until) && (
-                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>
+                                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '10px' }}>
                                         📅 {s.valid_from ? new Date(s.valid_from).toLocaleDateString('vi-VN') : '---'} → {s.valid_until ? new Date(s.valid_until).toLocaleDateString('vi-VN') : 'Không giới hạn'}
                                     </div>
                                 )}

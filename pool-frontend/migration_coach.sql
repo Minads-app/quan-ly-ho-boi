@@ -9,33 +9,37 @@ CREATE TABLE IF NOT EXISTS public.coaches (
     profile_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     full_name TEXT NOT NULL,
     phone TEXT,
+    specialty TEXT,
     is_active BOOLEAN DEFAULT true,
     note TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.coaches ADD COLUMN IF NOT EXISTS specialty TEXT;
+
 -- Index cho truy vấn nhanh
 CREATE INDEX IF NOT EXISTS idx_coaches_profile_id ON public.coaches(profile_id);
 CREATE INDEX IF NOT EXISTS idx_coaches_is_active ON public.coaches(is_active);
 
--- RLS policies cho coaches
+-- RLS policies cho coaches (chỉ ADMIN mới có quyền thêm/sửa/xóa)
 ALTER TABLE public.coaches ENABLE ROW LEVEL SECURITY;
 
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coaches' AND policyname = 'coaches_select_all') THEN
-        CREATE POLICY "coaches_select_all" ON public.coaches FOR SELECT USING (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coaches' AND policyname = 'coaches_insert_admin') THEN
-        CREATE POLICY "coaches_insert_admin" ON public.coaches FOR INSERT WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coaches' AND policyname = 'coaches_update_admin') THEN
-        CREATE POLICY "coaches_update_admin" ON public.coaches FOR UPDATE USING (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coaches' AND policyname = 'coaches_delete_admin') THEN
-        CREATE POLICY "coaches_delete_admin" ON public.coaches FOR DELETE USING (true);
-    END IF;
-END $$;
+DROP POLICY IF EXISTS "coaches_select_all" ON public.coaches;
+DROP POLICY IF EXISTS "coaches_insert_admin" ON public.coaches;
+DROP POLICY IF EXISTS "coaches_update_admin" ON public.coaches;
+DROP POLICY IF EXISTS "coaches_delete_admin" ON public.coaches;
+
+CREATE POLICY "coaches_select_all" ON public.coaches
+    FOR SELECT TO authenticated USING (true);
+CREATE POLICY "coaches_insert_admin" ON public.coaches
+    FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
+CREATE POLICY "coaches_update_admin" ON public.coaches
+    FOR UPDATE TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
+CREATE POLICY "coaches_delete_admin" ON public.coaches
+    FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
 
 -- ========== 2. Thêm cột coach_id vào bảng tickets ==========
 ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS coach_id UUID REFERENCES public.coaches(id) ON DELETE SET NULL;
@@ -60,20 +64,25 @@ CREATE INDEX IF NOT EXISTS idx_coach_attendances_date ON public.coach_attendance
 -- RLS policies cho coach_attendances
 ALTER TABLE public.coach_attendances ENABLE ROW LEVEL SECURITY;
 
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_attendances' AND policyname = 'coach_attendances_select_all') THEN
-        CREATE POLICY "coach_attendances_select_all" ON public.coach_attendances FOR SELECT USING (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_attendances' AND policyname = 'coach_attendances_insert') THEN
-        CREATE POLICY "coach_attendances_insert" ON public.coach_attendances FOR INSERT WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_attendances' AND policyname = 'coach_attendances_update') THEN
-        CREATE POLICY "coach_attendances_update" ON public.coach_attendances FOR UPDATE USING (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'coach_attendances' AND policyname = 'coach_attendances_delete') THEN
-        CREATE POLICY "coach_attendances_delete" ON public.coach_attendances FOR DELETE USING (true);
-    END IF;
-END $$;
+DROP POLICY IF EXISTS "coach_attendances_select_all" ON public.coach_attendances;
+DROP POLICY IF EXISTS "coach_attendances_insert" ON public.coach_attendances;
+DROP POLICY IF EXISTS "coach_attendances_update" ON public.coach_attendances;
+DROP POLICY IF EXISTS "coach_attendances_delete" ON public.coach_attendances;
+
+CREATE POLICY "coach_attendances_select_all" ON public.coach_attendances
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN')
+        OR EXISTS (SELECT 1 FROM public.coaches c WHERE c.id = coach_id AND c.profile_id = auth.uid())
+    );
+CREATE POLICY "coach_attendances_insert" ON public.coach_attendances
+    FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
+CREATE POLICY "coach_attendances_update" ON public.coach_attendances
+    FOR UPDATE TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
+CREATE POLICY "coach_attendances_delete" ON public.coach_attendances
+    FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
 
 -- ========== 4. Tạo View tổng hợp chấm công HLV từ check-in (Lớp kèm) ==========
 CREATE OR REPLACE VIEW public.coach_checkin_summary AS

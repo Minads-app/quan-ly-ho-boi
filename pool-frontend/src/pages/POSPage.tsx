@@ -1,11 +1,18 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/immutability, react-hooks/exhaustive-deps, prefer-const */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, prefer-const */
 import { useEffect, useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { normalizeScannerInput } from '../utils/scannerUtils';
 import { ToastProvider, toast, showConfirm } from '../components/Toast';
+import { Badge, PageHeader, SegmentedTabs } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { TicketType, Ticket, RetailProduct, Customer } from '../types';
+import type { TicketType, Ticket, RetailProduct, Customer, Promotion, ValidatedVoucher, BusinessInfo } from '../types';
+import {
+    maskCardCode as maskCardCodeUtil,
+    fetchBusinessSettings,
+    getTodayLocalVN,
+    sanitizePostgrestTerm
+} from '../utils/helpers';
 
 export interface CartItem {
     cart_id: string;
@@ -21,6 +28,7 @@ export interface CartItem {
     privateBirthYear?: number;
     privateBirthYear2?: number;
     customerName2?: string;
+    extraStudents?: { name: string; birthYear: number | '' }[];
     privateDurationVal?: number;
     privateDurationUnit?: 'months' | 'days';
     privateUnlimited?: boolean;
@@ -43,52 +51,15 @@ interface SoldTicket extends Ticket {
     pass_remaining_sessions?: number | null;
 }
 
-interface Promotion {
-    id: string;
-    name: string;
-    type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
-    value: number;
-    valid_from: string | null;
-    valid_until: string | null;
-    is_active: boolean;
-    applicable_ticket_types: string[] | null;
-    applicable_lesson_types: string[] | null;
-    customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
-    auto_apply: boolean;
-    combinable: boolean;
-}
-
-interface ValidatedVoucher {
-    voucher_id: string;
-    promotion_id: string;
-    promo_name: string;
-    promo_type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
-    promo_value: number;
-}
-
-interface BusinessInfo {
-    business_name?: string;
-    business_address?: string;
-    business_phone?: string;
-    business_logo?: string;
-    bank_name?: string;
-    bank_account_number?: string;
-    bank_account_name?: string;
-    print_format?: 'K80' | 'A5';
-    pool_close_time?: string;
-}
-
 export default function POSPage() {
-    // Helper: Mask card code for non-admins
-    function maskCardCode(code: string | null): string | null {
-        if (!code) return null;
-        if (profile?.role === 'ADMIN') return code;
-        if (code.length <= 6) return '***';
-        // Show first 5 and last 4, middle masked
-        return `${code.substring(0, 5)}***${code.substring(code.length - 4)}`;
-    }
-
     const { profile } = useAuth();
+    const maskCardCode = (code: string | null | undefined) => maskCardCodeUtil(code, profile?.role);
+
+    // Synchronous locks to prevent double-submit on fast clicks / scanner bursts
+    const isCheckingOutRef = useRef(false);
+    const isCheckingInRef = useRef(false);
+    const checkoutIdempotencyKeyRef = useRef<string | null>(null);
+
     const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
     const [loading, setLoading] = useState(true);
     const [selling, setSelling] = useState(false);
@@ -266,12 +237,19 @@ export default function POSPage() {
                     setSelectedCustomerBirthDate(cust.birth_date || null);
                     setCustSearchResults([]);
                     setCustSearchTerm('');
+                    toast.info(`Phím tắt ${e.key}`, `Đã chọn khách hàng: ${cust.full_name}`);
+                } else {
+                    toast.info(`Phím tắt ${e.key}`, `Chưa có khách hàng nào được gán phím tắt ${e.key}.`);
                 }
             }
         }
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [hotkeyCustomers, showNewCustomerModal, selectedAdvancedType, showPaymentModal, showPackageSelectModal]);
+
+    useEffect(() => {
+        checkoutIdempotencyKeyRef.current = cart.length > 0 ? crypto.randomUUID() : null;
+    }, [cart]);
 
     useEffect(() => {
         fetchTicketTypes();
@@ -282,53 +260,46 @@ export default function POSPage() {
         fetchCoaches();
 
         async function fetchCoaches() {
-            const { data } = await supabase.from('coaches').select('*').eq('is_active', true).order('full_name');
+            const { data, error } = await supabase.from('coaches').select('*').eq('is_active', true).order('full_name');
+            if (error) console.error('Lỗi tải danh sách HLV:', error);
             if (data) setCoaches(data);
         }
 
-        async function fetchProducts() {
-            const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
-            if (data) {
-                setProducts(data);
-            }
-        }
-
         async function fetchBusinessInfo() {
-            const { data } = await supabase.from('system_settings').select('key, value');
-            if (data) {
-                const info: any = {};
-                data.forEach(r => {
-                    let val = r.value;
-                    try {
-                        val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, '');
-                    } catch (e) {
-                        val = typeof val === 'string' ? val : String(val);
-                    }
-                    info[r.key] = val;
-                });
-                setBizInfo({
-                    business_name: info.business_name || 'Hệ Thống Vé Bơi',
-                    business_address: info.business_address || '',
-                    business_phone: info.business_phone || '',
-                    business_logo: info.business_logo || '',
-                    bank_name: info.bank_name || '',
-                    bank_account_number: info.bank_account_number || '',
-                    bank_account_name: info.bank_account_name || '',
-                    print_format: info.print_format || 'K80'
-                });
-            }
+            const info = await fetchBusinessSettings();
+            setBizInfo({
+                business_name: info.business_name || 'Hệ Thống Vé Bơi',
+                business_address: info.business_address || '',
+                business_phone: info.business_phone || '',
+                business_logo: info.business_logo || '',
+                bank_name: info.bank_name || '',
+                bank_account_number: info.bank_account_number || '',
+                bank_account_name: info.bank_account_name || '',
+                print_format: (info.print_format as 'K80' | 'A5') || 'K80'
+            });
         }
     }, []);
 
+    async function fetchProducts() {
+        const { data, error } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+        if (error) {
+            toast.error('Lỗi tải sản phẩm', error.message);
+        } else if (data) {
+            setProducts(data);
+        }
+    }
+
     async function fetchTicketTypes() {
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('ticket_types')
             .select('*')
             .eq('is_active', true)
             .order('category')
             .order('name');
 
-        if (data) {
+        if (error) {
+            toast.error('Lỗi tải danh mục vé', error.message);
+        } else if (data) {
             setTicketTypes(data);
             const initialQuantities: Record<string, number> = {};
             data.filter(t => t.category === 'DAILY').forEach(t => {
@@ -340,16 +311,24 @@ export default function POSPage() {
     }
 
     async function fetchPromotions() {
-        // Fetch only active promos that are valid right now
-        const now = new Date().toISOString();
-        const { data } = await supabase
+        const now = new Date();
+        const { data, error } = await supabase
             .from('promotions')
             .select('*')
-            .eq('is_active', true)
-            .or(`valid_from.is.null,valid_from.lte.${now}`)
-            .or(`valid_until.is.null,valid_until.gte.${now}`);
+            .eq('is_active', true);
 
-        if (data) setPromotions(data);
+        if (error) {
+            toast.error('Lỗi tải khuyến mãi', error.message);
+            return;
+        }
+        if (data) {
+            const validPromos = data.filter((p: Promotion) => {
+                if (p.valid_from && now < new Date(p.valid_from)) return false;
+                if (p.valid_until && now > new Date(p.valid_until)) return false;
+                return true;
+            });
+            setPromotions(validPromos);
+        }
     }
 
     async function handleApplyVoucher() {
@@ -369,6 +348,11 @@ export default function POSPage() {
         } else if (data && !data.valid) {
             setVoucherError(data.error || 'Mã không hợp lệ.');
         } else if (data && data.valid) {
+            if (cart.some(c => c.voucherId === data.voucher_id)) {
+                setVoucherError('Mã Voucher này đã được áp dụng cho một gói khác trong giỏ hàng hiện tại.');
+                setValidatingVoucher(false);
+                return;
+            }
             setValidatedVoucher({
                 voucher_id: data.voucher_id,
                 promotion_id: data.promotion_id,
@@ -693,191 +677,215 @@ export default function POSPage() {
                 return prev.map(c => c.cart_id === existing.cart_id ? { ...c, quantity: c.quantity + quantity, subtotal: (c.quantity + quantity) * c.unitPrice } : c);
             }
             return [...prev, {
-                cart_id: Date.now() + Math.random().toString(),
+                cart_id: crypto.randomUUID(),
                 type, item, quantity, unitPrice: item.price, subtotal: item.price * quantity
             }];
         });
     }
 
     async function doCheckoutOrder() {
-        if (cart.length === 0) return;
+        if (cart.length === 0 || isCheckingOutRef.current) return;
+        isCheckingOutRef.current = true;
         setSelling(true);
 
-        const p_items = cart.map(c => {
-            if (c.type === 'PRODUCT') {
-                return { type: 'PRODUCT', id: c.item.id, quantity: c.quantity, unit_price: c.unitPrice, subtotal: c.subtotal };
-            }
+        try {
+            const todayStr = getTodayLocalVN();
 
-            let validFrom = null;
-            let validUntil = null;
-            let customDurationMonths = null;
-            let customValidityDays = null;
-
-            if (c.item.category === 'DAILY') {
-                if (c.item.validity_days) {
-                    const today = new Date();
-                    const tzOffset = today.getTimezoneOffset() * 60000;
-                    const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, -1);
-                    validFrom = localISOTime.split('T')[0];
-                    const expDate = new Date(today);
-                    const daysToAdd = c.item.validity_days > 0 ? c.item.validity_days - 1 : 0;
-                    expDate.setDate(today.getDate() + daysToAdd);
-                    const localISOExp = (new Date(expDate.getTime() - tzOffset)).toISOString().slice(0, -1);
-                    validUntil = localISOExp.split('T')[0];
+            const p_items = cart.map(c => {
+                if (c.type === 'PRODUCT') {
+                    return { type: 'PRODUCT', id: c.item.id, quantity: c.quantity, unit_price: c.unitPrice, subtotal: c.subtotal };
                 }
-            } else {
-                if (!c.privateUnlimited && c.privateDurationVal) {
-                    if (c.privateDurationUnit === 'months') {
-                        customDurationMonths = Number(c.privateDurationVal);
-                    } else {
-                        customValidityDays = Number(c.privateDurationVal);
+
+                let validFrom = null;
+                let validUntil = null;
+                let customDurationMonths = null;
+                let customValidityDays = null;
+
+                if (c.item.category === 'DAILY') {
+                    validFrom = todayStr;
+                    const daysToAdd = Math.max(0, (c.item.validity_days || 1) - 1);
+                    const expDate = new Date(`${todayStr}T00:00:00+07:00`);
+                    expDate.setDate(expDate.getDate() + daysToAdd);
+                    validUntil = `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}-${String(expDate.getDate()).padStart(2, '0')}`;
+                } else {
+                    if (!c.privateUnlimited && c.privateDurationVal) {
+                        if (c.privateDurationUnit === 'months') {
+                            customDurationMonths = Number(c.privateDurationVal);
+                        } else {
+                            customValidityDays = Number(c.privateDurationVal);
+                        }
                     }
                 }
-            }
 
-            let finalPrice = c.unitPrice;
-            let finalSessions = c.item.session_count || null;
-            if (c.privateSessions) finalSessions = c.privateSessions;
+                const finalPrice = c.unitPrice;
+                let finalSessions = c.item.session_count || null;
+                if (c.privateSessions) finalSessions = c.privateSessions;
 
-            if (c.promoId) {
-                const promo = promotions.find(p => p.id === c.promoId);
-                if (promo) {
-                    // AMOUNT & PERCENT đã được tính trong calculateAdvancedPrice() → không tính lại
-                    if (promo.type === 'BONUS_SESSION' && finalSessions !== null) {
+                if (c.promoId) {
+                    const promo = promotions.find(p => p.id === c.promoId);
+                    if (promo && promo.type === 'BONUS_SESSION' && finalSessions !== null) {
                         finalSessions += promo.value;
                     }
                 }
-            }
-            // Auto-applied promo (if different from promoId, to avoid double-counting)
-            if (c.autoPromoId && c.autoPromoId !== c.promoId) {
-                const autoPromo = promotions.find(p => p.id === c.autoPromoId);
-                if (autoPromo && autoPromo.type === 'BONUS_SESSION' && finalSessions !== null) {
-                    finalSessions += autoPromo.value;
+                // Auto-applied promo (if different from promoId, to avoid double-counting)
+                if (c.autoPromoId && c.autoPromoId !== c.promoId) {
+                    const autoPromo = promotions.find(p => p.id === c.autoPromoId);
+                    if (autoPromo && autoPromo.type === 'BONUS_SESSION' && finalSessions !== null) {
+                        finalSessions += autoPromo.value;
+                    }
                 }
-            }
 
-            return {
-                type: 'TICKET', id: c.item.id, quantity: c.quantity, unit_price: c.quantity > 1 ? c.unitPrice : finalPrice, subtotal: c.subtotal,
-                ticket_metadata: {
-                    customer_name: c.customerName || customerName || null,
-                    customer_phone: c.customerPhone || customerPhone || null,
-                    valid_from: validFrom,
-                    valid_until: validUntil,
-                    remaining_sessions: finalSessions,
-                    total_sessions: finalSessions,
-                    promotion_id: c.promoId || null,
-                    card_code: c.cardCode || cardCode || null,
-                    customer_birth_year: c.privateBirthYear || null,
-                    customer_name_2: c.customerName2 || null,
-                    customer_birth_year_2: c.privateBirthYear2 || null,
-                    custom_duration_months: customDurationMonths,
-                    custom_validity_days: customValidityDays,
-                    guardian_name: c.guardianName || null,
-                    guardian_phone: c.guardianPhone || null
-                }
-            };
-        });
+                const cleanExtraStudents = (c.extraStudents || [])
+                    .filter(s => s.name && s.name.trim())
+                    .map(s => ({ name: s.name.trim(), birthYear: Number(s.birthYear) || null }));
 
-        const total_amount_raw = p_items.reduce((sum, item) => sum + item.subtotal, 0);
-
-        const { data, error } = await supabase.rpc('create_checkout_order', {
-            p_total_amount: total_amount_raw,
-            p_payment_method: selectedPaymentMethod,
-            p_customer_name: customerName || null,
-            p_customer_phone: customerPhone || null,
-            p_note: '',
-            p_user_id: profile?.id,
-            p_items: p_items
-        });
-
-        if (error || !data?.success) {
-            toast.error('Lỗi bán hàng', error?.message || data?.error);
-            setSelling(false);
-            return;
-        }
-
-        // Ghi nhận sử dụng Voucher (nếu có)
-        for (const c of cart) {
-            if ((c as any).voucherId) {
-                await supabase.rpc('use_voucher', {
-                    p_voucher_id: (c as any).voucherId,
-                    p_customer_id: selectedCustomerId || null,
-                    p_ticket_id: null,
-                    p_used_by: profile?.id || null
-                });
-            }
-        }
-
-        // Build receipt object before clearing cart
-        const receipt = {
-            order_id: data.order_id,
-            items: cart.map(c => {
-                const promo = c.promoId ? promotions.find(p => p.id === c.promoId) : null;
                 return {
-                    name: c.item.name,
-                    quantity: c.quantity,
-                    unitPrice: c.unitPrice,
-                    subtotal: c.subtotal,
-                    isLesson: c.type === 'TICKET' && c.item.category === 'LESSON',
-                    promoName: promo ? promo.name : null,
-                    promoLabel: promo ? (promo.type === 'AMOUNT' ? `−${promo.value.toLocaleString('vi-VN')}đ` : promo.type === 'PERCENT' ? `−${promo.value}%` : `+${promo.value} buổi`) : null
+                    type: 'TICKET', id: c.item.id, quantity: c.quantity, unit_price: c.quantity > 1 ? c.unitPrice : finalPrice, subtotal: c.subtotal,
+                    ticket_metadata: {
+                        customer_id: selectedCustomerId || null,
+                        customer_name: c.customerName || customerName || null,
+                        customer_phone: c.customerPhone || customerPhone || null,
+                        valid_from: validFrom,
+                        valid_until: validUntil,
+                        remaining_sessions: finalSessions,
+                        total_sessions: finalSessions,
+                        promotion_id: c.promoId || c.autoPromoId || null,
+                        voucher_id: c.voucherId || null,
+                        coach_id: c.coachId || null,
+                        card_code: c.cardCode || cardCode || null,
+                        customer_birth_year: c.privateBirthYear || null,
+                        customer_name_2: c.customerName2 || null,
+                        customer_birth_year_2: c.privateBirthYear2 || null,
+                        extra_students: cleanExtraStudents,
+                        custom_duration_months: customDurationMonths,
+                        custom_validity_days: customValidityDays,
+                        guardian_name: c.guardianName || null,
+                        guardian_phone: c.guardianPhone || null
+                    }
                 };
-            }),
-            totalPrice: total_amount_raw,
-            customerName,
-            customerPhone,
-            paymentMethod: selectedPaymentMethod,
-            createdAt: new Date().toISOString()
-        };
+            });
 
-        if (data.ticket_ids && data.ticket_ids.length > 0) {
-            // Gán HLV cho các ticket loại LESSON
-            for (const c of cart) {
-                if (c.type === 'TICKET' && c.item.category === 'LESSON' && c.coachId) {
-                    await supabase.from('tickets')
-                        .update({ coach_id: c.coachId })
-                        .in('id', data.ticket_ids)
-                        .eq('ticket_type_id', c.item.id);
+            const total_amount_raw = p_items.reduce((sum, item) => sum + item.subtotal, 0);
+            const basePayload = {
+                p_total_amount: total_amount_raw,
+                p_payment_method: selectedPaymentMethod,
+                p_customer_name: customerName || null,
+                p_customer_phone: customerPhone || null,
+                p_note: '',
+                p_user_id: profile?.id,
+                p_items: p_items
+            };
+
+            let { data, error } = await supabase.rpc('create_checkout_order', {
+                ...basePayload,
+                p_idempotency_key: checkoutIdempotencyKeyRef.current
+            });
+
+            // Backward-compatible fallback if migration 058 hasn't been applied on DB yet
+            if (error && (error.code === 'PGRST202' || error.message?.includes('p_idempotency_key'))) {
+                const retryRes = await supabase.rpc('create_checkout_order', basePayload);
+                data = retryRes.data;
+                error = retryRes.error;
+            }
+
+            if (error || !data?.success) {
+                toast.error('Lỗi bán hàng', error?.message || data?.error);
+                return;
+            }
+
+            // Fallback ghi nhận Voucher nếu DB chưa chạy migration 058 (chưa trả về voucher_processed = true)
+            if (!data.voucher_processed) {
+                for (const c of cart) {
+                    if (c.voucherId) {
+                        await supabase.rpc('use_voucher', {
+                            p_voucher_id: c.voucherId,
+                            p_customer_id: selectedCustomerId || null,
+                            p_ticket_id: null,
+                            p_used_by: profile?.id || null
+                        });
+                    }
                 }
             }
 
-            const { data: generatedTickets } = await supabase.from('tickets').select('*').in('id', data.ticket_ids);
-            if (generatedTickets) {
-                const dailyTickets = generatedTickets.filter(t => {
-                    const c = cart.find(x => x.type === 'TICKET' && x.item.id === t.ticket_type_id);
-                    return c && c.item.category === 'DAILY';
-                });
-                if (dailyTickets.length > 0) {
-                    const closeTime = await getPoolCloseTime();
-                    const mapped = dailyTickets.map(t => {
-                        const c = cart.find(x => x.type === 'TICKET' && x.item.id === t.ticket_type_id);
-                        return {
-                            ...t,
-                            type_name: c!.item.name,
-                            pool_close_time: closeTime,
-                            remaining_sessions: t.remaining_sessions,
-                            payment_method: selectedPaymentMethod
-                        };
-                    });
-                    setPendingTickets(mapped as any); // Store single QR tickets
+            // Build receipt object before clearing cart
+            const receipt = {
+                order_id: data.order_id,
+                items: cart.map(c => {
+                    const promo = c.promoId
+                        ? promotions.find(p => p.id === c.promoId)
+                        : c.autoPromoId
+                            ? promotions.find(p => p.id === c.autoPromoId)
+                            : null;
+                    return {
+                        name: c.item.name,
+                        quantity: c.quantity,
+                        unitPrice: c.unitPrice,
+                        subtotal: c.subtotal,
+                        isLesson: c.type === 'TICKET' && c.item.category === 'LESSON',
+                        promoName: promo ? promo.name : null,
+                        promoLabel: promo ? (promo.type === 'AMOUNT' ? `−${promo.value.toLocaleString('vi-VN')}đ` : promo.type === 'PERCENT' ? `−${promo.value}%` : `+${promo.value} buổi`) : null
+                    };
+                }),
+                totalPrice: total_amount_raw,
+                customerName,
+                customerPhone,
+                paymentMethod: selectedPaymentMethod,
+                createdAt: new Date().toISOString()
+            };
+
+            if (data.ticket_ids && data.ticket_ids.length > 0) {
+                // Fallback gán HLV nếu DB chưa xử lý coach_id trong RPC
+                if (!data.voucher_processed) {
+                    for (const c of cart) {
+                        if (c.type === 'TICKET' && c.item.category === 'LESSON' && c.coachId) {
+                            await supabase.from('tickets')
+                                .update({ coach_id: c.coachId })
+                                .in('id', data.ticket_ids)
+                                .eq('ticket_type_id', c.item.id);
+                        }
+                    }
                 }
 
-                // ALWAYS generate Master Receipt
+                const { data: generatedTickets } = await supabase.from('tickets').select('*').in('id', data.ticket_ids);
+                if (generatedTickets) {
+                    const dailyTickets = generatedTickets.filter(t => {
+                        const c = cart.find(x => x.type === 'TICKET' && x.item.id === t.ticket_type_id);
+                        return c && c.item.category === 'DAILY';
+                    });
+                    if (dailyTickets.length > 0) {
+                        const closeTime = await getPoolCloseTime();
+                        const mapped = dailyTickets.map(t => {
+                            const c = cart.find(x => x.type === 'TICKET' && x.item.id === t.ticket_type_id);
+                            return {
+                                ...t,
+                                type_name: c!.item.name,
+                                pool_close_time: closeTime,
+                                remaining_sessions: t.remaining_sessions,
+                                payment_method: selectedPaymentMethod
+                            };
+                        });
+                        setPendingTickets(mapped as any);
+                    }
+
+                    setCheckoutReceipt(receipt);
+                }
+            } else {
                 setCheckoutReceipt(receipt);
             }
-        } else {
-            // Only retail products sold
-            setCheckoutReceipt(receipt);
-        }
 
-        setSelling(false);
-        setCart([]);
-        setCustomerName('');
-        setCustomerPhone('');
-        setCardCode('');
-        setSelectedCustomerBirthDate(null);
-        setSelectedPaymentMethod('CASH');
-        setShowPaymentModal(false);
+            setCart([]);
+            setCustomerName('');
+            setCustomerPhone('');
+            setCardCode('');
+            setSelectedCustomerId(null);
+            setSelectedCustomerBirthDate(null);
+            setSelectedPaymentMethod('CASH');
+            setShowPaymentModal(false);
+            fetchProducts();
+        } finally {
+            isCheckingOutRef.current = false;
+            setSelling(false);
+        }
     }
 
     function handleAdvancedSubmit(e: React.FormEvent) {
@@ -955,39 +963,7 @@ export default function POSPage() {
             }
         }
 
-        const calculateAdvancedPrice = () => {
-            let subtotal = selectedAdvancedType.price;
-            if (isPriv && privateSessions) {
-                const currentYear = new Date().getFullYear();
-                // Tính giá từng học viên
-                const allBirthYears = [Number(privateBirthYear), ...extraStudents.map(s => Number(s.birthYear || 0))].filter(y => y > 0);
-                let totalUnitPrice = 0;
-
-                for (const by of allBirthYears) {
-                    let unitP = selectedAdvancedType.price;
-                    if (selectedAdvancedType.age_price_tiers && selectedAdvancedType.age_price_tiers.length > 0) {
-                        const age = currentYear - by;
-                        const tier = selectedAdvancedType.age_price_tiers.find(t => age >= t.minAge && (t.maxAge === null ? true : age <= t.maxAge));
-                        if (tier) unitP = Math.round(tier.price);
-                    }
-                    totalUnitPrice += unitP;
-                }
-
-                // Nếu chỉ có 1 HV mà không có age_tiers, dùng giá mặc định
-                if (allBirthYears.length === 0) {
-                    totalUnitPrice = selectedAdvancedType.price * sc;
-                }
-
-                subtotal = Math.round(totalUnitPrice * Number(privateSessions));
-            }
-            // Áp dụng giảm giá từ Voucher (nếu có)
-            if (validatedVoucher) {
-                if (validatedVoucher.promo_type === 'AMOUNT') subtotal = Math.max(0, subtotal - validatedVoucher.promo_value);
-                if (validatedVoucher.promo_type === 'PERCENT') subtotal = Math.round(subtotal * (1 - validatedVoucher.promo_value / 100));
-            }
-            return subtotal;
-        };
-
+        const { finalSubtotal } = computeAdvancedFinalPrice(selectedAdvancedType);
         const privateSessionsVal = isPriv ? (Number(privateSessions) || undefined) : undefined;
 
         // ADD TO CART 
@@ -996,8 +972,8 @@ export default function POSPage() {
             type: 'TICKET',
             item: selectedAdvancedType,
             quantity: 1, // advanced ticket always qty=1
-            unitPrice: calculateAdvancedPrice(),
-            subtotal: calculateAdvancedPrice(),
+            unitPrice: finalSubtotal,
+            subtotal: finalSubtotal,
             promoId: selectedPromoId || undefined,
             autoPromoId: autoAppliedPromo?.id || undefined,
             voucherId: validatedVoucher?.voucher_id || undefined,
@@ -1015,9 +991,59 @@ export default function POSPage() {
             guardianName: guardianName.trim() || undefined,
             guardianPhone: guardianPhone.trim() || undefined,
             coachId: selectedCoachId || undefined
-        } as any]);
+        }]);
 
         setSelectedAdvancedType(null);
+    }
+
+    function computeAdvancedFinalPrice(ticketType: TicketType): { baseSubtotal: number; finalSubtotal: number } {
+        const isPriv = isPrivateLesson(ticketType);
+        const sc = getStudentCount(ticketType);
+        let baseSubtotal = ticketType.price;
+
+        if (isPriv) {
+            const currentYear = new Date().getFullYear();
+            const allBirthYears = [Number(privateBirthYear), ...extraStudents.map(s => Number(s.birthYear || 0))].filter(y => y > 0);
+            let totalUnitPrice = 0;
+
+            for (const by of allBirthYears) {
+                let unitP = ticketType.price;
+                if (ticketType.age_price_tiers && ticketType.age_price_tiers.length > 0) {
+                    const age = currentYear - by;
+                    const tier = ticketType.age_price_tiers.find(t => age >= t.minAge && (t.maxAge === null ? true : age <= t.maxAge));
+                    if (tier) unitP = Math.round(tier.price);
+                }
+                totalUnitPrice += unitP;
+            }
+
+            if (allBirthYears.length === 0) {
+                totalUnitPrice = ticketType.price * sc;
+            } else if (allBirthYears.length < sc) {
+                totalUnitPrice += ticketType.price * (sc - allBirthYears.length);
+            }
+
+            baseSubtotal = Math.round(totalUnitPrice * Number(privateSessions || 0));
+        }
+
+        let subtotal = baseSubtotal;
+
+        // 1. Áp dụng Khuyến mãi tự động hoặc thủ công (AMOUNT / PERCENT)
+        if (autoAppliedPromo && autoAppliedPromo.id !== validatedVoucher?.promotion_id) {
+            if (autoAppliedPromo.type === 'AMOUNT') subtotal = Math.max(0, subtotal - autoAppliedPromo.value);
+            if (autoAppliedPromo.type === 'PERCENT') subtotal = Math.max(0, Math.round(subtotal * (1 - autoAppliedPromo.value / 100)));
+        } else if (selectedPromoId && !validatedVoucher) {
+            const manualPromo = promotions.find(p => p.id === selectedPromoId);
+            if (manualPromo?.type === 'AMOUNT') subtotal = Math.max(0, subtotal - manualPromo.value);
+            if (manualPromo?.type === 'PERCENT') subtotal = Math.max(0, Math.round(subtotal * (1 - manualPromo.value / 100)));
+        }
+
+        // 2. Áp dụng giảm giá từ Voucher (nếu có)
+        if (validatedVoucher) {
+            if (validatedVoucher.promo_type === 'AMOUNT') subtotal = Math.max(0, subtotal - validatedVoucher.promo_value);
+            if (validatedVoucher.promo_type === 'PERCENT') subtotal = Math.max(0, Math.round(subtotal * (1 - validatedVoucher.promo_value / 100)));
+        }
+
+        return { baseSubtotal, finalSubtotal: subtotal };
     }
 
     function handleDailySaleClick(ticketType: TicketType) {
@@ -1149,126 +1175,131 @@ export default function POSPage() {
 
     // --- CHECK IN LOGIC ---
     async function doCheckin(passId: string, confirmNewPackage: boolean = false, selectedTicketId?: string) {
-        // --- Tất cả loại gói đều dùng chung RPC checkin_pass_and_issue_ticket ---
-        // (RPC xử lý requires_gate_ticket, sport_type, và ghi checkin_logs)
-        const payload: any = {
-            p_pass_id: passId,
-            p_staff_id: profile?.id,
-            p_confirm_new_package: confirmNewPackage,
-            p_selected_ticket_id: selectedTicketId || null
-        };
+        if (isCheckingInRef.current) return;
+        isCheckingInRef.current = true;
 
-        const { data, error } = await supabase.rpc('checkin_pass_and_issue_ticket', payload);
+        try {
+            const payload: any = {
+                p_pass_id: passId,
+                p_staff_id: profile?.id,
+                p_confirm_new_package: confirmNewPackage,
+                p_selected_ticket_id: selectedTicketId || null
+            };
 
-        if (error) {
-            setCheckinError(error.message);
+            const { data, error } = await supabase.rpc('checkin_pass_and_issue_ticket', payload);
 
-            return;
-        }
-
-        // --- Handle Multi-Package Selection ---
-        if (!data.success && data.needs_package_selection) {
-            setAvailablePackages(data.available_packages || []);
-            setPendingCheckinCode(passId);
-            setShowPackageSelectModal(true);
-            return;
-        }
-
-        // --- Cảnh báo kích hoạt gói mới ---
-        if (!data.success && data.needs_confirmation) {
-            const info = data.new_package_info;
-            const catLabel = info.category === 'LESSON' ? 'Gói học bơi' : 'Gói bơi';
-
-            // Dùng message từ backend để hiển thị đúng ngữ cảnh
-            const headerMsg = data.message || 'Xác nhận kích hoạt gói';
-
-
-            const confirmed = await showConfirm({
-                title: 'Kích hoạt gói mới',
-                message: headerMsg,
-                icon: '📦',
-                type: 'warning',
-                confirmText: '⚡ Kích hoạt & Trừ 1 buổi',
-                cancelText: 'Không kích hoạt',
-                details: [
-                    { label: 'Khách hàng', value: info.customer_name || 'N/A' },
-                    { label: 'Loại gói', value: `${catLabel} — ${info.type_name}` },
-                    { label: 'Số buổi', value: `${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}` },
-                ],
-            });
-
-            if (confirmed) {
-                // Gọi lại với confirm = true, truyền selected_ticket_id nếu có
-                await doCheckin(passId, true, data.selected_ticket_id || undefined);
-            }
-            return;
-        }
-
-        if (!data.success) {
-            setCheckinError(data.message);
-
-            return;
-        }
-
-        // --- Success ---
-        const passCategory = data.pass_status.category || '';
-        const passTypeName = data.pass_status.type_name || '';
-        toast.success(
-            data.is_new_package ? '🆕 Kích hoạt gói mới thành công' : '✅ Check-in thành công',
-            `📦 Gói: ${passTypeName}\n` +
-            (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} buổi.` : 'Không giới hạn lượt.') +
-            (data.requires_gate_ticket === false ? '\n📋 Chỉ điểm danh (không in vé cổng).' : '')
-        );
-
-
-        // --- Cập nhật giao diện in vé con (chỉ khi requires_gate_ticket = true)
-        if (data.requires_gate_ticket !== false) {
-            let newTix = [];
-            if (data.new_tickets && Array.isArray(data.new_tickets)) {
-                newTix = data.new_tickets;
-            } else if (data.new_ticket) {
-                newTix = [data.new_ticket];
+            if (error) {
+                setCheckinError(error.message);
+                return;
             }
 
-            if (newTix.length > 0) {
-                setSoldTickets(newTix.map((t: any) => ({
-                    id: t.id,
-                    ticket_type_id: '',
-                    status: 'UNUSED',
-                    customer_birth_year: null,
-                    price_paid: t.price_paid,
-                    sold_at: t.sold_at,
-                    valid_from: new Date().toISOString().split('T')[0],
-                    valid_until: new Date().toISOString().split('T')[0],
-                    type_name: t.type_name,
-                    pool_close_time: t.pool_close_time,
-                    remaining_sessions: 1,
-                    customer_name: t.customer_name,
-                    customer_phone: null,
-                    sold_by: profile?.id || null,
-                    last_scan_direction: null,
-                    last_scan_at: null,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                    payment_method: 'CASH',
-                    pass_category: passCategory,
-                    pass_remaining_sessions: data.pass_status.remaining_sessions
-                })));
+            // --- Handle Multi-Package Selection ---
+            if (!data.success && data.needs_package_selection) {
+                setAvailablePackages(data.available_packages || []);
+                setPendingCheckinCode(passId);
+                setShowPackageSelectModal(true);
+                return;
             }
-        }
 
-        setCheckinCode('');
-        // Refresh check-in history after successful check-in
-        if (historyMode === 'TODAY') fetchCheckinHistory();
+            // --- Cảnh báo kích hoạt gói mới ---
+            if (!data.success && data.needs_confirmation) {
+                const info = data.new_package_info;
+                const catLabel = info.category === 'LESSON' ? 'Gói học bơi' : 'Gói bơi';
+                const headerMsg = data.message || 'Xác nhận kích hoạt gói';
+
+                // Nhả khóa trước khi mở popup confirm để lần gọi đệ quy không bị chặn
+                isCheckingInRef.current = false;
+
+                const confirmed = await showConfirm({
+                    title: 'Kích hoạt gói mới',
+                    message: headerMsg,
+                    icon: '📦',
+                    type: 'warning',
+                    confirmText: '⚡ Kích hoạt & Trừ 1 buổi',
+                    cancelText: 'Không kích hoạt',
+                    details: [
+                        { label: 'Khách hàng', value: info.customer_name || 'N/A' },
+                        { label: 'Loại gói', value: `${catLabel} — ${info.type_name}` },
+                        { label: 'Số buổi', value: `${info.total_sessions || info.remaining_sessions || 'Không giới hạn'}` },
+                    ],
+                });
+
+                if (confirmed) {
+                    await doCheckin(passId, true, data.selected_ticket_id || undefined);
+                }
+                return;
+            }
+
+            if (!data.success) {
+                setCheckinError(data.message);
+                return;
+            }
+
+            // --- Success ---
+            const passCategory = data.pass_status.category || '';
+            const passTypeName = data.pass_status.type_name || '';
+            toast.success(
+                data.is_new_package ? '🆕 Kích hoạt gói mới thành công' : '✅ Check-in thành công',
+                `📦 Gói: ${passTypeName}\n` +
+                (data.pass_status.remaining_sessions !== null ? `Còn lại: ${data.pass_status.remaining_sessions} buổi.` : 'Không giới hạn lượt.') +
+                (data.requires_gate_ticket === false ? '\n📋 Chỉ điểm danh (không in vé cổng).' : '')
+            );
+
+            // --- Cập nhật giao diện in vé con (hỗ trợ cả tickets_issued từ migration 054/058 và new_tickets cũ) ---
+            if (data.requires_gate_ticket !== false) {
+                const todayLocal = getTodayLocalVN();
+                let newTix: any[] = [];
+                if (Array.isArray(data.tickets_issued) && data.tickets_issued.length > 0) {
+                    newTix = data.tickets_issued;
+                } else if (Array.isArray(data.new_tickets) && data.new_tickets.length > 0) {
+                    newTix = data.new_tickets;
+                } else if (data.ticket_issued) {
+                    newTix = [data.ticket_issued];
+                } else if (data.new_ticket) {
+                    newTix = [data.new_ticket];
+                }
+
+                if (newTix.length > 0) {
+                    setSoldTickets(newTix.map((t: any) => ({
+                        id: t.id,
+                        ticket_type_id: '',
+                        status: 'UNUSED',
+                        customer_birth_year: null,
+                        price_paid: t.price_paid,
+                        sold_at: t.sold_at,
+                        valid_from: todayLocal,
+                        valid_until: todayLocal,
+                        type_name: t.type_name,
+                        pool_close_time: t.pool_close_time,
+                        remaining_sessions: 1,
+                        customer_name: t.customer_name,
+                        customer_phone: null,
+                        sold_by: profile?.id || null,
+                        last_scan_direction: null,
+                        last_scan_at: null,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        payment_method: 'CASH',
+                        pass_category: passCategory,
+                        pass_remaining_sessions: data.pass_status.remaining_sessions
+                    })));
+                }
+            }
+
+            setCheckinCode('');
+            if (historyMode === 'TODAY') fetchCheckinHistory();
+        } finally {
+            isCheckingInRef.current = false;
+        }
     }
 
     async function handleCheckinSubmit(e: React.FormEvent) {
         e.preventDefault();
         setCheckinError('');
-        if (!checkinCode.trim()) return;
+        if (!checkinCode.trim() || checkingIn || isCheckingInRef.current) return;
 
         setCheckingIn(true);
-        const code = checkinCode.trim().toUpperCase();
+        const code = sanitizePostgrestTerm(checkinCode.trim().toUpperCase());
 
         // Pre-fetch ticket information for preview popup
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1295,33 +1326,26 @@ export default function POSPage() {
             .order('sold_at', { ascending: false });
 
         if (error || !tickets || tickets.length === 0) {
-            // alert(`[Gỡ lỗi] Không tìm thấy vé hợp lệ để hiển thị Popup.\nCode quét: ${code}\nLý do: ${error?.message || 'tickets.length = 0'}\nSẽ gọi trực tiếp check-in cũ!`);
-            // Không tìm thấy hoặc thẻ ngày, gọi doCheckin để backend hiển thị lỗi chuẩn
             await doCheckin(code);
             setCheckingIn(false);
             return;
         }
 
-        // Lọc thẻ chưa hết hạn nếu backend xử lý sau, ta vẫn nên hiển thị cái gần nhất
         const validTickets = tickets.filter(t => t.status !== 'EXPIRED');
 
         if (validTickets.length === 0) {
-            // Để backend báo lỗi hết hạn
             await doCheckin(code);
             setCheckingIn(false);
             return;
         }
 
-        // Kiểm tra có nhiều LOẠI gói khác nhau không (theo ticket_type_id)
         const uniqueTypes = new Set(validTickets.map(t => t.ticket_type_id));
         if (uniqueTypes.size > 1) {
-            // Nhiều loại gói → bỏ qua preview, gọi thẳng doCheckin để backend Smart Selection xử lý
             await doCheckin(code);
             setCheckingIn(false);
             return;
         }
 
-        // Chỉ 1 loại gói → Hiển thị popup preview với thông tin gói
         setPreviewTicket(validTickets[0]);
         setCheckingIn(false);
     }
@@ -1331,6 +1355,58 @@ export default function POSPage() {
         setCheckingIn(true);
         await doCheckin(pendingCheckinCode.trim().toUpperCase(), false, ticketId);
         setCheckingIn(false);
+    }
+
+    async function handleCancelCheckinHistoryItem(h: any) {
+        if (profile?.role !== 'ADMIN') return;
+        const reason = window.prompt(`Nhập lý do hủy lượt check-in của "${h.customer_name || 'Khách'}":`, 'Check-in nhầm');
+        if (!reason || !reason.trim()) return;
+
+        // Ưu tiên gọi RPC cancel_checkin_log (hỗ trợ cả vé không qua cổng), fallback sang cancel_ticket
+        if (h.isFromCheckinLogs) {
+            const { data, error } = await supabase.rpc('cancel_checkin_log', {
+                p_log_id: h.id,
+                p_reason: reason.trim(),
+                p_cancelled_by: profile.id
+            });
+            if (error && (error.code === 'PGRST202' || error.message?.includes('cancel_checkin_log'))) {
+                if (h.gate_ticket_id) {
+                    const fallbackRes = await supabase.rpc('cancel_ticket', {
+                        p_ticket_id: h.gate_ticket_id,
+                        p_reason: reason.trim(),
+                        p_cancelled_by: profile.id
+                    });
+                    if (fallbackRes.error || !fallbackRes.data?.success) {
+                        toast.error('Lỗi hủy check-in', fallbackRes.error?.message || fallbackRes.data?.message);
+                        return;
+                    }
+                    await supabase.from('checkin_logs').update({ status: 'CANCELLED' }).eq('id', h.id);
+                    toast.success('Đã hủy check-in', fallbackRes.data.message);
+                    fetchCheckinHistory(historyMode === 'SEARCH' ? historySearchTerm : undefined);
+                    return;
+                }
+                toast.error('Cần cập nhật DB', 'Vui lòng chạy file migration 058 trên Supabase để hủy lượt điểm danh không in vé cổng.');
+                return;
+            }
+            if (error || !data?.success) {
+                toast.error('Lỗi hủy check-in', error?.message || data?.message);
+                return;
+            }
+            toast.success('Đã hủy check-in', data.message);
+            fetchCheckinHistory(historyMode === 'SEARCH' ? historySearchTerm : undefined);
+        } else {
+            const { data, error } = await supabase.rpc('cancel_ticket', {
+                p_ticket_id: h.id,
+                p_reason: reason.trim(),
+                p_cancelled_by: profile.id
+            });
+            if (error || !data?.success) {
+                toast.error('Lỗi hủy vé', error?.message || data?.message);
+                return;
+            }
+            toast.success('Đã hủy check-in', data.message);
+            fetchCheckinHistory(historyMode === 'SEARCH' ? historySearchTerm : undefined);
+        }
     }
 
     // Auto focus scanner if tab changes to CHECKIN
@@ -1346,7 +1422,7 @@ export default function POSPage() {
     async function fetchCheckinHistory(searchQuery?: string) {
         setLoadingHistory(true);
         try {
-            const todayStr = new Date().toLocaleDateString('en-CA');
+            const todayStr = getTodayLocalVN();
 
             // --- TRY 1: Query from checkin_logs (new table, correct package names) ---
             let logQuery = supabase
@@ -1359,7 +1435,7 @@ export default function POSPage() {
                 `);
 
             if (searchQuery && searchQuery.trim().length >= 2) {
-                const term = searchQuery.trim();
+                const term = sanitizePostgrestTerm(searchQuery);
                 const { data: mc } = await supabase.from('customers').select('id')
                     .or(`card_code.ilike.%${term}%,full_name.ilike.%${term}%,phone.ilike.%${term}%`);
                 const cids = (mc || []).map((c: any) => c.id);
@@ -1367,8 +1443,8 @@ export default function POSPage() {
                 if (cids.length > 0) orP += `,customer_id.in.(${cids.join(',')})`;
                 logQuery = logQuery.or(orP).order('checked_in_at', { ascending: false }).limit(100);
             } else {
-                logQuery = logQuery.gte('checked_in_at', todayStr + 'T00:00:00')
-                    .lte('checked_in_at', todayStr + 'T23:59:59')
+                logQuery = logQuery.gte('checked_in_at', `${todayStr}T00:00:00+07:00`)
+                    .lte('checked_in_at', `${todayStr}T23:59:59.999+07:00`)
                     .order('checked_in_at', { ascending: false });
             }
 
@@ -1385,6 +1461,7 @@ export default function POSPage() {
                     is_new_activation: log.is_new_activation, requires_gate_ticket: log.requires_gate_ticket,
                     profiles: log.profiles, isCancelled: log.status === 'CANCELLED', cancellation: null,
                     gate_ticket_id: log.gate_ticket_id, source_ticket_id: log.source_ticket_id,
+                    isFromCheckinLogs: true,
                 }));
                 setCheckinHistory(mapped);
                 setLoadingHistory(false);
@@ -1400,7 +1477,7 @@ export default function POSPage() {
                 .eq('price_paid', 0).eq('total_sessions', 1);
 
             if (searchQuery && searchQuery.trim().length >= 2) {
-                const term = searchQuery.trim();
+                const term = sanitizePostgrestTerm(searchQuery);
                 const { data: mc } = await supabase.from('customers').select('id')
                     .or(`card_code.ilike.%${term}%,full_name.ilike.%${term}%,phone.ilike.%${term}%`);
                 const cids = (mc || []).map((c: any) => c.id);
@@ -1408,8 +1485,8 @@ export default function POSPage() {
                 if (cids.length > 0) orP += `,customer_id.in.(${cids.join(',')})`;
                 oldQuery = oldQuery.or(orP).order('sold_at', { ascending: false }).limit(100);
             } else {
-                oldQuery = oldQuery.gte('sold_at', todayStr + 'T00:00:00')
-                    .lte('sold_at', todayStr + 'T23:59:59')
+                oldQuery = oldQuery.gte('sold_at', `${todayStr}T00:00:00+07:00`)
+                    .lte('sold_at', `${todayStr}T23:59:59.999+07:00`)
                     .order('sold_at', { ascending: false });
             }
 
@@ -1437,33 +1514,43 @@ export default function POSPage() {
 
     if (loading) return <div className="page-loading">Đang tải...</div>;
 
-    // --- Compact tile renderers ---
-    const tileStyle = (borderColor: string, disabled?: boolean): React.CSSProperties => ({
-        background: '#fff', border: '1px solid #f1f5f9', borderRadius: '12px', padding: '14px',
-        cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left' as const, overflow: 'hidden',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.04)', transition: 'all 0.15s ease',
-        borderTop: `3px solid ${borderColor}`, opacity: disabled ? 0.55 : 1,
-        display: 'flex', flexDirection: 'column' as const, gap: '6px', minHeight: '120px',
-    });
+    // --- Compact tile renderer (Theme-aware) ---
+    const getSoftToneBg = (borderColor: string) => {
+        if (borderColor === '#3b82f6') return 'var(--accent-blue-soft)';
+        if (borderColor === '#8b5cf6') return 'var(--accent-purple-soft)';
+        if (borderColor === '#10b981') return 'var(--accent-green-soft)';
+        return 'var(--accent-orange-soft)';
+    };
 
     const renderTile = (item: { id: string; name: string; icon: string; price: number; borderColor: string; badge?: string; badge2?: string; badgeColor?: string; disabled?: boolean; onClick: () => void }) => (
-        <button key={item.id} onClick={item.onClick} disabled={selling || item.disabled}
-            style={tileStyle(item.borderColor, item.disabled)}
-            onMouseEnter={e => { if (!item.disabled) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'; } }}
-            onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)'; }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '17px' }}>{item.icon}</span>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1d27', lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{item.name}</div>
+        <button
+            key={item.id}
+            type="button"
+            onClick={item.onClick}
+            disabled={selling || item.disabled}
+            className="pos-tile"
+        >
+            <div className="pos-tile-top">
+                <span className="pos-tile-icon" style={{ background: getSoftToneBg(item.borderColor) }}>
+                    {item.icon}
+                </span>
+                {item.badge && (
+                    <span className="pos-tile-badge" title={item.badge}>
+                        {item.badge}
+                    </span>
+                )}
             </div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: item.borderColor, marginTop: 'auto' }}>
-                {item.price.toLocaleString('vi-VN')}đ
-            </div>
-            {(item.badge || item.badge2) && (
-                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                    {item.badge && <span style={{ background: item.badgeColor || '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 600 }}>{item.badge}</span>}
-                    {item.badge2 && <span style={{ background: item.badgeColor || '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 600 }}>{item.badge2}</span>}
+            <div>
+                <div className="pos-tile-name">{item.name}</div>
+                <div className="pos-tile-price" style={{ color: item.borderColor }}>
+                    {item.price.toLocaleString('vi-VN')}đ
                 </div>
-            )}
+                {item.badge2 && (
+                    <div className="pos-tile-badges" style={{ marginTop: '6px' }}>
+                        <span className="pos-tile-badge">{item.badge2}</span>
+                    </div>
+                )}
+            </div>
         </button>
     );
 
@@ -1857,74 +1944,76 @@ export default function POSPage() {
     }
 
     return (
-        <div className="page-container" style={{ maxWidth: '1200px' }}>
-            <div className="page-header flex-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                    <h1>{activeTab === 'SELL' ? '🏪 Bán Hàng' : '📸 Check-in Thẻ'}</h1>
-                    <p>{activeTab === 'SELL' ? 'Chọn sản phẩm / dịch vụ để bán' : 'Quét mã Thẻ của khách để in vé lượt'}</p>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '12px' }}>
-                    <button className={`btn ${activeTab === 'SELL' ? 'btn-primary' : 'btn-ghost'}`} style={{ border: 'none', margin: 0, padding: '8px 16px' }} onClick={() => setActiveTab('SELL')}>Bán Hàng <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '4px' }}>(F4)</span></button>
-                    <button className={`btn ${activeTab === 'CHECKIN' ? 'btn-primary' : 'btn-ghost'}`} style={{ border: 'none', margin: 0, padding: '8px 16px' }} onClick={() => setActiveTab('CHECKIN')}>Quẹt Thẻ Gói <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '4px' }}>(F2)</span></button>
-                </div>
-            </div>
+        <div className="page-container">
+            <PageHeader
+                title={activeTab === 'SELL' ? '🏪 Bán Vé & Bán Hàng' : '💳 Quẹt Thẻ Gói (Check-in)'}
+                subtitle={activeTab === 'SELL' ? 'Chọn vé, gói bơi hoặc sản phẩm bán lẻ · Phím tắt F2 / F3 / F4' : 'Quét mã thẻ khách hàng để xác nhận và in vé lượt qua cổng'}
+                actions={
+                    <SegmentedTabs
+                        tabs={[
+                            { key: 'SELL', label: 'Bán Hàng (F4)', icon: '🏪' },
+                            { key: 'CHECKIN', label: 'Quẹt Thẻ Gói (F2)', icon: '💳' },
+                        ]}
+                        activeKey={activeTab}
+                        onChange={(k) => setActiveTab(k as 'SELL' | 'CHECKIN')}
+                    />
+                }
+            />
 
             {activeTab === 'SELL' && (
-                <div style={{ display: 'flex', gap: '24px', animation: 'fadeIn 0.3s ease', alignItems: 'flex-start' }}>
+                <div className="pos-layout">
 
-                    {/* LEFT COLUMN: Search + Filter Tabs + Product Grid */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        {/* Search Bar */}
-                        <div style={{ position: 'relative' }}>
-                            <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', fontSize: '18px', color: '#94a3b8' }}>🔍</span>
+                    {/* LEFT COLUMN: Search + Hotkeys + Filter Tabs + Product Grid */}
+                    <div className="pos-catalog-col">
+                        <div className="pos-search-bar">
+                            <span className="pos-search-icon">🔍</span>
                             <input
                                 type="text"
-                                placeholder="Tìm sản phẩm, vé, dịch vụ..."
+                                className="pos-search-input"
+                                placeholder="Tìm sản phẩm, vé lượt, vé tháng, khóa học..."
                                 value={searchTerm}
                                 onChange={e => setSearchTerm(e.target.value)}
-                                style={{
-                                    width: '100%', padding: '12px 16px 12px 44px', border: '1px solid #e2e8f0',
-                                    borderRadius: '12px', fontSize: '14px', background: '#fff',
-                                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)', outline: 'none',
-                                    transition: 'border-color 0.2s',
-                                }}
-                                onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
-                                onBlur={e => e.currentTarget.style.borderColor = '#e2e8f0'}
                             />
                             {searchTerm && (
-                                <button onClick={() => setSearchTerm('')}
-                                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#94a3b8' }}>✕</button>
+                                <button type="button" className="pos-search-clear" onClick={() => setSearchTerm('')}>✕</button>
                             )}
                         </div>
 
-                        {/* Category Tabs */}
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            {categoryTabs.map(tab => (
-                                <button key={tab.key}
-                                    onClick={() => setActiveCategory(tab.key)}
-                                    style={{
-                                        padding: '7px 14px', borderRadius: '20px', border: 'none',
-                                        fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-                                        background: activeCategory === tab.key ? '#3b82f6' : '#f1f5f9',
-                                        color: activeCategory === tab.key ? '#fff' : '#475569',
-                                        transition: 'all 0.15s',
-                                        display: 'flex', alignItems: 'center', gap: '4px',
-                                    }}>
-                                    <span>{tab.icon}</span> {tab.label}
-                                    <span style={{
-                                        background: activeCategory === tab.key ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
-                                        padding: '1px 7px', borderRadius: '10px', fontSize: '11px', fontWeight: 700,
-                                        marginLeft: '2px',
-                                    }}>{tab.count}</span>
-                                </button>
-                            ))}
-                        </div>
+                        {hotkeyCustomers.length > 0 && (
+                            <div className="pos-hotkey-strip">
+                                <span className="pos-hotkey-label">Khách nhanh:</span>
+                                {hotkeyCustomers.map(hc => (
+                                    <button
+                                        key={hc.id}
+                                        type="button"
+                                        className={`pos-hotkey-chip ${selectedCustomerId === hc.id ? 'active' : ''}`}
+                                        onClick={() => {
+                                            setCustomerName(hc.full_name);
+                                            setCustomerPhone(hc.phone);
+                                            setCardCode(hc.card_code);
+                                            setSelectedCustomerId(hc.id);
+                                            setSelectedCustomerBirthDate(hc.birth_date || null);
+                                        }}
+                                    >
+                                        <span className="pos-hotkey-kbd">{hc.hotkey}</span>
+                                        <span>{hc.full_name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        <SegmentedTabs
+                            size="sm"
+                            tabs={categoryTabs.map(t => ({ key: t.key, label: t.label, icon: t.icon, count: t.count }))}
+                            activeKey={activeCategory}
+                            onChange={(k) => setActiveCategory(k)}
+                        />
 
                         {/* Product Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: '12px', alignContent: 'start' }}>
+                        <div className="pos-grid">
                             {filteredItems.length > 0 ? filteredItems.map(item => renderTile(item)) : (
-                                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
-                                    <div style={{ fontSize: '40px', marginBottom: '8px' }}>🔍</div>
+                                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '44px 0', color: 'var(--text-muted)' }}>
+                                    <div style={{ fontSize: '38px', marginBottom: '8px' }}>🔍</div>
                                     <p>Không tìm thấy sản phẩm "{searchTerm}"</p>
                                 </div>
                             )}
@@ -1932,20 +2021,33 @@ export default function POSPage() {
                     </div>
 
                     {/* RIGHT COLUMN: CART */}
-                    <div style={{ width: '360px', background: '#fff', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 120px)', position: 'sticky', top: '24px' }}>
-                        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                <h2 style={{ fontSize: '18px', margin: 0 }}>🛒 Giỏ hàng</h2>
-                                <span style={{ background: 'var(--bg-hover)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 }}>{cart.length} món</span>
+                    <div className="pos-cart">
+                        <div className="pos-cart-header">
+                            <div className="pos-cart-title-row">
+                                <h2>🛒 Giỏ hàng</h2>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Badge variant="blue" className="tabular-nums">{cart.length} món</Badge>
+                                    {cart.length > 0 && (
+                                        <button
+                                            type="button"
+                                            className="btn btn-ghost btn-sm"
+                                            style={{ padding: '3px 8px', color: 'var(--accent-red)' }}
+                                            onClick={() => setCart([])}
+                                        >
+                                            Xóa
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             {/* ALWAYS-VISIBLE CUSTOMER SEARCH BAR */}
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                 <div style={{ flex: 1, position: 'relative' }}>
-                                    <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: '#94a3b8' }}>🔍</span>
+                                    <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: 'var(--text-muted)' }}>🔍</span>
                                     <input
                                         ref={customerSearchRef}
                                         type="text"
+                                        className="input"
                                         placeholder="Tìm tên, SĐT, mã thẻ..."
                                         value={custSearchTerm}
                                         onChange={async (e) => {
@@ -1962,39 +2064,29 @@ export default function POSPage() {
                                             setCustSearchResults((data || []) as Customer[]);
                                             setSearchingCust(false);
                                         }}
-                                        style={{
-                                            width: '100%', padding: '8px 10px 8px 32px', fontSize: '13px',
-                                            borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none',
-                                            background: '#f8fafc',
-                                        }}
-                                        onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
-                                        onBlur={e => e.currentTarget.style.borderColor = '#e2e8f0'}
+                                        style={{ padding: '7px 36px 7px 30px', fontSize: '12.5px' }}
                                     />
-                                    <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: '#94a3b8', background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>F3</span>
+                                    <span style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '10px', color: 'var(--text-muted)', background: 'var(--bg-subtle)', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>F3</span>
                                 </div>
                                 <button
+                                    type="button"
+                                    className="btn btn-outline"
                                     onClick={() => {
                                         setShowNewCustomerModal(true);
                                         setNewCustCardCode(''); setNewCustName(''); setNewCustPhone('');
                                         setNewCustEmail(''); setNewCustBirthDate(''); setNewCustGender('');
                                         setNewCustNote(''); setNewCustAddress(''); setNewCustHotkey('');
                                     }}
-                                    style={{
-                                        width: '36px', height: '36px', borderRadius: '8px', border: '1px solid #e2e8f0',
-                                        background: '#f8fafc',
-                                        color: '#475569',
-                                        cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        transition: 'all 0.15s', flexShrink: 0,
-                                    }}
+                                    style={{ width: '34px', height: '34px', padding: 0, fontSize: '16px', flexShrink: 0 }}
                                     title="Thêm khách hàng mới"
                                 >+</button>
                             </div>
 
                             {/* Search results dropdown */}
                             {custSearchResults.length > 0 && (
-                                <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', marginTop: '6px', maxHeight: '150px', overflowY: 'auto', background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                                <div className="pos-cust-dropdown">
                                     {custSearchResults.map((c, i) => (
-                                        <div key={c.id || i} onClick={() => {
+                                        <div key={c.id || i} className="pos-cust-option" onClick={() => {
                                             setCustomerName(c.full_name);
                                             setCustomerPhone(c.phone);
                                             setCardCode(c.card_code);
@@ -2002,83 +2094,76 @@ export default function POSPage() {
                                             setSelectedCustomerBirthDate(c.birth_date || null);
                                             setCustSearchResults([]);
                                             setCustSearchTerm('');
-                                        }} style={{
-                                            padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9',
-                                            fontSize: '13px', transition: 'background 0.15s'
-                                        }}
-                                            onMouseEnter={e => (e.currentTarget.style.background = '#f0f9ff')}
-                                            onMouseLeave={e => (e.currentTarget.style.background = '')}>
+                                        }}>
                                             <strong>{c.full_name || 'N/A'}</strong>
-                                            <span style={{ marginLeft: '8px', color: '#64748b' }}>📞 {c.phone || '—'}</span>
-                                            <span style={{ marginLeft: '8px', color: '#94a3b8', fontSize: '11px' }}>🏷️ {maskCardCode(c.card_code) || '—'}</span>
-                                            {c.hotkey && <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {c.hotkey}</span>}
+                                            <span style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>📞 {c.phone || '—'}</span>
+                                            <span style={{ marginLeft: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>🏷️ {maskCardCode(c.card_code) || '—'}</span>
+                                            {c.hotkey && <Badge variant="blue" className="ml-1">⌨ {c.hotkey}</Badge>}
                                         </div>
                                     ))}
                                 </div>
                             )}
-                            {searchingCust && <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>Đang tìm...</span>}
+                            {searchingCust && <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Đang tìm...</span>}
 
                             {/* Selected customer info display */}
                             {(cardCode || customerName || customerPhone) && (
-                                <div style={{ marginTop: '8px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ fontSize: '12px' }}>
-                                        <div style={{ fontWeight: 600, color: '#166534' }}>👤 {customerName || 'Chưa có tên'}</div>
-                                        <div style={{ color: '#64748b', marginTop: '2px' }}>
+                                <div className="pos-cust-selected">
+                                    <div style={{ fontSize: '12px', minWidth: 0 }}>
+                                        <div style={{ fontWeight: 700, color: 'var(--accent-green)' }}>👤 {customerName || 'Chưa có tên'}</div>
+                                        <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
                                             {cardCode && <span>🏷️ {maskCardCode(cardCode)}</span>}
                                             {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
-                                            {(() => { const hk = hotkeyCustomers.find(c => c.id === selectedCustomerId); return hk?.hotkey ? <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {hk.hotkey}</span> : null; })()}
+                                            {(() => { const hk = hotkeyCustomers.find(c => c.id === selectedCustomerId); return hk?.hotkey ? <Badge variant="blue">⌨ {hk.hotkey}</Badge> : null; })()}
                                         </div>
                                     </div>
-                                    <button onClick={() => {
+                                    <button type="button" onClick={() => {
                                         setCustomerName(''); setCustomerPhone(''); setCardCode('');
                                         setSelectedCustomerId(null); setSelectedCustomerBirthDate(null); setCustSearchTerm('');
-                                    }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>&times;</button>
+                                    }} style={{ background: 'none', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>&times;</button>
                                 </div>
                             )}
                         </div>
 
-                        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div className="pos-cart-items">
                             {cart.length === 0 ? (
-                                <div style={{ textAlign: 'center', color: 'var(--text-muted)', margin: '40px 0' }}>
-                                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>🛍️</div>
-                                    <p>Giỏ hàng trống</p>
+                                <div style={{ textAlign: 'center', color: 'var(--text-muted)', margin: '36px 0' }}>
+                                    <div style={{ fontSize: '36px', marginBottom: '10px' }}>🛍️</div>
+                                    <p style={{ fontSize: '13px' }}>Chưa có sản phẩm trong giỏ</p>
                                 </div>
                             ) : (
                                 cart.map(c => (
-                                    <div key={c.cart_id} style={{ display: 'flex', gap: '12px', paddingBottom: '12px', borderBottom: '1px dashed #e2e8f0' }}>
-                                        <div style={{ flex: 1 }}>
-                                            <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                                                <span>{c.item.name} {c.type === 'TICKET' && c.item.category === 'LESSON' ? (c.privateSessions ? `(${c.privateSessions} buổi)` : '') : ''}</span>
-                                                <button onClick={() => setCart(prev => prev.filter(x => x.cart_id !== c.cart_id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0 4px' }}>&times;</button>
+                                    <div key={c.cart_id} className="pos-cart-row">
+                                        <div style={{ fontWeight: 600, fontSize: '13.5px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                                            <span>{c.item.name} {c.type === 'TICKET' && c.item.category === 'LESSON' ? (c.privateSessions ? `(${c.privateSessions} buổi)` : '') : ''}</span>
+                                            <button type="button" onClick={() => setCart(prev => prev.filter(x => x.cart_id !== c.cart_id))} style={{ background: 'none', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', padding: '0 4px', fontSize: '16px', lineHeight: 1 }}>&times;</button>
+                                        </div>
+                                        {(c.customerName || c.customerName2 || (c as any).extraStudents?.length) && (
+                                            <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                                                👤 {c.customerName}{(c as any).extraStudents?.length ? ` & ${(c as any).extraStudents.map((s: any) => s.name).filter(Boolean).join(', ')}` : c.customerName2 ? ` & ${c.customerName2}` : ''}
                                             </div>
-                                            {(c.customerName || c.customerName2 || (c as any).extraStudents?.length) && (
-                                                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>
-                                                    👤 {c.customerName}{(c as any).extraStudents?.length ? ` & ${(c as any).extraStudents.map((s: any) => s.name).filter(Boolean).join(', ')}` : c.customerName2 ? ` & ${c.customerName2}` : ''}
+                                        )}
+                                        {c.promoId && (() => {
+                                            const promo = promotions.find(p => p.id === c.promoId);
+                                            if (!promo) return null;
+                                            const label = promo.type === 'AMOUNT' ? `−${promo.value.toLocaleString('vi-VN')}đ` : promo.type === 'PERCENT' ? `−${promo.value}%` : `+${promo.value} buổi`;
+                                            return (
+                                                <div style={{ fontSize: '11.5px', color: 'var(--accent-green)', fontWeight: 600 }}>
+                                                    🎁 {promo.name} ({label})
                                                 </div>
-                                            )}
-                                            {c.promoId && (() => {
-                                                const promo = promotions.find(p => p.id === c.promoId);
-                                                if (!promo) return null;
-                                                const label = promo.type === 'AMOUNT' ? `−${promo.value.toLocaleString('vi-VN')}đ` : promo.type === 'PERCENT' ? `−${promo.value}%` : `+${promo.value} buổi`;
-                                                return (
-                                                    <div style={{ fontSize: '11px', color: '#059669', fontWeight: 600, marginBottom: '4px' }}>
-                                                        🎁 {promo.name} ({label})
-                                                    </div>
-                                                );
-                                            })()}
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-                                                <div style={{ color: 'var(--accent-blue)', fontWeight: 700, fontSize: '14px' }}>{c.unitPrice.toLocaleString('vi-VN')}đ</div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '2px' }}>
-                                                    <button onClick={() => setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: Math.max(1, x.quantity - 1), subtotal: Math.max(1, x.quantity - 1) * x.unitPrice } : x))} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>-</button>
-                                                    <span style={{ fontSize: '13px', fontWeight: 600, width: '20px', textAlign: 'center' }}>{c.quantity}</span>
-                                                    <button onClick={() => {
-                                                        if (c.type === 'PRODUCT' && c.quantity + 1 > c.item.stock_quantity) {
-                                                            toast.warning('Hết hàng', `Sản phẩm chỉ còn ${c.item.stock_quantity} trong kho!`);
-                                                            return;
-                                                        }
-                                                        setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: x.quantity + 1, subtotal: (x.quantity + 1) * x.unitPrice } : x));
-                                                    }} style={{ border: 'none', background: 'none', width: '24px', cursor: 'pointer', fontWeight: 'bold' }}>+</button>
-                                                </div>
+                                            );
+                                        })()}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                                            <div className="tabular-nums" style={{ color: 'var(--accent-blue)', fontWeight: 700, fontSize: '13.5px' }}>{c.unitPrice.toLocaleString('vi-VN')}đ</div>
+                                            <div className="pos-qty-stepper">
+                                                <button type="button" className="pos-qty-btn" onClick={() => setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: Math.max(1, x.quantity - 1), subtotal: Math.max(1, x.quantity - 1) * x.unitPrice } : x))}>−</button>
+                                                <span className="tabular-nums" style={{ fontSize: '12.5px', fontWeight: 700, minWidth: '20px', textAlign: 'center' }}>{c.quantity}</span>
+                                                <button type="button" className="pos-qty-btn" onClick={() => {
+                                                    if (c.type === 'PRODUCT' && c.quantity + 1 > c.item.stock_quantity) {
+                                                        toast.warning('Hết hàng', `Sản phẩm chỉ còn ${c.item.stock_quantity} trong kho!`);
+                                                        return;
+                                                    }
+                                                    setCart(prev => prev.map(x => x.cart_id === c.cart_id ? { ...x, quantity: x.quantity + 1, subtotal: (x.quantity + 1) * x.unitPrice } : x));
+                                                }}>+</button>
                                             </div>
                                         </div>
                                     </div>
@@ -2086,12 +2171,31 @@ export default function POSPage() {
                             )}
                         </div>
 
-                        <div style={{ padding: '20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottomLeftRadius: '16px', borderBottomRightRadius: '16px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '18px', fontWeight: 800 }}>
-                                <span>Tổng cộng:</span>
-                                <span style={{ color: 'var(--accent-green)' }}>{cart.reduce((s, c) => s + c.subtotal, 0).toLocaleString('vi-VN')}đ</span>
+                        <div className="pos-cart-footer">
+                            <div className="pos-pay-pills">
+                                {([
+                                    ['CASH', '💵 Tiền mặt'],
+                                    ['TRANSFER', '🏦 Chuyển khoản'],
+                                    ['CARD', '💳 Thẻ POS'],
+                                    ['TRANSFER_COMPANY', '🏢 CK Công ty'],
+                                ] as const).map(([key, label]) => (
+                                    <button
+                                        key={key}
+                                        type="button"
+                                        className={`pos-pay-pill ${selectedPaymentMethod === key ? 'active' : ''}`}
+                                        onClick={() => setSelectedPaymentMethod(key)}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
                             </div>
-                            <button className="btn btn-primary" style={{ width: '100%', padding: '14px', fontSize: '15px' }} disabled={cart.length === 0 || selling}
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '16px', fontWeight: 800 }}>
+                                <span>Tổng cộng</span>
+                                <span className="tabular-nums" style={{ color: 'var(--accent-green)', fontSize: '20px' }}>{cart.reduce((s, c) => s + c.subtotal, 0).toLocaleString('vi-VN')}đ</span>
+                            </div>
+
+                            <button type="button" className="btn btn-primary btn-full" style={{ padding: '12px', fontSize: '14.5px' }} disabled={cart.length === 0 || selling}
                                 onClick={() => {
                                     const hasAdvanced = cart.some(c => c.type === 'TICKET' && c.item.category !== 'DAILY');
                                     if (hasAdvanced && (!cardCode.trim() || !customerPhone.trim())) {
@@ -2101,7 +2205,7 @@ export default function POSPage() {
                                     }
                                     setShowPaymentModal(true);
                                 }}>
-                                Thanh Toán
+                                Thanh Toán &amp; In Vé
                             </button>
                         </div>
                     </div>
@@ -2109,146 +2213,116 @@ export default function POSPage() {
             )}
 
             {activeTab === 'CHECKIN' && (
-                <div style={{ animation: 'fadeIn 0.3s ease' }}>
-                    {/* SCAN FORM */}
-                    <section className="dashboard-content-card" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
-                        <div style={{ padding: '32px 0' }}>
-                            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📸</div>
-                            <h2 style={{ marginBottom: '8px' }}>Quét Thẻ Tháng / Thẻ Nhiều Buổi</h2>
-                            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Dùng máy quét mã vạch hoặc nhập mã thẻ vào ô bên dưới để lấy vé lượt cho khách đi qua cổng kiểm soát.</p>
+                <div className="pos-checkin-grid">
+                    {/* LEFT: SCAN FORM */}
+                    <section className="ui-card" style={{ textAlign: 'center', padding: '28px 22px' }}>
+                        <div style={{ fontSize: '42px', marginBottom: '12px' }}>💳</div>
+                        <h2 style={{ fontSize: '17px', fontWeight: 700, marginBottom: '6px' }}>Quét Thẻ Tháng / Thẻ Nhiều Buổi</h2>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
+                            Dùng máy quét hoặc nhập mã thẻ để xem trước thông tin gói và in vé lượt qua cổng.
+                        </p>
 
-                            <form onSubmit={handleCheckinSubmit} style={{ maxWidth: '400px', margin: '0 auto' }}>
-                                {checkinError && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{checkinError}</div>}
-                                <input
-                                    ref={scannerInputRef}
-                                    type="text"
-                                    className="input"
-                                    placeholder="Quét mã QR Thẻ vào đây..."
-                                    value={checkinCode}
-                                    onChange={e => setCheckinCode(normalizeScannerInput(e.target.value))}
-                                    style={{ textAlign: 'center', fontSize: '18px', padding: '16px', marginBottom: '16px' }}
-                                    autoFocus
-                                />
-                                <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }} disabled={checkingIn}>
-                                    {checkingIn ? 'Đang xử lý...' : 'Xác nhận (Enter)'}
-                                </button>
-                            </form>
-                        </div>
+                        <form onSubmit={handleCheckinSubmit}>
+                            {checkinError && <div className="alert alert-error">{checkinError}</div>}
+                            <input
+                                ref={scannerInputRef}
+                                type="text"
+                                className="input"
+                                placeholder="Quét mã QR Thẻ vào đây..."
+                                value={checkinCode}
+                                onChange={e => setCheckinCode(normalizeScannerInput(e.target.value))}
+                                style={{ textAlign: 'center', fontSize: '17px', padding: '14px', marginBottom: '12px', fontWeight: 600 }}
+                                autoFocus
+                            />
+                            <button type="submit" className="btn btn-primary btn-full" style={{ padding: '12px' }} disabled={checkingIn}>
+                                {checkingIn ? 'Đang xử lý...' : 'Xác nhận (Enter)'}
+                            </button>
+                        </form>
                     </section>
 
-                    {/* CHECK-IN HISTORY */}
-                    <section style={{ maxWidth: '900px', margin: '24px auto 0', background: '#fff', borderRadius: '16px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-                        {/* Header */}
-                        <div style={{ padding: '20px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                            <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* RIGHT: CHECK-IN HISTORY */}
+                    <section className="ui-card ui-card-flush">
+                        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>
                                 📋 Lịch Sử Check-in Thẻ Gói
                             </h3>
-                            <div style={{ display: 'flex', gap: '6px', background: '#f1f5f9', padding: '3px', borderRadius: '10px' }}>
-                                <button
-                                    onClick={() => { setHistoryMode('TODAY'); setHistorySearchTerm(''); fetchCheckinHistory(); }}
-                                    style={{
-                                        padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
-                                        cursor: 'pointer', transition: 'all 0.15s',
-                                        background: historyMode === 'TODAY' ? '#3b82f6' : 'transparent',
-                                        color: historyMode === 'TODAY' ? '#fff' : '#475569',
-                                    }}
-                                >📅 Hôm nay</button>
-                                <button
-                                    onClick={() => setHistoryMode('SEARCH')}
-                                    style={{
-                                        padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
-                                        cursor: 'pointer', transition: 'all 0.15s',
-                                        background: historyMode === 'SEARCH' ? '#3b82f6' : 'transparent',
-                                        color: historyMode === 'SEARCH' ? '#fff' : '#475569',
-                                    }}
-                                >🔍 Tra cứu KH</button>
-                            </div>
+                            <SegmentedTabs
+                                size="sm"
+                                tabs={[
+                                    { key: 'TODAY', label: 'Hôm nay', icon: '📅' },
+                                    { key: 'SEARCH', label: 'Tra cứu KH', icon: '🔍' },
+                                ]}
+                                activeKey={historyMode}
+                                onChange={(k) => {
+                                    if (k === 'TODAY') {
+                                        setHistoryMode('TODAY');
+                                        setHistorySearchTerm('');
+                                        fetchCheckinHistory();
+                                    } else {
+                                        setHistoryMode('SEARCH');
+                                    }
+                                }}
+                            />
                         </div>
 
-                        {/* Search bar (only in SEARCH mode) */}
                         {historyMode === 'SEARCH' && (
-                            <div style={{ padding: '12px 24px 0' }}>
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                    <div style={{ flex: 1, position: 'relative' }}>
-                                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: '#94a3b8' }}>🔍</span>
-                                        <input
-                                            type="text"
-                                            placeholder="Nhập mã thẻ, tên KH hoặc SĐT..."
-                                            value={historySearchTerm}
-                                            onChange={e => setHistorySearchTerm(e.target.value)}
-                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchCheckinHistory(historySearchTerm); } }}
-                                            style={{
-                                                width: '100%', padding: '10px 12px 10px 36px', fontSize: '14px',
-                                                borderRadius: '10px', border: '1px solid #e2e8f0', outline: 'none',
-                                                background: '#f8fafc', transition: 'border-color 0.2s',
-                                            }}
-                                            onFocus={e => e.currentTarget.style.borderColor = '#3b82f6'}
-                                            onBlur={e => e.currentTarget.style.borderColor = '#e2e8f0'}
-                                        />
-                                    </div>
-                                    <button
-                                        className="btn btn-primary"
-                                        style={{ padding: '10px 20px', fontSize: '13px', whiteSpace: 'nowrap' }}
-                                        onClick={() => fetchCheckinHistory(historySearchTerm)}
-                                        disabled={loadingHistory || historySearchTerm.trim().length < 2}
-                                    >
-                                        {loadingHistory ? '...' : 'Tìm kiếm'}
-                                    </button>
-                                </div>
+                            <div style={{ padding: '14px 20px 0', display: 'flex', gap: '8px' }}>
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="Nhập mã thẻ, tên KH hoặc SĐT..."
+                                    value={historySearchTerm}
+                                    onChange={e => setHistorySearchTerm(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchCheckinHistory(historySearchTerm); } }}
+                                />
+                                <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    onClick={() => fetchCheckinHistory(historySearchTerm)}
+                                    disabled={loadingHistory || historySearchTerm.trim().length < 2}
+                                >
+                                    {loadingHistory ? '...' : 'Tìm kiếm'}
+                                </button>
                             </div>
                         )}
 
-                        {/* Stats summary */}
                         {!loadingHistory && checkinHistory.length > 0 && (
-                            <div style={{ padding: '12px 24px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569' }}>
-                                    <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 10px', borderRadius: '12px', fontWeight: 700, fontSize: '13px' }}>
-                                        {checkinHistory.filter(h => !h.isCancelled).length}
-                                    </span>
-                                    Thành công
-                                </div>
+                            <div style={{ padding: '12px 20px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <Badge variant="green">{checkinHistory.filter(h => !h.isCancelled).length} Thành công</Badge>
                                 {checkinHistory.filter(h => h.isCancelled).length > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569' }}>
-                                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 10px', borderRadius: '12px', fontWeight: 700, fontSize: '13px' }}>
-                                            {checkinHistory.filter(h => h.isCancelled).length}
-                                        </span>
-                                        Đã hủy
-                                    </div>
+                                    <Badge variant="red">{checkinHistory.filter(h => h.isCancelled).length} Đã hủy</Badge>
                                 )}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#94a3b8' }}>
-                                    Tổng: {checkinHistory.length} lượt
-                                </div>
+                                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tổng: {checkinHistory.length} lượt</span>
                             </div>
                         )}
 
-                        {/* Table */}
-                        <div style={{ padding: '0 24px 20px', overflowX: 'auto' }}>
+                        <div style={{ padding: '0 20px 18px', overflowX: 'auto' }}>
                             {loadingHistory ? (
-                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
-                                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>⏳</div>
-                                    Đang tải...
+                                <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--text-muted)' }}>
+                                    ⏳ Đang tải...
                                 </div>
                             ) : checkinHistory.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
-                                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭</div>
-                                    <p style={{ margin: 0 }}>
+                                <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--text-muted)' }}>
+                                    <div style={{ fontSize: '30px', marginBottom: '6px' }}>📭</div>
+                                    <p style={{ margin: 0, fontSize: '13px' }}>
                                         {historyMode === 'TODAY'
                                             ? 'Chưa có lượt check-in nào hôm nay.'
                                             : 'Không tìm thấy lịch sử check-in cho từ khóa này.'}
                                     </p>
                                 </div>
                             ) : (
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                                <table>
                                     <thead>
-                                        <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Thời gian</th>
-                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Khách hàng</th>
-                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Loại gói</th>
-                                            <th style={{ textAlign: 'center', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Trạng thái</th>
-                                            <th style={{ textAlign: 'left', padding: '10px 8px', color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Nhân viên</th>
+                                        <tr>
+                                            <th>Thời gian</th>
+                                            <th>Khách hàng</th>
+                                            <th>Loại gói</th>
+                                            <th style={{ textAlign: 'center' }}>Trạng thái</th>
+                                            <th>Nhân viên</th>
+                                            {profile?.role === 'ADMIN' && <th style={{ textAlign: 'center' }}>Thao tác</th>}
                                         </tr>
                                     </thead>
-<tbody>
+                                    <tbody>
                                         {checkinHistory.map((h, idx) => {
                                             const time = new Date(h.sold_at);
                                             const timeStr = time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
@@ -2257,62 +2331,58 @@ export default function POSPage() {
                                                 : '';
                                             const ticketTypeName = h.ticket_type_name || 'N/A';
                                             const staffName = (h.profiles as any)?.full_name || '—';
-                                            const sportType = h.sport_type;
-                                            const sportIcon = sportType === 'BASKETBALL' ? '🏀' : '🏊';
+                                            const sportIcon = h.sport_type === 'BASKETBALL' ? '🏀' : '🏊';
 
                                             return (
-                                                <tr key={h.id || idx} style={{
-                                                    borderBottom: '1px solid #f1f5f9',
-                                                    background: h.isCancelled ? '#fef2f2' : (idx % 2 === 0 ? '#fff' : '#fafbfc'),
-                                                    transition: 'background 0.15s',
-                                                }}
-                                                    onMouseEnter={e => e.currentTarget.style.background = h.isCancelled ? '#fee2e2' : '#f0f9ff'}
-                                                    onMouseLeave={e => e.currentTarget.style.background = h.isCancelled ? '#fef2f2' : (idx % 2 === 0 ? '#fff' : '#fafbfc')}
-                                                >
-                                                    <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
-                                                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{timeStr}</span>
-                                                        {dateStr && <span style={{ color: '#94a3b8', marginLeft: '4px', fontSize: '11px' }}>{dateStr}</span>}
+                                                <tr key={h.id || idx} style={{ opacity: h.isCancelled ? 0.75 : 1 }}>
+                                                    <td style={{ whiteSpace: 'nowrap' }} className="tabular-nums">
+                                                        <strong>{timeStr}</strong>
+                                                        {dateStr && <span style={{ color: 'var(--text-muted)', marginLeft: '4px', fontSize: '11px' }}>{dateStr}</span>}
                                                     </td>
-                                                    <td style={{ padding: '10px 8px' }}>
-                                                        <div style={{ fontWeight: 600, color: '#1e293b' }}>{h.customer_name || 'Khách vãng lai'}</div>
+                                                    <td>
+                                                        <div style={{ fontWeight: 600 }}>{h.customer_name || 'Khách vãng lai'}</div>
                                                         {h.card_code && (
-                                                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                                                                🏷️ {profile?.role === 'ADMIN' ? h.card_code : (h.card_code.length > 6 ? `${h.card_code.substring(0, 5)}***${h.card_code.substring(h.card_code.length - 4)}` : '***')}
+                                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                                                🏷️ {maskCardCode(h.card_code)}
                                                             </div>
                                                         )}
                                                     </td>
-                                                    <td style={{ padding: '10px 8px' }}>
+                                                    <td>
                                                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                                             {sportIcon} {ticketTypeName}
                                                         </span>
                                                     </td>
-                                                    <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                                                    <td style={{ textAlign: 'center' }}>
                                                         {h.isCancelled ? (
                                                             <div>
-                                                                <span style={{
-                                                                    display: 'inline-block',
-                                                                    background: '#fee2e2', color: '#991b1b',
-                                                                    padding: '3px 10px', borderRadius: '12px',
-                                                                    fontSize: '11px', fontWeight: 700,
-                                                                }}>🔄 Đã hủy</span>
+                                                                <Badge variant="red">🔄 Đã hủy</Badge>
                                                                 {h.cancellation?.sessions_restored > 0 && (
-                                                                    <div style={{ fontSize: '10px', color: '#059669', marginTop: '3px', fontWeight: 600 }}>
+                                                                    <div style={{ fontSize: '10px', color: 'var(--accent-green)', marginTop: '3px', fontWeight: 600 }}>
                                                                         +{h.cancellation.sessions_restored} buổi hoàn trả
                                                                     </div>
                                                                 )}
                                                             </div>
                                                         ) : (
-                                                            <span style={{
-                                                                display: 'inline-block',
-                                                                background: '#dcfce7', color: '#166534',
-                                                                padding: '3px 10px', borderRadius: '12px',
-                                                                fontSize: '11px', fontWeight: 700,
-                                                            }}>✅ Thành công</span>
+                                                            <Badge variant="green">✅ Thành công</Badge>
                                                         )}
                                                     </td>
-                                                    <td style={{ padding: '10px 8px', color: '#64748b', fontSize: '12px' }}>
+                                                    <td style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
                                                         {staffName}
                                                     </td>
+                                                    {profile?.role === 'ADMIN' && (
+                                                        <td style={{ textAlign: 'center' }}>
+                                                            {!h.isCancelled && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="btn btn-sm"
+                                                                    style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', padding: '3px 8px', fontSize: '11px' }}
+                                                                    onClick={() => handleCancelCheckinHistoryItem(h)}
+                                                                >
+                                                                    ✕ Hủy
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             );
                                         })}
@@ -2327,36 +2397,36 @@ export default function POSPage() {
             {/* Modal Preview Checkin */}
             {previewTicket && (
                 <div className="modal-overlay" onClick={() => setPreviewTicket(null)}>
-                    <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px', padding: '32px 24px' }}>
-                        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-                            <div style={{ fontSize: '56px', marginBottom: '12px', lineHeight: 1 }}>👤</div>
-                            <h2 style={{ fontSize: '22px', marginBottom: '8px' }}>Xác Nhận Check-in</h2>
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Kiểm tra thông tin khách hàng trước khi xác nhận</p>
+                    <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px', padding: '28px 24px' }}>
+                        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                            <div style={{ fontSize: '48px', marginBottom: '10px', lineHeight: 1 }}>👤</div>
+                            <h2 style={{ fontSize: '20px', marginBottom: '6px' }}>Xác Nhận Check-in</h2>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Kiểm tra thông tin khách hàng trước khi xác nhận</p>
                         </div>
 
-                        <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '28px', border: '1px solid #e2e8f0', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
-                                <span style={{ color: '#64748b', fontSize: '14px' }}>Khách hàng</span>
-                                <strong style={{ fontSize: '16px', color: '#0f172a' }}>{previewTicket.customer_name || 'Khách vãng lai'}</strong>
+                        <div className="pos-summary-box" style={{ marginBottom: '22px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--border-color)' }}>
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Khách hàng</span>
+                                <strong style={{ fontSize: '15px', color: 'var(--text-primary)' }}>{previewTicket.customer_name || 'Khách vãng lai'}</strong>
                             </div>
 
                             {previewTicket.customer_phone && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
-                                    <span style={{ color: '#64748b', fontSize: '14px' }}>Số điện thoại</span>
-                                    <strong style={{ fontSize: '15px' }}>{previewTicket.customer_phone}</strong>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--border-color)' }}>
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Số điện thoại</span>
+                                    <strong style={{ fontSize: '14px' }}>{previewTicket.customer_phone}</strong>
                                 </div>
                             )}
 
                             {previewTicket.customer_name_2 && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
-                                    <span style={{ color: '#64748b', fontSize: '14px' }}>Học viên 2</span>
-                                    <strong style={{ fontSize: '15px' }}>{previewTicket.customer_name_2}</strong>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--border-color)' }}>
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Học viên 2</span>
+                                    <strong style={{ fontSize: '14px' }}>{previewTicket.customer_name_2}</strong>
                                 </div>
                             )}
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
-                                <span style={{ color: '#64748b', fontSize: '14px' }}>Gói thẻ</span>
-                                <span style={{ fontWeight: 700, color: '#3b82f6', textAlign: 'right', fontSize: '15px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--border-color)' }}>
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Gói thẻ</span>
+                                <span style={{ fontWeight: 700, color: 'var(--accent-blue)', textAlign: 'right', fontSize: '14px' }}>
                                     {previewTicket.ticket_types?.sport_type === 'BASKETBALL'
                                         ? '🏀 ' + previewTicket.ticket_types?.name
                                         : previewTicket.ticket_types?.category === 'LESSON'
@@ -2365,47 +2435,49 @@ export default function POSPage() {
                                 </span>
                             </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px dashed #cbd5e1' }}>
-                                <span style={{ color: '#64748b', fontSize: '14px' }}>Số buổi còn lại</span>
-                                <strong style={{ fontSize: '16px', color: previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 3 ? '#ef4444' : '#10b981' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--border-color)' }}>
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Số buổi còn lại</span>
+                                <strong className="tabular-nums" style={{ fontSize: '15px', color: previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 3 ? 'var(--accent-red)' : 'var(--accent-green)' }}>
                                     {previewTicket.remaining_sessions !== null ? `${previewTicket.remaining_sessions} buổi` : 'Không giới hạn'}
                                 </strong>
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ color: '#64748b', fontSize: '14px' }}>Trạng thái</span>
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '13.5px' }}>Trạng thái</span>
                                 {(() => {
                                     let finalStatus = previewTicket.status;
                                     if (finalStatus !== 'EXPIRED' && finalStatus !== 'CANCELLED') {
                                         const today = new Date().toLocaleDateString('en-CA');
+                                        const todayMs = new Date(today).getTime();
+                                        const validUntilMs = previewTicket.valid_until ? new Date(previewTicket.valid_until).getTime() : 0;
+                                        const daysLeft = validUntilMs ? (validUntilMs - todayMs) / 86400000 : 999;
+
                                         if (previewTicket.valid_until && previewTicket.valid_until < today) finalStatus = 'EXPIRED';
                                         else if (previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 0) finalStatus = 'EXPIRED';
-                                        else if (previewTicket.valid_until && (new Date(previewTicket.valid_until).getTime() - Date.now()) / 86400000 <= 7 && (new Date(previewTicket.valid_until).getTime() - Date.now()) / 86400000 > 0) finalStatus = 'EXPIRING';
+                                        else if (previewTicket.valid_until && daysLeft <= 7 && daysLeft > 0) finalStatus = 'EXPIRING';
                                         else if (previewTicket.remaining_sessions !== null && previewTicket.remaining_sessions <= 3 && previewTicket.remaining_sessions > 0) finalStatus = 'EXPIRING';
                                         else if (previewTicket.remaining_sessions !== null && previewTicket.total_sessions !== null && previewTicket.remaining_sessions < previewTicket.total_sessions) finalStatus = 'IN_USE';
                                         else if (['IN', 'OUT', 'IN_USE'].includes(finalStatus)) finalStatus = 'IN_USE';
                                         else finalStatus = 'UNUSED';
                                     }
-                                    let badge = { text: 'Chưa sử dụng', bg: '#dbeafe', color: '#1d4ed8' };
-                                    if (['IN_USE', 'ACTIVE'].includes(finalStatus)) badge = { text: 'Đang sử dụng', bg: '#dcfce7', color: '#166534' };
-                                    else if (finalStatus === 'EXPIRING') badge = { text: 'Sắp hết hạn', bg: '#fef3c7', color: '#92400e' };
-                                    else if (finalStatus === 'EXPIRED') badge = { text: 'Hết hạn', bg: '#fee2e2', color: '#991b1b' };
-                                    return (
-                                        <span style={{ background: badge.bg, color: badge.color, padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600 }}>
-                                            {badge.text}
-                                        </span>
-                                    );
+                                    let variant: 'blue' | 'green' | 'amber' | 'red' = 'blue';
+                                    let text = 'Chưa sử dụng';
+                                    if (['IN_USE', 'ACTIVE'].includes(finalStatus)) { variant = 'green'; text = 'Đang sử dụng'; }
+                                    else if (finalStatus === 'EXPIRING') { variant = 'amber'; text = 'Sắp hết hạn'; }
+                                    else if (finalStatus === 'EXPIRED') { variant = 'red'; text = 'Hết hạn'; }
+                                    return <Badge variant={variant}>{text}</Badge>;
                                 })()}
                             </div>
                         </div>
 
                         <div style={{ display: 'flex', gap: '12px' }}>
-                            <button className="btn btn-secondary" style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#f1f5f9', color: '#475569', border: 'none' }} onClick={() => setPreviewTicket(null)}>
+                            <button type="button" className="btn btn-outline" style={{ flex: 1, padding: '12px' }} onClick={() => setPreviewTicket(null)}>
                                 Hủy (ESC)
                             </button>
                             <button
+                                type="button"
                                 className="btn btn-primary"
-                                style={{ flex: 1, padding: '14px', fontSize: '15px', fontWeight: 600, background: '#0ea5e9', border: 'none', boxShadow: '0 4px 12px rgba(14,165,233,0.3)' }}
+                                style={{ flex: 1, padding: '12px' }}
                                 disabled={checkingIn}
                                 onClick={async () => {
                                     setCheckingIn(true);
@@ -2428,7 +2500,7 @@ export default function POSPage() {
                         <h2>{selectedAdvancedType.category === 'DAILY' ? 'Xác nhận bán vé' : 'Thông tin khách thẻ'}</h2>
 
                         {/* Summary Block */}
-                        <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
+                        <div className="pos-summary-box" style={{ marginBottom: '20px' }}>
                             <p style={{ margin: 0, fontWeight: 500 }}>{selectedAdvancedType.name}</p>
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px' }}>
@@ -2769,7 +2841,25 @@ export default function POSPage() {
                                 {voucherError && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '6px', fontWeight: 500 }}>❌ {voucherError}</div>}
                             </div>
 
-
+                            {(() => {
+                                const { baseSubtotal, finalSubtotal } = computeAdvancedFinalPrice(selectedAdvancedType);
+                                const hasDiscount = finalSubtotal < baseSubtotal;
+                                return (
+                                    <div style={{ background: '#f8fafc', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-secondary)' }}>Thành tiền tạm tính:</span>
+                                        <div style={{ textAlign: 'right' }}>
+                                            {hasDiscount && (
+                                                <span style={{ textDecoration: 'line-through', color: '#94a3b8', fontSize: '12.5px', marginRight: '8px' }}>
+                                                    {baseSubtotal.toLocaleString('vi-VN')}đ
+                                                </span>
+                                            )}
+                                            <strong style={{ fontSize: '17px', color: 'var(--accent-green)' }} className="tabular-nums">
+                                                {finalSubtotal.toLocaleString('vi-VN')}đ
+                                            </strong>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="modal-actions">
                                 <button type="button" className="btn btn-ghost" disabled={selling} onClick={() => setSelectedAdvancedType(null)}>
@@ -2785,13 +2875,11 @@ export default function POSPage() {
             )}
             {/* MODAL THANH TOÁN (Giỏ Hàng) */}
             {showPaymentModal && cart.length > 0 && (
-                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-                    onClick={() => setShowPaymentModal(false)}>
-                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', maxWidth: '400px', width: '90%', boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', overflowY: 'auto' }}
-                        onClick={e => e.stopPropagation()}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                            <h2 style={{ fontSize: '18px' }}>💳 Thanh toán Đơn hàng</h2>
-                            <button onClick={() => setShowPaymentModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
+                <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
+                    <div className="modal-card" style={{ maxWidth: '420px' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                            <h2 style={{ fontSize: '18px', margin: 0 }}>💳 Thanh toán Đơn hàng</h2>
+                            <button type="button" onClick={() => setShowPaymentModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
                         </div>
 
                         {(() => {
@@ -2802,10 +2890,10 @@ export default function POSPage() {
                             return (
                                 <form onSubmit={(e) => { e.preventDefault(); doCheckoutOrder(); }}>
                                     {hasAdvanced && (
-                                        <div style={{ background: '#f0fdf4', padding: '14px 16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #bbf7d0' }}>
-                                            <div style={{ fontSize: '13px', fontWeight: 600, color: '#166534', marginBottom: '4px' }}>👤 Thông tin cấp thẻ</div>
+                                        <div style={{ background: 'var(--accent-green-soft)', padding: '12px 14px', borderRadius: '10px', marginBottom: '16px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                                            <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--accent-green)', marginBottom: '4px' }}>👤 Thông tin cấp thẻ</div>
                                             <div style={{ fontSize: '14px', fontWeight: 600 }}>{customerName || 'Chưa có tên'}</div>
-                                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                                                 {cardCode && <span>🏷️ {maskCardCode(cardCode)}</span>}
                                                 {customerPhone && <span style={{ marginLeft: '8px' }}>📞 {customerPhone}</span>}
                                             </div>
@@ -2813,47 +2901,47 @@ export default function POSPage() {
                                     )}
 
                                     {!isFreeTicket ? (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
-                                            <div style={{ marginBottom: '8px', fontWeight: 600, fontSize: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                                            <div style={{ marginBottom: '6px', fontWeight: 700, fontSize: '16px', display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Tổng tiền:</span>
-                                                <span style={{ color: 'var(--accent-green)' }}>{actualPrice.toLocaleString('vi-VN')}đ</span>
+                                                <span className="tabular-nums" style={{ color: 'var(--accent-green)' }}>{actualPrice.toLocaleString('vi-VN')}đ</span>
                                             </div>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CASH' ? 'var(--bg-hover)' : 'transparent' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '11px 12px', border: `1px solid ${selectedPaymentMethod === 'CASH' ? 'var(--accent-blue)' : 'var(--border-color)'}`, borderRadius: '10px', cursor: 'pointer', background: selectedPaymentMethod === 'CASH' ? 'var(--accent-blue-soft)' : 'transparent' }}>
                                                 <input type="radio" name="payment" value="CASH" checked={selectedPaymentMethod === 'CASH'} onChange={() => setSelectedPaymentMethod('CASH')} />
-                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>💵 Tiền mặt</span>
+                                                <span style={{ fontSize: '15px', fontWeight: 600 }}>💵 Tiền mặt</span>
                                             </label>
 
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER' ? 'var(--bg-hover)' : 'transparent' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '11px 12px', border: `1px solid ${selectedPaymentMethod === 'TRANSFER' ? 'var(--accent-blue)' : 'var(--border-color)'}`, borderRadius: '10px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER' ? 'var(--accent-blue-soft)' : 'transparent' }}>
                                                 <input type="radio" name="payment" value="TRANSFER" checked={selectedPaymentMethod === 'TRANSFER'} onChange={() => setSelectedPaymentMethod('TRANSFER')} />
-                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>🏦 Chuyển khoản</span>
+                                                <span style={{ fontSize: '15px', fontWeight: 600 }}>🏦 Chuyển khoản</span>
                                             </label>
 
                                             {selectedPaymentMethod === 'TRANSFER' && bizInfo.bank_account_number && (
-                                                <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', marginLeft: '32px', border: '1px dashed #cbd5e1' }}>
+                                                <div style={{ padding: '12px', background: 'var(--bg-subtle)', borderRadius: '10px', fontSize: '13px', marginLeft: '20px', border: '1px dashed var(--border-color)' }}>
                                                     <div>Ngân hàng: <strong>{bizInfo.bank_name}</strong></div>
-                                                    <div>Số tài khoản: <strong style={{ color: '#0f172a', fontSize: '15px' }}>{bizInfo.bank_account_number}</strong></div>
+                                                    <div>Số tài khoản: <strong style={{ color: 'var(--text-primary)', fontSize: '15px' }}>{bizInfo.bank_account_number}</strong></div>
                                                     <div>Chủ TK: <strong>{bizInfo.bank_account_name}</strong></div>
                                                 </div>
                                             )}
 
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'CARD' ? 'var(--bg-hover)' : 'transparent' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '11px 12px', border: `1px solid ${selectedPaymentMethod === 'CARD' ? 'var(--accent-blue)' : 'var(--border-color)'}`, borderRadius: '10px', cursor: 'pointer', background: selectedPaymentMethod === 'CARD' ? 'var(--accent-blue-soft)' : 'transparent' }}>
                                                 <input type="radio" name="payment" value="CARD" checked={selectedPaymentMethod === 'CARD'} onChange={() => setSelectedPaymentMethod('CARD')} />
-                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>💳 Quẹt thẻ (POS)</span>
+                                                <span style={{ fontSize: '15px', fontWeight: 600 }}>💳 Quẹt thẻ (POS)</span>
                                             </label>
 
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER_COMPANY' ? 'var(--bg-hover)' : 'transparent' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '11px 12px', border: `1px solid ${selectedPaymentMethod === 'TRANSFER_COMPANY' ? 'var(--accent-blue)' : 'var(--border-color)'}`, borderRadius: '10px', cursor: 'pointer', background: selectedPaymentMethod === 'TRANSFER_COMPANY' ? 'var(--accent-blue-soft)' : 'transparent' }}>
                                                 <input type="radio" name="payment" value="TRANSFER_COMPANY" checked={selectedPaymentMethod === 'TRANSFER_COMPANY'} onChange={() => setSelectedPaymentMethod('TRANSFER_COMPANY')} />
-                                                <span style={{ fontSize: '16px', fontWeight: 500 }}>🏢 Chuyển khoản công ty</span>
+                                                <span style={{ fontSize: '15px', fontWeight: 600 }}>🏢 Chuyển khoản công ty</span>
                                             </label>
                                         </div>
                                     ) : (
-                                        <div style={{ marginBottom: '24px', textAlign: 'center', color: 'var(--accent-green)' }}>
+                                        <div style={{ marginBottom: '20px', textAlign: 'center', color: 'var(--accent-green)' }}>
                                             <p style={{ fontSize: '16px', fontWeight: 600 }}>Miễn phí (0đ)</p>
                                         </div>
                                     )}
 
                                     <div style={{ display: 'flex', gap: '12px' }}>
-                                        <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowPaymentModal(false)}>Hủy</button>
+                                        <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={() => setShowPaymentModal(false)}>Hủy</button>
                                         <button type="submit" className="btn btn-primary" style={{ flex: 2 }} disabled={selling}>
                                             {selling ? 'Đang xử lý...' : (isFreeTicket ? 'PHÁT HÀNH' : 'XÁC NHẬN THANH TOÁN')}
                                         </button>
@@ -2978,61 +3066,51 @@ export default function POSPage() {
             )}
             {/* ========== NEW CUSTOMER MODAL POPUP ========== */}
             {showNewCustomerModal && (
-                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                <div className="modal-overlay" style={{ zIndex: 9999 }}
                     onKeyDown={(e) => {
                         if (e.key === 'Escape') setShowNewCustomerModal(false);
                         if (e.key === 'F8') { e.preventDefault(); handleSaveNewCustomer(); }
                     }}>
-                    <div style={{ background: '#fff', borderRadius: '16px', width: '480px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
+                    <div className="modal-card" style={{ width: '480px', maxWidth: '95vw', padding: 0 }}>
                         {/* Header */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #e2e8f0' }}>
-                            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Tạo khách hàng mới</h2>
-                            <button onClick={() => setShowNewCustomerModal(false)} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#64748b', padding: '4px' }}>&times;</button>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid var(--border-color)' }}>
+                            <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>Tạo khách hàng mới</h2>
+                            <button type="button" onClick={() => setShowNewCustomerModal(false)} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: 'var(--text-secondary)', padding: '4px' }}>&times;</button>
                         </div>
                         {/* Form */}
-                        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                            {/* Mã thẻ */}
-                            <div>
-                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Mã thẻ <span style={{ color: '#ef4444' }}>*</span></label>
-                                <input type="text" value={newCustCardCode} onChange={e => setNewCustCardCode(e.target.value)} placeholder="Mã thẻ nhựa" autoFocus
-                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                        <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>Mã thẻ <span style={{ color: 'var(--accent-red)' }}>*</span></label>
+                                <input type="text" value={newCustCardCode} onChange={e => setNewCustCardCode(e.target.value)} placeholder="Mã thẻ nhựa" autoFocus />
                             </div>
-                            {/* Họ và tên */}
-                            <div>
-                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Họ và tên <span style={{ color: '#ef4444' }}>*</span></label>
-                                <input type="text" value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Họ và tên"
-                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>Họ và tên <span style={{ color: 'var(--accent-red)' }}>*</span></label>
+                                <input type="text" value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Họ và tên" />
                             </div>
-                            {/* SĐT + Email */}
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                <div>
-                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Số điện thoại <span style={{ color: '#ef4444' }}>*</span></label>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label>Số điện thoại <span style={{ color: 'var(--accent-red)' }}>*</span></label>
                                     <input type="tel" value={newCustPhone} onChange={e => handleNewCustPhoneChange(e.target.value)} placeholder="Số điện thoại"
-                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: duplicatePhoneCustomer ? '2px solid #f59e0b' : '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box', background: duplicatePhoneCustomer ? '#fffbeb' : '' }} />
+                                        style={{ borderColor: duplicatePhoneCustomer ? 'var(--accent-orange)' : undefined }} />
                                     {duplicatePhoneCustomer && (
-                                        <div style={{ marginTop: '6px', padding: '8px 12px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '8px', fontSize: '12px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            <span>⚠️</span>
-                                            <span>SĐT đã đăng ký cho: <strong>{duplicatePhoneCustomer.full_name}</strong> ({duplicatePhoneCustomer.card_code}) — Thông tin đã được tải lại. Bấm <strong>Lưu</strong> để chọn KH này.</span>
+                                        <div style={{ marginTop: '6px', padding: '8px 10px', background: 'var(--accent-orange-soft)', border: '1px solid rgba(245, 158, 11, 0.35)', borderRadius: '8px', fontSize: '11.5px', color: 'var(--text-primary)' }}>
+                                            ⚠️ SĐT đã đăng ký cho: <strong>{duplicatePhoneCustomer.full_name}</strong> ({duplicatePhoneCustomer.card_code}). Bấm <strong>Lưu</strong> để chọn KH này.
                                         </div>
                                     )}
                                 </div>
-                                <div>
-                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Email</label>
-                                    <input type="email" value={newCustEmail} onChange={e => setNewCustEmail(e.target.value)} placeholder="Email"
-                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label>Email</label>
+                                    <input type="email" value={newCustEmail} onChange={e => setNewCustEmail(e.target.value)} placeholder="Email" />
                                 </div>
                             </div>
-                            {/* Ngày sinh + Giới tính */}
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                <div>
-                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Ngày sinh</label>
-                                    <input type="date" value={newCustBirthDate} onChange={e => setNewCustBirthDate(e.target.value)}
-                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label>Ngày sinh</label>
+                                    <input type="date" value={newCustBirthDate} onChange={e => setNewCustBirthDate(e.target.value)} />
                                 </div>
-                                <div>
-                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Giới tính</label>
-                                    <select value={newCustGender} onChange={e => setNewCustGender(e.target.value)}
-                                        style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', background: '#fff', boxSizing: 'border-box' }}>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label>Giới tính</label>
+                                    <select value={newCustGender} onChange={e => setNewCustGender(e.target.value)}>
                                         <option value="">Chọn giới tính</option>
                                         <option value="Nam">Nam</option>
                                         <option value="Nữ">Nữ</option>
@@ -3040,40 +3118,32 @@ export default function POSPage() {
                                     </select>
                                 </div>
                             </div>
-                            {/* Ghi chú */}
-                            <div>
-                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Ghi chú</label>
-                                <input type="text" value={newCustNote} onChange={e => setNewCustNote(e.target.value)} placeholder="Ghi chú"
-                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>Ghi chú</label>
+                                <input type="text" value={newCustNote} onChange={e => setNewCustNote(e.target.value)} placeholder="Ghi chú" />
                             </div>
-                            {/* Địa chỉ */}
-                            <div>
-                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Địa chỉ</label>
-                                <input type="text" value={newCustAddress} onChange={e => setNewCustAddress(e.target.value)} placeholder="Địa chỉ"
-                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', boxSizing: 'border-box' }} />
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>Địa chỉ</label>
+                                <input type="text" value={newCustAddress} onChange={e => setNewCustAddress(e.target.value)} placeholder="Địa chỉ" />
                             </div>
-                            {/* Phím tắt */}
-                            <div>
-                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>⌨ Phím tắt <span style={{ color: '#94a3b8', fontWeight: 400 }}>(không bắt buộc)</span></label>
-                                <select value={newCustHotkey} onChange={e => setNewCustHotkey(e.target.value)}
-                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none', background: '#fff', boxSizing: 'border-box' }}>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>⌨ Phím tắt <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(không bắt buộc)</span></label>
+                                <select value={newCustHotkey} onChange={e => setNewCustHotkey(e.target.value)}>
                                     <option value="">-- Không gán phím tắt --</option>
                                     {['F6', 'F7', 'F8', 'F9', 'F10'].filter(k => !hotkeyCustomers.some(c => c.hotkey === k)).map(k => (
                                         <option key={k} value={k}>{k}</option>
                                     ))}
                                 </select>
-                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>Gán phím tắt để nhấn nhanh điền thông tin KH khi bán hàng</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>Gán phím tắt để nhấn nhanh điền thông tin KH khi bán hàng</div>
                             </div>
                         </div>
                         {/* Footer */}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #e2e8f0' }}>
-                            <button onClick={() => setShowNewCustomerModal(false)}
-                                style={{ padding: '10px 20px', fontSize: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
-                                Hủy <span style={{ background: '#e2e8f0', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>ESC</span>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '14px 22px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-subtle)' }}>
+                            <button type="button" className="btn btn-outline" onClick={() => setShowNewCustomerModal(false)}>
+                                Hủy <span style={{ fontSize: '10px', opacity: 0.75 }}>ESC</span>
                             </button>
-                            <button onClick={handleSaveNewCustomer} disabled={savingCustomer}
-                                style={{ padding: '10px 20px', fontSize: '14px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, opacity: savingCustomer ? 0.7 : 1 }}>
-                                {savingCustomer ? 'Đang lưu...' : 'Lưu'} <span style={{ background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>F8</span>
+                            <button type="button" className="btn btn-primary" onClick={handleSaveNewCustomer} disabled={savingCustomer}>
+                                {savingCustomer ? 'Đang lưu...' : 'Lưu'} <span style={{ fontSize: '10px', opacity: 0.85 }}>F8</span>
                             </button>
                         </div>
                     </div>
@@ -3082,63 +3152,35 @@ export default function POSPage() {
 
             {/* PRODUCT VARIANT SELECTION MODAL */}
             {selectingVariantFor && (
-                <div className="modal-overlay" style={{ zIndex: 1100 }}>
-                    <div className="modal-card" style={{ maxWidth: '450px' }}>
+                <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setSelectingVariantFor(null)}>
+                    <div className="modal-card" style={{ maxWidth: '450px' }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <h2 style={{ fontSize: '18px', margin: 0 }}>Chọn phân loại: {selectingVariantFor.name}</h2>
-                            <button onClick={() => setSelectingVariantFor(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748b' }}>&times;</button>
+                            <h2 style={{ fontSize: '17px', margin: 0 }}>Chọn phân loại: {selectingVariantFor.name}</h2>
+                            <button type="button" onClick={() => setSelectingVariantFor(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>&times;</button>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
                             {products.filter(v => v.parent_id === selectingVariantFor.id && v.is_active).map(variant => (
                                 <button
                                     key={variant.id}
+                                    type="button"
+                                    className="pos-variant-btn"
                                     disabled={variant.stock_quantity <= 0}
                                     onClick={() => {
                                         handleProductSaleClick(variant);
                                         setSelectingVariantFor(null);
                                     }}
-                                    style={{
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                        padding: '14px 16px', borderRadius: '12px', border: `1px solid ${variant.stock_quantity > 0 ? '#e2e8f0' : '#f1f5f9'}`,
-                                        background: variant.stock_quantity > 0 ? '#fff' : '#f8fafc', cursor: variant.stock_quantity > 0 ? 'pointer' : 'not-allowed',
-                                        opacity: variant.stock_quantity > 0 ? 1 : 0.6,
-                                        boxShadow: variant.stock_quantity > 0 ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                                        transition: 'all 0.2s ease', textAlign: 'left'
-                                    }}
-                                    onMouseEnter={e => {
-                                        if (variant.stock_quantity > 0) {
-                                            e.currentTarget.style.borderColor = '#f59e0b';
-                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(245, 158, 11, 0.1)';
-                                            e.currentTarget.style.transform = 'translateY(-1px)';
-                                        }
-                                    }}
-                                    onMouseLeave={e => {
-                                        if (variant.stock_quantity > 0) {
-                                            e.currentTarget.style.borderColor = '#e2e8f0';
-                                            e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
-                                            e.currentTarget.style.transform = 'translateY(0)';
-                                        }
-                                    }}
                                 >
                                     <div>
-                                        <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e293b', marginBottom: '4px' }}>
+                                        <div style={{ fontWeight: 700, fontSize: '14.5px', color: 'var(--text-primary)', marginBottom: '3px' }}>
                                             {variant.sku || variant.name.replace(selectingVariantFor.name + ' — ', '')}
                                         </div>
-                                        <div style={{ fontSize: '13px', color: '#64748b' }}>
+                                        <div className="tabular-nums" style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
                                             {variant.price.toLocaleString('vi-VN')}đ / {variant.unit}
                                         </div>
                                     </div>
-                                    <div style={{ textAlign: 'right' }}>
-                                        {variant.stock_quantity > 0 ? (
-                                            <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
-                                                Còn {variant.stock_quantity}
-                                            </span>
-                                        ) : (
-                                            <span style={{ background: '#fee2e2', color: '#991b1b', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
-                                                Hết hàng
-                                            </span>
-                                        )}
-                                    </div>
+                                    <Badge variant={variant.stock_quantity > 0 ? 'green' : 'red'}>
+                                        {variant.stock_quantity > 0 ? `Còn ${variant.stock_quantity}` : 'Hết hàng'}
+                                    </Badge>
                                 </button>
                             ))}
                         </div>

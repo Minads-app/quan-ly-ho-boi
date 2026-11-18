@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
-import type { CardBank, CardBatchView, BulkExtension } from '../types';
+import type { CardBank, CardBatchView, BulkExtension, TicketType, Promotion, Voucher } from '../types';
+import { PageHeader } from '../components/ui';
 
 interface Settings {
     gate_control_mode: string;
@@ -28,57 +29,12 @@ interface DaySchedule {
 
 type WeekSchedule = Record<string, DaySchedule>;
 
-interface TicketType {
-    id: string;
-    name: string;
-    category: 'DAILY' | 'MULTI' | 'MONTHLY' | 'LESSON';
-    price: number;
-    description: string;
-    validity_days: number | null;
-    session_count: number | null;
-    is_active: boolean;
-    duration_months: number | null;
-    duration_unit: 'days' | 'months' | null;
-    lesson_class_type: 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | 'PRIVATE' | null;
-    lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
-    student_count: number | null;
-    age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
-    sport_type?: 'SWIMMING' | 'BASKETBALL';
-    requires_gate_ticket?: boolean;
-}
-
 interface LessonScheduleRow {
     id: string;
     ticket_type_id: string;
     day_of_week: number;
     start_time: string;
     end_time: string;
-}
-
-interface Promotion {
-    id: string;
-    name: string;
-    type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
-    value: number;
-    valid_from: string | null;
-    valid_until: string | null;
-    is_active: boolean;
-    applicable_ticket_types: string[] | null;
-    applicable_lesson_types: string[] | null;
-    customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
-    auto_apply: boolean;
-    combinable: boolean;
-}
-
-interface Voucher {
-    id: string;
-    promotion_id: string;
-    code: string;
-    max_uses: number | null;
-    used_count: number;
-    is_active: boolean;
-    created_at: string;
-    updated_at: string;
 }
 
 
@@ -1111,66 +1067,36 @@ export default function SettingsPage() {
     }
 
     return (
-        <div className="page-container" style={{ maxWidth: '1000px' }}>
-            <div className="page-header">
-                <h1>⚙️ Cài Đặt Hệ Thống</h1>
-                <p>Cấu hình cổng kiểm soát và các loại vé bơi</p>
-                {saved && <span className="save-badge">✓ Đã lưu</span>}
-            </div>
+        <div className="page-container">
+            <PageHeader
+                title="Cài Đặt Hệ Thống"
+                subtitle="Cấu hình cổng kiểm soát, doanh nghiệp, loại vé, khuyến mãi và ngân hàng thẻ"
+                badge={saved ? <span className="save-badge">✓ Đã lưu</span> : undefined}
+            />
 
-            {/* Tabs Navigation */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', borderBottom: '1px solid var(--border-color)', marginBottom: '24px' }}>
-                <button
-                    className={`btn ${activeTab === 'system' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('system')}
-                >
-                    🔧 Cài đặt chung
-                </button>
-                <button
-                    className={`btn ${activeTab === 'business' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('business')}
-                >
-                    🏢 Đơn vị & Thanh toán
-                </button>
-                <button
-                    className={`btn ${activeTab === 'tickets' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('tickets')}
-                >
-                    🎟️ Quản lý Loại Vé
-                </button>
-                <button
-                    className={`btn ${activeTab === 'lessons' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('lessons')}
-                >
-                    📚 Gói Khóa Học
-                </button>
-                <button
-                    className={`btn ${activeTab === 'promotions' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('promotions')}
-                >
-                    🎁 Khuyến Mãi
-                </button>
-                <button
-                    className={`btn ${activeTab === 'cards' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('cards')}
-                >
-                    💳 Ngân Hàng Thẻ
-                </button>
-                <button
-                    className={`btn ${activeTab === 'bulk_extend' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('bulk_extend')}
-                >
-                    🛠️ Gia Hạn Hàng Loạt
-                </button>
+            <div className="settings-layout">
+                <aside className="settings-subnav" aria-label="Danh mục cài đặt">
+                    {[
+                        ['system', '🔧 Cài đặt chung'],
+                        ['business', '🏢 Đơn vị & Thanh toán'],
+                        ['tickets', '🎟️ Quản lý Loại Vé'],
+                        ['lessons', '📚 Gói Khóa Học'],
+                        ['promotions', '🎁 Khuyến Mãi'],
+                        ['cards', '💳 Ngân Hàng Thẻ'],
+                        ['bulk_extend', '🛠️ Gia Hạn Hàng Loạt'],
+                    ].map(([key, label]) => (
+                        <button
+                            key={key}
+                            type="button"
+                            className={`settings-subnav-btn ${activeTab === key ? 'active' : ''}`}
+                            onClick={() => setActiveTab(key as any)}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </aside>
 
-            </div>
+                <div className="settings-content-col">
 
             {activeTab === 'business' && (
                 <div className="tab-content" style={{ animation: 'fadeIn 0.3s ease' }}>
@@ -2712,6 +2638,8 @@ export default function SettingsPage() {
                 </div>
             )}
 
+                </div>
+            </div>
         </div>
     );
 }

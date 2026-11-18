@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader } from '../components/ui';
 import type { Coach } from '../types';
 
 export default function CoachManagementPage() {
@@ -80,18 +81,18 @@ export default function CoachManagementPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header flex-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                    <h1>🏊 Quản lý Huấn Luyện Viên</h1>
-                    <p>Danh sách HLV đang hoạt động</p>
-                </div>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                    <button className="btn btn-primary" onClick={openCreate}>➕ Thêm HLV</button>
-                    <button className="btn btn-secondary" onClick={fetchCoaches}>🔄 Làm mới</button>
-                </div>
-            </div>
+            <PageHeader
+                title="Quản lý Huấn Luyện Viên"
+                subtitle="Danh sách HLV đang hoạt động và liên kết tài khoản"
+                actions={
+                    <>
+                        <button type="button" className="btn btn-primary" onClick={openCreate}>➕ Thêm HLV</button>
+                        <button type="button" className="btn btn-outline" onClick={fetchCoaches}>🔄 Làm mới</button>
+                    </>
+                }
+            />
 
-            <div className="dashboard-content-card" style={{ marginTop: '2rem' }}>
+            <div className="dashboard-content-card">
                 {loading ? (
                     <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Đang tải...</div>
                 ) : coaches.length === 0 ? (

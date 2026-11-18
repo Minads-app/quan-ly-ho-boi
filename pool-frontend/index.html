@@ -9,8 +9,19 @@
   <meta name="description" content="Hệ thống quản lý vé bơi - Bán vé, soát vé QR, kiểm soát cổng" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <title>Hệ Thống Vé Bơi</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('pool_theme');
+        if (t === 'dark' || t === 'light') {
+          document.documentElement.setAttribute('data-theme', t);
+          document.documentElement.style.colorScheme = t;
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 
 <body>

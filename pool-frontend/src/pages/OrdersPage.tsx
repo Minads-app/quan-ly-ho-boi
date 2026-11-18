@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/rules-of-hooks */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { getTodayLocalVN } from '../utils/helpers';
 import { normalizeScannerInput } from '../utils/scannerUtils';
+import { Badge, Drawer, PageHeader, SegmentedTabs } from '../components/ui';
 
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
 
@@ -121,8 +123,8 @@ export default function OrdersPage() {
                 id, total_amount, payment_method, customer_name, customer_phone, note, created_at,
                 profiles:created_by (full_name)
             `)
-            .gte('created_at', `${from}T00:00:00`)
-            .lte('created_at', `${to}T23:59:59`)
+            .gte('created_at', `${from}T00:00:00+07:00`)
+            .lte('created_at', `${to}T23:59:59.999+07:00`)
             .order('created_at', { ascending: false });
 
         if (oErr) { console.error('Error fetching orders:', oErr); setLoading(false); return; }
@@ -298,14 +300,14 @@ export default function OrdersPage() {
         const updatedRemaining = editSessions === '' ? null : Number(editSessions);
         const finalValidUntil = editValidUntil || null;
 
-        const today = new Date().toLocaleDateString('en-CA');
+        const today = getTodayLocalVN();
         const isDateExpired = finalValidUntil && finalValidUntil < today;
         const isSessionExpired = updatedRemaining !== null && updatedRemaining <= 0;
 
         if (isDateExpired || isSessionExpired) {
             finalStatus = 'EXPIRED';
         } else if (finalStatus === 'EXPIRED') {
-            finalStatus = 'IN_USE';
+            finalStatus = editValidFrom ? 'IN_USE' : 'UNUSED';
         }
 
         const updateData: any = {
@@ -316,14 +318,16 @@ export default function OrdersPage() {
             valid_until: finalValidUntil,
         };
 
-        // If card_code changes, validate via manual code flow in DB or just update tickets
-        // For simplicity in this edit form, we just update tickets.
-        // Full card mapping is available in CustomerPage
-        if (editCardCode !== (selectedPkg.card_code || '')) {
-            updateData.card_code = editCardCode || null;
-            // Best effort to insert into card_bank
-            if (editCardCode) {
-                await supabase.from('card_bank').insert({ card_code: editCardCode, prefix: 'M', status: 'USED', source: 'MANUAL', created_by: profile?.id }).select().single();
+        if (editCardCode.trim() !== (selectedPkg.card_code || '')) {
+            const cleanCard = editCardCode.trim().toUpperCase();
+            updateData.card_code = cleanCard || null;
+            if (cleanCard) {
+                await supabase
+                    .from('card_bank')
+                    .upsert(
+                        { card_code: cleanCard, prefix: 'M', status: 'USED', source: 'MANUAL', created_by: profile?.id },
+                        { onConflict: 'card_code' }
+                    );
             }
         }
 
@@ -377,105 +381,101 @@ export default function OrdersPage() {
 
     if (loading) return <div className="page-loading">Đang tải...</div>;
 
-    const thS: React.CSSProperties = { textAlign: 'left', padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap' };
-    const tdS: React.CSSProperties = { padding: '12px 16px', fontSize: '14px', whiteSpace: 'nowrap' };
-
     return (
-        <div className="page-container" style={{ maxWidth: '1100px' }}>
-            <div style={{ marginBottom: '20px' }}>
-                <h1 style={{ fontSize: '24px', fontWeight: 700 }}>🧾 Danh sách Hóa Đơn</h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Quản lý hóa đơn mua hàng và tùy chỉnh gói dịch vụ (Admin)</p>
-            </div>
+        <div className="page-container">
+            <PageHeader
+                title="Danh Sách Hóa Đơn"
+                subtitle="Quản lý hóa đơn bán hàng, điều chỉnh thông tin và tùy chỉnh gói dịch vụ (Admin)"
+            />
 
             {/* Controls */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <input type="text" placeholder="🔍 Tên KH, SĐT, Mã HĐ..."
-                    value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                    style={{ flex: 1, minWidth: '200px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)' }}
+            <div className="ui-filter-bar">
+                <input
+                    type="text"
+                    className="ui-search-input"
+                    placeholder="🔍 Tên KH, SĐT, Mã HĐ..."
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
                 />
 
-                <div style={{ display: 'flex', gap: '4px' }}>
-                    {(['THIS_MONTH', 'LAST_MONTH', 'TODAY', 'CUSTOM'] as DateRange[]).map(r => (
-                        <button key={r} className={`btn ${dateRange === r ? 'btn-primary' : 'btn-ghost'}`}
-                            style={{ padding: '6px 12px', fontSize: '13px' }}
-                            onClick={() => setDateRange(r)}>
-                            {r === 'TODAY' ? 'Hôm nay' : r === 'THIS_MONTH' ? 'Tháng này' : r === 'LAST_MONTH' ? 'Tháng trước' : 'Tùy chọn'}
-                        </button>
-                    ))}
-                    {dateRange === 'CUSTOM' && (
-                        <>
-                            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' }} />
-                            <span style={{ color: 'var(--text-secondary)' }}>→</span>
-                            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' }} />
-                        </>
-                    )}
-                </div>
+                <SegmentedTabs
+                    size="sm"
+                    tabs={[
+                        { key: 'THIS_MONTH', label: 'Tháng này' },
+                        { key: 'LAST_MONTH', label: 'Tháng trước' },
+                        { key: 'TODAY', label: 'Hôm nay' },
+                        { key: 'CUSTOM', label: 'Tùy chọn' },
+                    ]}
+                    activeKey={dateRange}
+                    onChange={(k) => setDateRange(k as DateRange)}
+                />
+                {dateRange === 'CUSTOM' && (
+                    <>
+                        <input type="date" className="ui-date-input" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                        <span style={{ color: 'var(--text-secondary)' }}>→</span>
+                        <input type="date" className="ui-date-input" value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                    </>
+                )}
             </div>
 
-            <div style={{ overflowX: 'auto', background: 'var(--bg-card)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="table-wrap">
+                <table>
                     <thead>
                         <tr>
-                            <th style={thS}>Mã ĐH</th>
-                            <th style={thS}>Ngày giờ</th>
-                            <th style={thS}>Khách hàng</th>
-                            <th style={thS}>SĐT</th>
-                            <th style={thS}>Nội dung</th>
-                            <th style={thS}>Tổng tiền</th>
-                            <th style={thS}>Thanh toán</th>
-                            <th style={thS}>Người tạo</th>
+                            <th>Mã ĐH</th>
+                            <th>Ngày giờ</th>
+                            <th>Khách hàng</th>
+                            <th>SĐT</th>
+                            <th>Nội dung</th>
+                            <th style={{ textAlign: 'right' }}>Tổng tiền</th>
+                            <th>Thanh toán</th>
+                            <th>Người tạo</th>
                         </tr>
                     </thead>
                     <tbody>
                         {filteredOrders.length === 0 ? (
                             <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Không có hóa đơn trong khoảng thời gian này.</td></tr>
                         ) : filteredOrders.map(o => (
-                            <tr key={o.id} style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', transition: 'background 0.15s' }}
-                                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                                onMouseLeave={e => (e.currentTarget.style.background = '')}
-                                onClick={() => openOrderModal(o)}>
-                                <td style={{ ...tdS, fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>{o.id.substring(0, 8).toUpperCase()}</td>
-                                <td style={tdS}>{fmtDT(o.created_at)}</td>
-                                <td style={{ ...tdS, fontWeight: 600 }}>{o.customer_name || '—'}</td>
-                                <td style={tdS}>{o.customer_phone || '—'}</td>
-                                <td style={tdS}>
-                                    <div style={{ fontSize: '13px' }}>
-                                        {o.tickets.length > 0 && <span style={{ color: '#0369a1', marginRight: '8px' }}>🎫 {o.tickets.length} vé</span>}
-                                        {o.products.length > 0 && <span style={{ color: '#9d174d' }}>🛍️ {o.products.reduce((acc, p) => acc + p.quantity, 0)} sp</span>}
+                            <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => openOrderModal(o)}>
+                                <td style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>{o.id.substring(0, 8).toUpperCase()}</td>
+                                <td className="tabular-nums">{fmtDT(o.created_at)}</td>
+                                <td style={{ fontWeight: 600 }}>{o.customer_name || '—'}</td>
+                                <td className="tabular-nums">{o.customer_phone || '—'}</td>
+                                <td>
+                                    <div style={{ fontSize: '12.5px' }}>
+                                        {o.tickets.length > 0 && <span style={{ color: 'var(--accent-blue)', marginRight: '8px', fontWeight: 600 }}>🎫 {o.tickets.length} vé</span>}
+                                        {o.products.length > 0 && <span style={{ color: 'var(--accent-purple)', fontWeight: 600 }}>🛍️ {o.products.reduce((acc, p) => acc + p.quantity, 0)} sp</span>}
                                     </div>
                                 </td>
-                                <td style={{ ...tdS, fontWeight: 700 }}>{fmt(o.total_amount)}</td>
-                                <td style={tdS}>
-                                    <span style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '4px', background: o.payment_method === 'CASH' ? '#dcfce7' : o.payment_method === 'TRANSFER' ? '#dbeafe' : o.payment_method === 'TRANSFER_COMPANY' ? '#e0f2fe' : '#f3e8ff' }}>
+                                <td className="tabular-nums" style={{ fontWeight: 700, textAlign: 'right' }}>{fmt(o.total_amount)}</td>
+                                <td>
+                                    <Badge variant={o.payment_method === 'CASH' ? 'green' : o.payment_method === 'TRANSFER' || o.payment_method === 'TRANSFER_COMPANY' ? 'blue' : 'purple'}>
                                         {o.payment_method === 'CASH' ? '💵 Tiền mặt' : o.payment_method === 'TRANSFER' ? '🏦 Chuyển khoản' : o.payment_method === 'TRANSFER_COMPANY' ? '🏢 CK Công ty' : '💳 Quẹt thẻ'}
-                                    </span>
+                                    </Badge>
                                 </td>
-                                <td style={{ ...tdS, color: 'var(--text-secondary)' }}>{o.created_by_name}</td>
+                                <td style={{ color: 'var(--text-secondary)' }}>{o.created_by_name}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
 
-            {/* ORDER DETAIL MODAL */}
-            {selectedOrder && (
-                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-                    onClick={() => { setSelectedOrder(null); setIsEditingPkg(false); setSelectedPkg(null); }}>
-
-                    <div style={{ background: 'var(--bg-card)', borderRadius: '16px', padding: '24px', width: '90%', maxWidth: '800px', maxHeight: '85vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}
-                        onClick={e => e.stopPropagation()}>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h2 style={{ fontSize: '20px', fontWeight: 700 }}>Chi tiết Hóa đơn #{selectedOrder.id.substring(0, 8).toUpperCase()}</h2>
-                            <button onClick={() => { setSelectedOrder(null); setIsEditingPkg(false); setSelectedPkg(null); }} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>
-                        </div>
-
+            {/* ORDER DETAIL DRAWER */}
+            <Drawer
+                open={Boolean(selectedOrder)}
+                onClose={() => { setSelectedOrder(null); setIsEditingPkg(false); setSelectedPkg(null); }}
+                title={selectedOrder ? `Chi tiết Hóa đơn #${selectedOrder.id.substring(0, 8).toUpperCase()}` : ''}
+                subtitle={selectedOrder ? `${fmtDT(selectedOrder.created_at)} · Thu ngân: ${selectedOrder.created_by_name || '—'}` : undefined}
+                width={760}
+            >
+                {selectedOrder && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                         {/* Customer Info Section */}
-                        <div style={{ background: 'var(--bg-hover)', borderRadius: '12px', padding: '16px', border: '1px solid var(--border-color)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                <div style={{ fontWeight: 600, fontSize: '15px' }}>👤 Thông tin khách hàng</div>
+                        <div className="ui-callout">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <div style={{ fontWeight: 700, fontSize: '14px' }}>👤 Thông tin khách hàng</div>
                                 {!isEditingCustomer && (
-                                    <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '4px 12px' }}
+                                    <button type="button" className="btn btn-ghost btn-sm"
                                         onClick={() => {
                                             setEditCustName(selectedOrder.customer_name || '');
                                             setEditCustPhone(selectedOrder.customer_phone || '');
@@ -490,31 +490,31 @@ export default function OrdersPage() {
                                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                     <div style={{ flex: 1, minWidth: '150px' }}>
                                         <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Họ tên</label>
-                                        <input type="text" value={editCustName} onChange={e => setEditCustName(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)' }} />
+                                        <input type="text" className="input" value={editCustName} onChange={e => setEditCustName(e.target.value)} />
                                     </div>
                                     <div style={{ flex: 1, minWidth: '150px' }}>
                                         <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>SĐT</label>
-                                        <input type="text" value={editCustPhone} onChange={e => setEditCustPhone(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)' }} />
+                                        <input type="text" className="input" value={editCustPhone} onChange={e => setEditCustPhone(e.target.value)} />
                                     </div>
                                     <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', width: '100%' }}>
-                                        <button className="btn btn-primary" onClick={handleSaveCustomerInfo}>Lưu thay đổi</button>
-                                        <button className="btn btn-ghost" onClick={() => setIsEditingCustomer(false)}>Hủy</button>
+                                        <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveCustomerInfo}>Lưu thay đổi</button>
+                                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setIsEditingCustomer(false)}>Hủy</button>
                                     </div>
                                 </div>
                             ) : (
-                                <div style={{ display: 'flex', gap: '32px' }}>
+                                <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
                                     <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Họ tên:</span> <strong>{selectedOrder.customer_name || '—'}</strong></div>
-                                    <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>SĐT:</span> <strong>{selectedOrder.customer_phone || '—'}</strong></div>
+                                    <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>SĐT:</span> <strong className="tabular-nums">{selectedOrder.customer_phone || '—'}</strong></div>
                                 </div>
                             )}
                         </div>
 
                         {/* Order Meta */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', fontSize: '14px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', fontSize: '13.5px' }}>
                             <div>
                                 <div style={{ color: 'var(--text-secondary)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     Thời gian
-                                    {!isEditingOrderDate && <button className="btn btn-ghost" style={{ padding: '2px 4px', fontSize: '10px', height: 'auto', minHeight: 'auto' }} onClick={() => {
+                                    {!isEditingOrderDate && <button type="button" className="btn btn-ghost" style={{ padding: '2px 4px', fontSize: '10px', height: 'auto' }} onClick={() => {
                                         const dt = new Date(selectedOrder.created_at);
                                         dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
                                         setEditOrderDate(dt.toISOString().slice(0, 16));
@@ -523,63 +523,63 @@ export default function OrdersPage() {
                                 </div>
                                 {isEditingOrderDate ? (
                                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
-                                        <input type="datetime-local" value={editOrderDate} onChange={e => setEditOrderDate(e.target.value)} style={{ padding: '4px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '12px', width: '100%' }} />
-                                        <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '10px', flex: 1 }} onClick={handleSaveOrderDate}>Lưu</button>
-                                        <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '10px', flex: 1 }} onClick={() => setIsEditingOrderDate(false)}>✕</button>
+                                        <input type="datetime-local" className="input" value={editOrderDate} onChange={e => setEditOrderDate(e.target.value)} style={{ padding: '4px 8px', fontSize: '12px' }} />
+                                        <button type="button" className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={handleSaveOrderDate}>Lưu</button>
+                                        <button type="button" className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setIsEditingOrderDate(false)}>✕</button>
                                     </div>
                                 ) : (
-                                    <div style={{ marginTop: '2px' }}>{fmtDT(selectedOrder.created_at)}</div>
+                                    <div className="tabular-nums" style={{ marginTop: '2px', fontWeight: 600 }}>{fmtDT(selectedOrder.created_at)}</div>
                                 )}
                             </div>
-                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thu ngân</div>{selectedOrder.created_by_name}</div>
-                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thanh toán</div>{selectedOrder.payment_method}</div>
-                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Ghi chú</div>{selectedOrder.note || '—'}</div>
+                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thu ngân</div><strong>{selectedOrder.created_by_name}</strong></div>
+                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Thanh toán</div><strong>{selectedOrder.payment_method}</strong></div>
+                            <div><div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Ghi chú</div><span>{selectedOrder.note || '—'}</span></div>
                         </div>
 
                         <hr style={{ border: 'none', borderTop: '1px dashed var(--border-color)' }} />
 
                         {/* Items List */}
-                        <div style={{ fontWeight: 600, fontSize: '15px' }}>🛒 Chi tiết Hóa đơn</div>
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-                                <thead style={{ background: 'var(--bg-hover)' }}>
+                        <div style={{ fontWeight: 700, fontSize: '14.5px' }}>🛒 Chi tiết Hóa đơn</div>
+                        <div className="table-wrap">
+                            <table>
+                                <thead>
                                     <tr>
-                                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 600 }}>Sản phẩm / Gói vé</th>
-                                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 600 }}>SL/Lượt</th>
-                                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 600 }}>Đơn giá</th>
-                                        <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontWeight: 600, textAlign: 'right' }}>Thành tiền</th>
-                                        <th style={{ width: '80px' }}></th>
+                                        <th>Sản phẩm / Gói vé</th>
+                                        <th>SL/Lượt</th>
+                                        <th style={{ textAlign: 'right' }}>Đơn giá</th>
+                                        <th style={{ textAlign: 'right' }}>Thành tiền</th>
+                                        <th style={{ width: '70px' }}></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {selectedOrder.products.map(p => (
-                                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                            <td style={{ padding: '12px 16px' }}>🛍️ {p.product_name}</td>
-                                            <td style={{ padding: '12px 16px' }}>{p.quantity}</td>
-                                            <td style={{ padding: '12px 16px' }}>{fmt(p.unit_price)}</td>
-                                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>{fmt(p.subtotal)}</td>
+                                        <tr key={p.id}>
+                                            <td>🛍️ {p.product_name}</td>
+                                            <td className="tabular-nums">{p.quantity}</td>
+                                            <td className="tabular-nums" style={{ textAlign: 'right' }}>{fmt(p.unit_price)}</td>
+                                            <td className="tabular-nums" style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(p.subtotal)}</td>
                                             <td></td>
                                         </tr>
                                     ))}
                                     {selectedOrder.tickets.map(t => {
                                         const st = getStatusBadge(t.status);
                                         return (
-                                            <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)', background: '#f0f9ff' }}>
-                                                <td style={{ padding: '12px 16px' }}>
+                                            <tr key={t.id} style={{ background: 'var(--accent-blue-soft)' }}>
+                                                <td>
                                                     <div style={{ fontWeight: 600 }}>🎫 {t.type_name}</div>
-                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px' }}>
                                                         {t.card_code ? `Thẻ: ${maskCardCode(t.card_code)} • ` : ''}
                                                         {fmtDate(t.valid_from)} - {fmtDate(t.valid_until)}
                                                     </div>
                                                 </td>
-                                                <td style={{ padding: '12px 16px' }}>
+                                                <td className="tabular-nums">
                                                     {t.remaining_sessions !== null ? `${t.remaining_sessions}/${t.total_sessions}` : '∞'} lượt
-                                                    <div style={{ marginTop: '4px' }}><span style={{ ...st, padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{st.text}</span></div>
+                                                    <div style={{ marginTop: '4px' }}><span className="ui-badge" style={{ ...st, fontSize: '10.5px' }}>{st.text}</span></div>
                                                 </td>
-                                                <td style={{ padding: '12px 16px' }}>{fmt(t.price_paid)}</td>
-                                                <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
-                                                <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                                                    <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '4px 8px', color: '#0369a1' }}
+                                                <td className="tabular-nums" style={{ textAlign: 'right' }}>{fmt(t.price_paid)}</td>
+                                                <td className="tabular-nums" style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--accent-blue)' }}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             setSelectedPkg(t);
@@ -599,17 +599,16 @@ export default function OrdersPage() {
                                 </tbody>
                                 <tfoot>
                                     <tr>
-                                        <td colSpan={3} style={{ padding: '16px', textAlign: 'right', fontWeight: 600 }}>Tổng Hóa Đơn:</td>
-                                        <td style={{ padding: '16px', textAlign: 'right', fontWeight: 700, fontSize: '18px', color: '#dc2626' }}>{fmt(selectedOrder.total_amount)}</td>
+                                        <td colSpan={3} style={{ padding: '14px', textAlign: 'right', fontWeight: 700 }}>Tổng Hóa Đơn:</td>
+                                        <td className="tabular-nums" style={{ padding: '14px', textAlign: 'right', fontWeight: 800, fontSize: '17px', color: 'var(--accent-red)' }}>{fmt(selectedOrder.total_amount)}</td>
                                         <td></td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
-
                     </div>
-                </div>
-            )}
+                )}
+            </Drawer>
 
             {/* EDIT PACKAGE MODAL */}
             {isEditingPkg && selectedPkg && (

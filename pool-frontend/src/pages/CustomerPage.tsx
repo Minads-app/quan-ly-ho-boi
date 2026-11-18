@@ -6,6 +6,14 @@ import { normalizeScannerInput } from '../utils/scannerUtils';
 import type { Customer } from '../types';
 import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
+import { Badge, Drawer, EmptyState, PageHeader, SegmentedTabs, StatCard } from '../components/ui';
+import { fetchAllSupabaseRows } from '../utils/financialService';
+import {
+    maskCardCode as maskCardCodeUtil,
+    fetchBusinessSettings,
+    getTodayLocalVN,
+    hasPermission
+} from '../utils/helpers';
 
 // Helper to parse dates from Excel (DD/MM/YYYY or YYYY-MM-DD or Excel serial)
 function parseDateDDMMYYYY(val: any): string {
@@ -44,6 +52,7 @@ interface PackageRow {
     card_code: string | null;
     customer_id: string | null;
     status: string;
+    raw_status?: string;
     valid_from: string | null;
     valid_until: string | null;
     remaining_sessions: number | null;
@@ -83,6 +92,10 @@ interface CustomerSummary {
 export default function CustomerPage() {
     const { profile } = useAuth();
     const isAdmin = profile?.role === 'ADMIN';
+    const canEditCustomer = hasPermission(profile, 'customers', 'edit');
+    const canDeleteCustomer = hasPermission(profile, 'customers', 'delete');
+    const canEditPackage = hasPermission(profile, 'packages', 'edit') || canEditCustomer;
+    const canDeletePackage = hasPermission(profile, 'packages', 'delete') || canDeleteCustomer;
 
     const [subTab, setSubTab] = useState<SubTab>('CUSTOMERS');
     const [allPackages, setAllPackages] = useState<PackageRow[]>([]);
@@ -153,10 +166,14 @@ export default function CustomerPage() {
     }, []);
 
     async function fetchAllData() {
-        const { data: custData } = await supabase
-            .from('customers')
-            .select('*')
-            .order('full_name');
+        const { data: custData } = await fetchAllSupabaseRows<Customer>((fromIdx, toIdx) =>
+            supabase
+                .from('customers')
+                .select('*')
+                .order('full_name')
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
         setAllCustomers((custData || []) as Customer[]);
         await fetchAllPackages();
     }
@@ -190,42 +207,38 @@ export default function CustomerPage() {
     }
 
     async function fetchBusinessInfo() {
-        const { data } = await supabase.from('system_settings').select('key, value');
-        if (data) {
-            const info: Record<string, string> = {};
-            data.forEach(r => {
-                let val = r.value;
-                try { val = typeof val === 'string' ? val.replace(/^"|"$/g, '') : JSON.parse(JSON.stringify(val)).replace(/^"|"$/g, ''); }
-                catch { val = typeof val === 'string' ? val : String(val); }
-                info[r.key] = val;
-            });
-            setBizInfo({
-                name: info.business_name || 'Hệ Thống Vé Bơi',
-                address: info.business_address || '',
-                phone: info.business_phone || '',
-                logo: info.business_logo || '',
-                pool_close_time: info.pool_close_time || ''
-            });
-        }
+        const info = await fetchBusinessSettings();
+        setBizInfo({
+            name: info.business_name || 'Hệ Thống Vé Bơi',
+            address: info.business_address || '',
+            phone: info.business_phone || '',
+            logo: info.business_logo || '',
+            pool_close_time: info.pool_close_time || ''
+        });
     }
 
     async function fetchAllPackages() {
-        const { data, error } = await supabase
-            .from('tickets')
-            .select(`
-                id, ticket_type_id, source, customer_name, customer_phone, card_code, customer_id, status,
-                valid_from, valid_until, remaining_sessions, total_sessions,
-                price_paid, sold_at, package_code, coach_id,
-                customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
-                ticket_types!inner (name, category, price, session_count, validity_days, sport_type),
-                profiles:sold_by (full_name),
-                promotions:promotion_id (name, type, value),
-                coaches:coach_id (full_name),
-                ticket_extension_logs (id, old_valid_until, new_valid_until, bulk_extensions(closed_start, days_extended))
-            `)
-            .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
-            .neq('source', 'CHECKIN')
-            .order('sold_at', { ascending: false });
+        const { data, error } = await fetchAllSupabaseRows<any>((fromIdx, toIdx) =>
+            supabase
+                .from('tickets')
+                .select(`
+                    id, ticket_type_id, source, customer_name, customer_phone, card_code, customer_id, status,
+                    valid_from, valid_until, remaining_sessions, total_sessions,
+                    price_paid, sold_at, package_code, coach_id,
+                    customer_name_2, customer_birth_year_2, guardian_name, guardian_phone,
+                    ticket_types!inner (name, category, price, session_count, validity_days, sport_type),
+                    profiles:sold_by (full_name),
+                    promotions:promotion_id (name, type, value),
+                    coaches:coach_id (full_name),
+                    ticket_extension_logs (id, old_valid_until, new_valid_until, bulk_extensions(closed_start, days_extended))
+                `)
+                .in('ticket_types.category', ['MONTHLY', 'MULTI', 'LESSON'])
+                .neq('source', 'CHECKIN')
+                .neq('status', 'CANCELLED')
+                .order('sold_at', { ascending: false })
+                .order('id', { ascending: true })
+                .range(fromIdx, toIdx)
+        );
 
         if (error) { console.error(error); setLoading(false); return; }
 
@@ -245,6 +258,7 @@ export default function CustomerPage() {
             card_code: t.card_code,
             customer_id: t.customer_id || null,
             status: computeStatus(t),
+            raw_status: t.status,
             valid_from: t.valid_from,
             valid_until: t.valid_until,
             remaining_sessions: t.remaining_sessions,
@@ -269,12 +283,21 @@ export default function CustomerPage() {
     }
 
     function computeStatus(t: Record<string, any>): string {
+        if (t.status === 'CANCELLED') return 'CANCELLED';
         if (t.status === 'EXPIRED') return 'EXPIRED';
-        const today = new Date().toLocaleDateString('en-CA');
+        const today = getTodayLocalVN();
         if (t.valid_until && t.valid_until < today) return 'EXPIRED';
         if (t.remaining_sessions !== null && t.remaining_sessions <= 0) return 'EXPIRED';
+
+        // Gói chưa kích hoạt (UNUSED, chưa có ngày bắt đầu và chưa trừ buổi nào) thì giữ nguyên UNUSED
+        const isNotStartedYet =
+            t.status === 'UNUSED' &&
+            !t.valid_from &&
+            (t.total_sessions === null || t.remaining_sessions === t.total_sessions);
+        if (isNotStartedYet) return 'UNUSED';
+
         if (t.valid_until) {
-            const daysLeft = (new Date(t.valid_until).getTime() - Date.now()) / 86400000;
+            const daysLeft = (new Date(`${t.valid_until}T23:59:59+07:00`).getTime() - Date.now()) / 86400000;
             if (daysLeft <= 7 && daysLeft > 0) return 'EXPIRING';
         }
         if (t.remaining_sessions !== null && t.remaining_sessions <= 3 && t.remaining_sessions > 0) return 'EXPIRING';
@@ -283,13 +306,8 @@ export default function CustomerPage() {
         return 'UNUSED';
     }
 
-    // Helper: Mask card code for non-admins
     function maskCardCode(code: string | null): string | null {
-        if (!code) return null;
-        if (profile?.role === 'ADMIN') return code;
-        if (code.length <= 6) return '***';
-        // Show first 5 and last 4, middle masked
-        return `${code.substring(0, 5)}***${code.substring(code.length - 4)}`;
+        return maskCardCodeUtil(code, profile?.role);
     }
 
     // --- Build customer summaries from customers table ---
@@ -366,7 +384,7 @@ export default function CustomerPage() {
         return pkgs.filter(p => { const d = p.sold_at.substring(0, 10); return d >= from && d <= to; });
     }
 
-    // --- Card code update ---
+    // --- Card code update (Atomic RPC with fallback) ---
     async function handleUpdateCardCode(pkgId: string) {
         const inputCardCode = newCardCode.trim().toUpperCase();
         if (!inputCardCode) { alert('Vui lòng nhập mã thẻ mới!'); return; }
@@ -376,7 +394,28 @@ export default function CustomerPage() {
         if (!pkg) return;
         const oldCode = pkg.card_code;
 
-        // --- 1. Validate against card_bank ---
+        // Ưu tiên gọi RPC nguyên tử change_customer_card_code (migration 058)
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('change_customer_card_code', {
+            p_ticket_id: pkg.id,
+            p_customer_id: pkg.customer_id || null,
+            p_old_code: oldCode || '',
+            p_new_code: inputCardCode,
+            p_actor_id: profile?.id || null
+        });
+
+        if (!rpcErr && rpcRes) {
+            if (!rpcRes.success) {
+                alert('Lỗi đổi mã thẻ: ' + (rpcRes.error || 'Không xác định'));
+                return;
+            }
+            setEditingCardPkgId(null);
+            setNewCardCode('');
+            fetchAllData();
+            alert('✅ Đã cập nhật mã thẻ thành công!');
+            return;
+        }
+
+        // Fallback nếu DB chưa chạy migration 058
         const { data: cardRes, error: cardErr } = await supabase
             .from('card_bank')
             .select('*')
@@ -395,113 +434,93 @@ export default function CustomerPage() {
                 alert('Mã thẻ không hợp lệ hoặc chưa được khởi tạo. Vui lòng liên hệ Admin.');
                 return;
             }
-        } else {
-            if (cardRes.status !== 'UNUSED') {
-                if (profile?.role === 'ADMIN') {
-                    const c = window.confirm(`Mã thẻ "${inputCardCode}" đã được sử dụng (Trạng thái: ${cardRes.status}). Bạn có chắc chắn muốn ép dùng mã này không?`);
-                    if (!c) return;
-                    shouldUpdateCardId = cardRes.id;
-                } else {
-                    alert(`Mã thẻ này đã được sử dụng hoặc hỏng (Trạng thái: ${cardRes.status}). Vui lòng lấy thẻ khác.`);
-                    return;
-                }
-            } else {
+        } else if (cardRes.status !== 'UNUSED') {
+            if (profile?.role === 'ADMIN') {
+                const c = window.confirm(`Mã thẻ "${inputCardCode}" đã được sử dụng (Trạng thái: ${cardRes.status}). Bạn có chắc chắn muốn ép dùng mã này không?`);
+                if (!c) return;
                 shouldUpdateCardId = cardRes.id;
+            } else {
+                alert(`Mã thẻ này đã được sử dụng hoặc hỏng (Trạng thái: ${cardRes.status}). Vui lòng lấy thẻ khác.`);
+                return;
             }
+        } else {
+            shouldUpdateCardId = cardRes.id;
         }
 
-        // --- 2. Update tickets ---
         if (oldCode) {
             await supabase.from('tickets').update({ card_code: inputCardCode }).eq('card_code', oldCode);
         } else {
             await supabase.from('tickets').update({ card_code: inputCardCode }).eq('id', pkgId);
         }
 
-        // --- 3. Update customer table if needed ---
-        if (pkg.customer_phone) {
+        if (pkg.customer_id) {
+            await supabase.from('customers').update({ card_code: inputCardCode }).eq('id', pkg.customer_id);
+        } else if (pkg.customer_phone) {
             await supabase.from('customers').update({ card_code: inputCardCode }).eq('phone', pkg.customer_phone);
-            // Also trigger a refresh of customers list
         }
 
-        // --- 4. Update card bank ---
         if (shouldInsertCard) {
-            await supabase.from('card_bank').insert({
+            await supabase.from('card_bank').upsert({
                 card_code: inputCardCode,
-                prefix: null,
-                month_year: null,
-                sequence_number: null,
-                random_string: null,
                 status: 'USED',
                 source: 'MANUAL',
-                batch_number: null,
-                batch_note: null,
                 created_by: profile?.id
-            });
+            }, { onConflict: 'card_code' });
         } else if (shouldUpdateCardId) {
             await supabase.from('card_bank').update({ status: 'USED' }).eq('id', shouldUpdateCardId);
         }
 
-        // --- 5. Revoke old card ---
         if (oldCode && oldCode !== inputCardCode) {
-            const { data: oldCard } = await supabase.from('card_bank').select('id').eq('card_code', oldCode).maybeSingle();
-            if (oldCard) {
-                await supabase.from('card_bank').update({ status: 'REVOKED' }).eq('id', oldCard.id);
-            }
+            await supabase.from('card_bank').update({ status: 'REVOKED' }).eq('card_code', oldCode);
         }
 
         setEditingCardPkgId(null);
         setNewCardCode('');
-        fetchAllData(); // Refresh customers and packages
+        fetchAllData();
         alert('✅ Đã cập nhật mã thẻ thành công!');
     }
 
-    // --- Package Editing & Deleting (Admin) ---
+    // --- Package Editing & Deleting ---
     async function handleUpdatePackage() {
-        if (!selectedPkg) return;
+        if (!selectedPkg || !canEditPackage) return;
         if (!confirm('Bạn có chắc chắn muốn lưu các thay đổi này?')) return;
 
         const updatedRemaining = editSessions === '' ? null : Number(editSessions);
         const updatedTotal = editTotalSessions === '' ? null : Number(editTotalSessions);
 
-        let finalStatus = selectedPkg.status;
-        if (finalStatus === 'EXPIRING') finalStatus = 'IN_USE'; // EXPIRING is a frontend display status
+        let finalStatus = selectedPkg.raw_status || selectedPkg.status;
+        if (finalStatus === 'EXPIRING') finalStatus = 'IN_USE';
 
         let finalValidFrom = editValidFrom || null;
         let finalValidUntil = editValidUntil || null;
 
-        // Tự động kích hoạt nếu gói chưa dùng và có sửa giảm lượt HOẶC admin đã khai báo ngày bắt đầu/kết thúc
         const isReducingSessions = updatedRemaining !== null && updatedTotal !== null && updatedRemaining < updatedTotal;
         const hasStartOrEndDate = finalValidFrom !== null || finalValidUntil !== null;
 
         if (
-            selectedPkg.status === 'UNUSED' &&
+            finalStatus === 'UNUSED' &&
             (isReducingSessions || hasStartOrEndDate)
         ) {
             finalStatus = 'IN_USE';
-            // Nếu admin chưa điền ngày bắt đầu thì lấy hôm nay
             if (!finalValidFrom) {
-                const now = new Date();
-                finalValidFrom = now.toLocaleDateString('en-CA');
+                finalValidFrom = getTodayLocalVN();
 
-                // Tính toán ngày kết thúc = hôm nay + validity_days (nếu có và admin chưa nhập)
                 if (!finalValidUntil && selectedPkg.validity_days) {
-                    const exp = new Date(now);
+                    const exp = new Date(`${finalValidFrom}T00:00:00+07:00`);
                     exp.setDate(exp.getDate() + selectedPkg.validity_days);
-                    finalValidUntil = exp.toLocaleDateString('en-CA');
+                    finalValidUntil = `${exp.getFullYear()}-${String(exp.getMonth() + 1).padStart(2, '0')}-${String(exp.getDate()).padStart(2, '0')}`;
                 }
             }
         }
 
-        // Tự động thay đổi trạng thái dựa trên ngày và số buổi cập nhật mới
-        const today = new Date().toLocaleDateString('en-CA');
+        const today = getTodayLocalVN();
         const isDateExpired = finalValidUntil && finalValidUntil < today;
         const isSessionExpired = updatedRemaining !== null && updatedRemaining <= 0;
 
         if (isDateExpired || isSessionExpired) {
             finalStatus = 'EXPIRED';
         } else if (finalStatus === 'EXPIRED') {
-            // Nếu thẻ đang "Hết hạn" nhưng được gia hạn (ngày và số lượt đều hợp lệ)
-            finalStatus = 'IN_USE';
+            finalStatus = finalValidFrom ? 'IN_USE' : 'UNUSED';
         }
 
         const updateData: any = {
@@ -536,11 +555,13 @@ export default function CustomerPage() {
     }
 
     async function handleDeletePackage() {
-        if (!selectedPkg) return;
+        if (!selectedPkg || !canDeletePackage) return;
         if (!confirm('⚠️ CẢNH BÁO: Hành động này sẽ XÓA VĨNH VIỄN gói thẻ này cùng toàn bộ lịch sử quẹt thẻ liên quan. Bạn có chắc chắn muốn tiếp tục?')) return;
         if (!confirm('Hỏi lại lần cuối: Bạn thực sự muốn XÓA VĨNH VIỄN gói thẻ này? Dữ liệu không thể khôi phục!')) return;
 
-        // 1. Delete scan logs to avoid foreign key constraint errors
+        // 1. Gỡ tham chiếu ở checkin_logs, promotion_usage và scan_logs để tránh lỗi khóa ngoại
+        await supabase.from('checkin_logs').update({ source_ticket_id: null }).eq('source_ticket_id', selectedPkg.id);
+        await supabase.from('promotion_usage').update({ ticket_id: null }).eq('ticket_id', selectedPkg.id);
         await supabase.from('scan_logs').delete().eq('ticket_id', selectedPkg.id);
 
         // 2. Delete the ticket
@@ -595,7 +616,7 @@ export default function CustomerPage() {
     }
 
     async function handleDeleteCustomer(c: CustomerSummary) {
-        if (!isAdmin) return;
+        if (!canDeleteCustomer) return;
 
         if (c.totalPackages > 0) {
             alert(`⚠️ Không thể xóa khách hàng này!\n\nKhách hàng đang có ${c.totalPackages} gói thẻ. Theo chính sách an toàn dữ liệu, bạn cần phải xóa các gói thẻ này trước khi xóa hồ sơ khách hàng.`);
@@ -603,6 +624,10 @@ export default function CustomerPage() {
         }
 
         if (!confirm(`⚠️ CẢNH BÁO: Xóa hồ sơ khách hàng "${c.name}"?\nHành động này không thể hoàn tác.`)) return;
+
+        await supabase.from('checkin_logs').update({ customer_id: null }).eq('customer_id', c.id);
+        await supabase.from('promotion_usage').update({ customer_id: null }).eq('customer_id', c.id);
+        await supabase.from('tickets').update({ customer_id: null }).eq('customer_id', c.id);
 
         const { error } = await supabase.from('customers').delete().eq('id', c.id);
 
@@ -879,172 +904,110 @@ export default function CustomerPage() {
         XLSX.writeFile(wb, `Danh_sach_goi_the_${new Date().toISOString().slice(0, 10)}.xlsx`);
     }
 
+    const activeCustomerDrawer = expandedId ? customers.find(c => c.id === expandedId) || null : null;
+
     return (
-        <div className="page-container" style={{ maxWidth: '1100px' }}>
-            {/* Header with sub-tabs */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
-                <div>
-                    <h1 style={{ fontSize: '24px', fontWeight: 700 }}>👥 Khách Hàng</h1>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Quản lý khách hàng và các gói thẻ bơi</p>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    {isAdmin && (
-                        <>
-                            <input type="file" ref={fileInputRef} accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileSelect} />
-                            <button className="btn btn-ghost" onClick={downloadImportTemplate} style={{ padding: '8px 16px', fontSize: '13px' }}>
-                                📋 Tải Template
-                            </button>
-                            <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} style={{ padding: '8px 16px', fontSize: '13px' }}>
-                                📥 Import Excel
-                            </button>
-                        </>
-                    )}
-                    <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '10px' }}>
-                        {([['CUSTOMERS', '👤 Khách hàng'], ['PACKAGES', '📦 Gói thẻ']] as [SubTab, string][]).map(([key, label]) => (
-                            <button key={key} className={`btn ${subTab === key ? 'btn-primary' : 'btn-ghost'}`}
-                                style={{ padding: '8px 16px', fontSize: '13px', margin: 0 }}
-                                onClick={() => { setSubTab(key); setSearchTerm(''); setExpandedId(null); }}>
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
+        <div className="page-container">
+            <PageHeader
+                title="Khách Hàng & Gói Thẻ"
+                subtitle="Quản lý hồ sơ khách hàng, gói thẻ tháng, thẻ nhiều buổi và lịch sử sử dụng"
+                actions={
+                    <>
+                        {isAdmin && (
+                            <>
+                                <input type="file" ref={fileInputRef} accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileSelect} />
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={downloadImportTemplate}>
+                                    📋 Tải Template
+                                </button>
+                                <button type="button" className="btn btn-outline btn-sm" onClick={() => fileInputRef.current?.click()}>
+                                    📥 Import Excel
+                                </button>
+                            </>
+                        )}
+                        <SegmentedTabs
+                            size="sm"
+                            tabs={[
+                                { key: 'CUSTOMERS', label: 'Khách hàng', icon: '👤', count: customers.length },
+                                { key: 'PACKAGES', label: 'Gói thẻ', icon: '📦', count: allPackages.length },
+                            ]}
+                            activeKey={subTab}
+                            onChange={(k) => { setSubTab(k as SubTab); setSearchTerm(''); setExpandedId(null); }}
+                        />
+                    </>
+                }
+            />
 
             {/* Search */}
-            <input type="text" placeholder={subTab === 'CUSTOMERS' ? '🔍 Tìm theo tên, SĐT...' : '🔍 Tìm theo tên, SĐT, mã thẻ, mã gói...'}
-                value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', marginBottom: '16px' }}
-            />
+            <div className="ui-filter-bar">
+                <input
+                    type="text"
+                    className="ui-search-input"
+                    placeholder={subTab === 'CUSTOMERS' ? '🔍 Tìm theo tên, SĐT, mã thẻ...' : '🔍 Tìm theo tên, SĐT, mã thẻ, mã gói...'}
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                />
+            </div>
 
             {/* ====================== TAB: CUSTOMERS ====================== */}
             {subTab === 'CUSTOMERS' && (
                 <>
-                    {/* Stats */}
-                    <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                        {[
-                            { label: 'Tổng khách hàng', value: String(filteredCustomers.length), color: '#3b82f6' },
-                            { label: 'Đang hoạt động', value: String(filteredCustomers.filter(c => c.overallStatus === 'ACTIVE').length), color: '#10b981' },
-                            { label: 'Sắp hết hạn', value: String(filteredCustomers.filter(c => c.overallStatus === 'EXPIRING').length), color: '#f59e0b' },
-                        ].map(k => (
-                            <div key={k.label} style={{ flex: 1, minWidth: '130px', background: 'var(--bg-card)', padding: '14px 18px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                                <div style={{ fontSize: '22px', fontWeight: 700, color: k.color }}>{k.value}</div>
-                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{k.label}</div>
-                            </div>
-                        ))}
+                    <div className="stats-grid">
+                        <StatCard label="Tổng khách hàng" value={filteredCustomers.length} tone="blue" icon="👥" />
+                        <StatCard label="Đang hoạt động" value={filteredCustomers.filter(c => c.overallStatus === 'ACTIVE').length} tone="green" icon="✅" />
+                        <StatCard label="Sắp hết hạn" value={filteredCustomers.filter(c => c.overallStatus === 'EXPIRING').length} tone="amber" icon="⚠️" />
                     </div>
 
-                    {/* Customer List */}
                     {filteredCustomers.length === 0 ? (
-                        <p style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Chưa có khách hàng.</p>
+                        <div className="ui-card">
+                            <EmptyState icon="👤" title="Chưa có khách hàng" description="Không tìm thấy khách hàng phù hợp với từ khóa." />
+                        </div>
                     ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {filteredCustomers.map((c) => {
-                                const st = getStatusBadge(c.overallStatus);
-                                const isExpanded = expandedId === c.id;
-                                return (
-                                    <div key={c.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
-                                        {/* Customer Row — clickable */}
-                                        <div onClick={() => setExpandedId(isExpanded ? null : c.id)}
-                                            style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
-                                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                                            onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(135deg, #3b82f6, #6366f1)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 700, flexShrink: 0 }}>
-                                                    {(c.name || '?')[0].toUpperCase()}
-                                                </div>
-                                                <div>
-                                                    <div style={{ fontWeight: 600, fontSize: '15px' }}>{c.name}</div>
-                                                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                                        🏷️ {maskCardCode(c.card_code)} · 📞 {c.phone}
-                                                        {c.email && <span> · ✉️ {c.email}</span>}
-                                                        {allCustomers.find(x => x.id === c.id)?.hotkey && <span style={{ marginLeft: '6px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>⌨ {allCustomers.find(x => x.id === c.id)!.hotkey}</span>}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                                <span style={{ background: st.bg, color: st.color, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>{st.text}</span>
-                                                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.totalPackages} gói</span>
-                                                <span style={{ fontSize: '16px', color: 'var(--text-muted)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : '' }}>▼</span>
-                                            </div>
-                                        </div>
-
-                                        {/* Expanded: Customer packages */}
-                                        {isExpanded && (
-                                            <div style={{ borderTop: '1px solid var(--border-color)', padding: '16px 18px', background: 'var(--bg-hover)', animation: 'fadeIn 0.2s ease' }}>
-                                                {/* Customer Info */}
-                                                <div style={{ display: 'flex', gap: '24px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                                    <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Họ tên:</span> <strong>{c.name}</strong></div>
-                                                    <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>SĐT:</span> <strong>{c.phone}</strong></div>
-                                                    <div><span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Gói đang dùng:</span> <strong>{c.activePackages}</strong></div>
-                                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-                                                        <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); openEditCustomer(c); }}>✏️ Sửa thông tin</button>
-                                                        {isAdmin && (
-                                                            <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: '12px', color: '#ef4444' }} onClick={(e) => { e.stopPropagation(); handleDeleteCustomer(c); }}>🗑️ Xóa</button>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {/* Package list */}
-                                                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>📦 Danh sách gói thẻ ({c.totalPackages})</div>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                                    {c.packages.map(p => {
-                                                        const pst = getStatusBadge(p.status);
-                                                        return (
-                                                            <div key={p.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '200px' }}>
-                                                                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{p.customer_name}</div>
-                                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                                                                        Mã thẻ: {maskCardCode(p.card_code || '—')} {p.customer_phone ? `· SĐT: ${p.customer_phone}` : ''}
-                                                                    </div>
-                                                                    <span style={{ background: p.category === 'MONTHLY' ? '#dbeafe' : p.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: p.category === 'MONTHLY' ? '#1d4ed8' : p.category === 'LESSON' ? '#166534' : '#92400e', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{p.type_name}</span>
-                                                                    <span style={{ background: pst.bg, color: pst.color, padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{pst.text}</span>
-                                                                    {p.extension_logs && p.extension_logs.length > 0 && (
-                                                                        <span style={{ background: '#dcfce7', color: '#166534', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                                            🔄 Đã gia hạn +{p.extension_logs.reduce((acc, log) => acc + (log.bulk_extensions?.days_extended || 0), 0)} ngày
-                                                                        </span>
-                                                                    )}
-                                                                    {p.remaining_sessions !== null && (
-                                                                        <span style={{ fontWeight: 700, fontSize: '13px', color: p.remaining_sessions <= 3 ? '#ef4444' : '' }}>
-                                                                            {p.remaining_sessions}/{p.total_sessions ?? p.remaining_sessions} lượt
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                                                                    <span>{fmtDate(p.valid_from)} → {fmtDate(p.valid_until)}</span>
-                                                                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmt(p.price_paid)}</span>
-                                                                    <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={(e) => { e.stopPropagation(); setSelectedPkg(p); }}>Chi tiết</button>
-                                                                </div>
+                        <div className="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Khách hàng</th>
+                                        <th>Mã thẻ</th>
+                                        <th>SĐT</th>
+                                        <th>Số gói</th>
+                                        <th>Trạng thái</th>
+                                        <th style={{ textAlign: 'right' }}>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredCustomers.map((c) => {
+                                        const st = getStatusBadge(c.overallStatus);
+                                        const hk = allCustomers.find(x => x.id === c.id)?.hotkey;
+                                        return (
+                                            <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => setExpandedId(c.id)}>
+                                                <td>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <div style={{ width: '34px', height: '34px', borderRadius: '999px', background: 'var(--gradient-blue)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, flexShrink: 0 }}>
+                                                            {(c.name || '?')[0].toUpperCase()}
+                                                        </div>
+                                                        <div>
+                                                            <div style={{ fontWeight: 600 }}>
+                                                                {c.name}
+                                                                {hk && <Badge variant="blue" className="ml-2">⌨ {hk}</Badge>}
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
-
-                                                {/* Edit card code — ADMIN only */}
-                                                {isAdmin && (
-                                                    <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed var(--border-color)' }}>
-                                                        {editingCardPkgId && c.packages.some(p => p.id === editingCardPkgId) ? (
-                                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                                                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Mã thẻ mới:</span>
-                                                                <input type="text" value={newCardCode} onChange={e => setNewCardCode(normalizeScannerInput(e.target.value))}
-                                                                    placeholder="Quét hoặc nhập mã thẻ mới" autoFocus
-                                                                    style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '14px', fontWeight: 700, flex: 1 }} />
-                                                                <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); handleUpdateCardCode(editingCardPkgId); }}>Lưu</button>
-                                                                <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); setEditingCardPkgId(null); setNewCardCode(''); }}>Hủy</button>
-                                                            </div>
-                                                        ) : (
-                                                            <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '6px 12px' }}
-                                                                onClick={(e) => { e.stopPropagation(); setEditingCardPkgId(c.packages[0]?.id || null); setNewCardCode(c.packages[0]?.card_code || ''); }}>
-                                                                ✏️ Đổi mã thẻ (mất thẻ)
-                                                            </button>
-                                                        )}
+                                                            {c.email && <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{c.email}</div>}
+                                                        </div>
                                                     </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
+                                                </td>
+                                                <td><code style={{ fontSize: '12px', background: 'var(--bg-subtle)', padding: '2px 7px', borderRadius: '5px' }}>{maskCardCode(c.card_code)}</code></td>
+                                                <td className="tabular-nums">{c.phone || '—'}</td>
+                                                <td className="tabular-nums"><strong>{c.activePackages}</strong> / {c.totalPackages} gói</td>
+                                                <td>
+                                                    <span className="ui-badge" style={{ background: st.bg, color: st.color }}>{st.text}</span>
+                                                </td>
+                                                <td style={{ textAlign: 'right', color: 'var(--accent-blue)', fontWeight: 600 }}>
+                                                    Xem hồ sơ →
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     )}
                 </>
@@ -1053,81 +1016,72 @@ export default function CustomerPage() {
             {/* ====================== TAB: PACKAGES ====================== */}
             {subTab === 'PACKAGES' && (
                 <>
-                    {/* Date Filter */}
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                        {(['THIS_MONTH', 'LAST_MONTH', 'TODAY', 'CUSTOM'] as DateRange[]).map(r => (
-                            <button key={r} className={`btn ${dateRange === r ? 'btn-primary' : 'btn-ghost'}`}
-                                style={{ padding: '6px 14px', fontSize: '13px' }}
-                                onClick={() => setDateRange(r)}>
-                                {r === 'TODAY' ? 'Hôm nay' : r === 'THIS_MONTH' ? 'Tháng này' : r === 'LAST_MONTH' ? 'Tháng trước' : 'Tùy chọn'}
-                            </button>
-                        ))}
+                    <div className="ui-filter-bar">
+                        <SegmentedTabs
+                            size="sm"
+                            tabs={[
+                                { key: 'THIS_MONTH', label: 'Tháng này' },
+                                { key: 'LAST_MONTH', label: 'Tháng trước' },
+                                { key: 'TODAY', label: 'Hôm nay' },
+                                { key: 'CUSTOM', label: 'Tùy chọn' },
+                            ]}
+                            activeKey={dateRange}
+                            onChange={(k) => setDateRange(k as DateRange)}
+                        />
                         {dateRange === 'CUSTOM' && (
                             <>
-                                <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' }} />
+                                <input type="date" className="ui-date-input" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
                                 <span style={{ color: 'var(--text-secondary)' }}>→</span>
-                                <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' }} />
+                                <input type="date" className="ui-date-input" value={customTo} onChange={e => setCustomTo(e.target.value)} />
                             </>
                         )}
-                        <div style={{ width: '1px', height: '24px', background: 'var(--border-color)', margin: '0 4px' }}></div>
-                        <button className={`btn ${filterExpiring ? 'btn-primary' : 'btn-outline'}`}
-                            style={{ padding: '6px 14px', fontSize: '13px', background: filterExpiring ? '' : '#fef3c7', color: filterExpiring ? '' : '#92400e', borderColor: filterExpiring ? '' : '#fde68a' }}
+                        <button type="button" className={`btn btn-sm ${filterExpiring ? 'btn-warning' : 'btn-outline'}`}
                             onClick={() => setFilterExpiring(!filterExpiring)}>
                             ⚠️ Sắp hết hạn
                         </button>
                         {isAdmin && (
-                            <button className={`btn ${bulkMode ? 'btn-primary' : 'btn-outline'}`}
-                                style={{ padding: '6px 14px', fontSize: '13px' }}
+                            <button type="button" className={`btn btn-sm ${bulkMode ? 'btn-primary' : 'btn-outline'}`}
                                 onClick={() => { setBulkMode(!bulkMode); setBulkSelected(new Set()); }}>
                                 {bulkMode ? '✕ Thoát chọn' : '☑️ Sửa hàng loạt'}
                             </button>
                         )}
-                        <button className="btn btn-outline"
-                            style={{ padding: '6px 14px', fontSize: '13px', marginLeft: 'auto' }}
+                        <button type="button" className="btn btn-outline btn-sm" style={{ marginLeft: 'auto' }}
                             onClick={() => exportPackagesExcel(filteredPackages)}>
                             ⬇️ Xuất Excel
                         </button>
                     </div>
 
-                    {/* Stats */}
-                    <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                        {[
-                            { label: 'Tổng gói', value: String(filteredPackages.length), color: '#8b5cf6' },
-                            { label: 'Đang dùng', value: String(filteredPackages.filter(p => p.status === 'IN_USE' || p.status === 'UNUSED').length), color: '#10b981' },
-                            { label: 'Doanh thu', value: fmt(filteredPackages.reduce((s, p) => s + p.price_paid, 0)), color: '#3b82f6' },
-                        ].map(k => (
-                            <div key={k.label} style={{ flex: 1, minWidth: '130px', background: 'var(--bg-card)', padding: '14px 18px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                                <div style={{ fontSize: '22px', fontWeight: 700, color: k.color }}>{k.value}</div>
-                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{k.label}</div>
-                            </div>
-                        ))}
+                    <div className="stats-grid">
+                        <StatCard label="Tổng gói" value={filteredPackages.length} tone="purple" />
+                        <StatCard label="Đang dùng" value={filteredPackages.filter(p => p.status === 'IN_USE' || p.status === 'UNUSED').length} tone="green" />
+                        <StatCard label="Doanh thu" value={fmt(filteredPackages.reduce((s, p) => s + p.price_paid, 0))} tone="blue" />
                     </div>
 
-                    {/* Bulk action bar */}
                     {bulkMode && (
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '12px 16px', background: 'linear-gradient(135deg, #eff6ff, #eef2ff)', border: '1px solid #bfdbfe', borderRadius: '10px', marginBottom: '16px' }}>
+                        <div className="ui-callout ui-callout-blue" style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
                             <input type="checkbox"
                                 checked={filteredPackages.length > 0 && bulkSelected.size === filteredPackages.length}
                                 onChange={e => {
                                     if (e.target.checked) setBulkSelected(new Set(filteredPackages.map(p => p.id)));
                                     else setBulkSelected(new Set());
                                 }}
-                                style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }} />
-                            <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e40af' }}>
-                                Đã chọn <b style={{ color: '#2563eb', fontSize: '15px' }}>{bulkSelected.size}</b> / {filteredPackages.length} gói
+                                style={{ width: '17px', height: '17px', cursor: 'pointer' }} />
+                            <span style={{ fontSize: '13px', fontWeight: 600 }}>
+                                Đã chọn <strong className="tabular-nums">{bulkSelected.size}</strong> / {filteredPackages.length} gói
                             </span>
                             <div style={{ flex: 1 }} />
-                            <button className="btn btn-primary" disabled={bulkSelected.size === 0}
-                                style={{ padding: '8px 18px', fontSize: '13px' }}
+                            <button type="button" className="btn btn-primary btn-sm" disabled={bulkSelected.size === 0}
                                 onClick={() => { setBulkTargetTypeId(''); setShowBulkModal(true); }}>
                                 ✏️ Đổi loại gói ({bulkSelected.size})
                             </button>
-                            <button className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: '13px', color: '#ef4444' }}
+                            <button type="button" className="btn btn-danger btn-sm"
                                 disabled={bulkSelected.size === 0}
                                 onClick={async () => {
                                     if (!confirm(`⚠️ CẢNH BÁO: Bạn sắp XÓA VĨNH VIỄN ${bulkSelected.size} gói thẻ đã chọn cùng toàn bộ lịch sử quẹt thẻ liên quan.\n\nHành động này KHÔNG THỂ hoàn tác. Bạn có chắc chắn?`)) return;
                                     if (!confirm('Hỏi lại lần cuối: Bạn thực sự muốn XÓA VĨNH VIỄN các gói đã chọn?')) return;
                                     const ids = Array.from(bulkSelected);
+                                    await supabase.from('checkin_logs').update({ source_ticket_id: null }).in('source_ticket_id', ids);
+                                    await supabase.from('promotion_usage').update({ ticket_id: null }).in('ticket_id', ids);
                                     await supabase.from('scan_logs').delete().in('ticket_id', ids);
                                     const { error } = await supabase.from('tickets').delete().in('id', ids);
                                     if (error) { alert('Lỗi xóa: ' + error.message); return; }
@@ -1140,22 +1094,21 @@ export default function CustomerPage() {
                         </div>
                     )}
 
-                    {/* Package Table */}
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', background: 'var(--bg-card)', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                    <div className="table-wrap">
+                        <table>
                             <thead>
                                 <tr>
-                                    {bulkMode && <th style={{ ...thS, width: '40px', textAlign: 'center' }}></th>}
-                                    <th style={thS}>Mã gói</th>
-                                    <th style={thS}>Khách hàng</th>
-                                    <th style={thS}>SĐT</th>
-                                    {isAdmin && <th style={thS}>Mã thẻ</th>}
-                                    <th style={thS}>Loại</th>
-                                    <th style={thS}>Trạng thái</th>
-                                    <th style={thS}>Lượt còn</th>
-                                    <th style={thS}>Hiệu lực</th>
-                                    <th style={thS}>Giá</th>
-                                    <th style={thS}>Ngày mua</th>
+                                    {bulkMode && <th style={{ width: '40px', textAlign: 'center' }}></th>}
+                                    <th>Mã gói</th>
+                                    <th>Khách hàng</th>
+                                    <th>SĐT</th>
+                                    {isAdmin && <th>Mã thẻ</th>}
+                                    <th>Loại</th>
+                                    <th>Trạng thái</th>
+                                    <th>Lượt còn</th>
+                                    <th>Hiệu lực</th>
+                                    <th style={{ textAlign: 'right' }}>Giá</th>
+                                    <th>Ngày mua</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1166,9 +1119,7 @@ export default function CustomerPage() {
                                     const isChecked = bulkSelected.has(t.id);
                                     return (
                                         <tr key={t.id}
-                                            style={{ borderBottom: '1px solid var(--border-color)', background: isChecked ? '#eff6ff' : 'var(--bg-card)', transition: 'background 0.15s', cursor: 'pointer' }}
-                                            onMouseEnter={e => (e.currentTarget.style.background = isChecked ? '#dbeafe' : 'var(--bg-hover)')}
-                                            onMouseLeave={e => (e.currentTarget.style.background = isChecked ? '#eff6ff' : '')}
+                                            style={{ background: isChecked ? 'var(--accent-blue-soft)' : undefined, cursor: 'pointer' }}
                                             onClick={() => {
                                                 if (bulkMode) {
                                                     const next = new Set(bulkSelected);
@@ -1179,34 +1130,33 @@ export default function CustomerPage() {
                                                 }
                                             }}>
                                             {bulkMode && (
-                                                <td style={{ ...tdS, textAlign: 'center' }}>
-                                                    <input type="checkbox" checked={isChecked} readOnly
-                                                        style={{ width: '16px', height: '16px', accentColor: '#3b82f6', cursor: 'pointer' }} />
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <input type="checkbox" checked={isChecked} readOnly style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
                                                 </td>
                                             )}
-                                            <td style={{ ...tdS, fontWeight: 700, minWidth: '80px' }}>{t.package_code || '—'}</td>
-                                            <td style={{ ...tdS, fontWeight: 600 }}>{t.customer_name || '—'}</td>
-                                            <td style={tdS}>{t.customer_phone || '—'}</td>
-                                            {isAdmin && <td style={tdS}>{t.card_code || '—'}</td>}
-                                            <td style={tdS}>
-                                                <span style={{ background: t.category === 'MONTHLY' ? '#dbeafe' : t.category === 'LESSON' ? '#f0fdf4' : '#fef3c7', color: t.category === 'MONTHLY' ? '#1d4ed8' : t.category === 'LESSON' ? '#166534' : '#92400e', padding: '4px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{t.type_name}</span>
+                                            <td style={{ fontWeight: 700, minWidth: '80px' }}>{t.package_code || '—'}</td>
+                                            <td style={{ fontWeight: 600 }}>{t.customer_name || '—'}</td>
+                                            <td className="tabular-nums">{t.customer_phone || '—'}</td>
+                                            {isAdmin && <td><code style={{ fontSize: '12px' }}>{t.card_code || '—'}</code></td>}
+                                            <td>
+                                                <Badge variant={t.category === 'MONTHLY' ? 'blue' : t.category === 'LESSON' ? 'green' : 'amber'}>{t.type_name}</Badge>
                                                 {t.extension_logs && t.extension_logs.length > 0 && (
                                                     <div style={{ marginTop: '4px' }}>
-                                                        <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                        <Badge variant="green">
                                                             🔄 +{t.extension_logs.reduce((acc, log) => acc + (log.bulk_extensions?.days_extended || 0), 0)} ngày
-                                                        </span>
+                                                        </Badge>
                                                     </div>
                                                 )}
                                             </td>
-                                            <td style={tdS}>
-                                                <span style={{ background: st.bg, color: st.color, padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>{st.text}</span>
+                                            <td>
+                                                <span className="ui-badge" style={{ background: st.bg, color: st.color }}>{st.text}</span>
                                             </td>
-                                            <td style={{ ...tdS, fontWeight: 700, color: t.remaining_sessions !== null && t.remaining_sessions <= 3 ? '#ef4444' : '' }}>
+                                            <td className="tabular-nums" style={{ fontWeight: 700, color: t.remaining_sessions !== null && t.remaining_sessions <= 3 ? 'var(--accent-red)' : undefined }}>
                                                 {t.remaining_sessions !== null ? `${t.remaining_sessions}/${t.total_sessions ?? t.remaining_sessions}` : '∞'}
                                             </td>
-                                            <td style={{ ...tdS, color: 'var(--text-secondary)' }}>{fmtDate(t.valid_from)} → {fmtDate(t.valid_until)}</td>
-                                            <td style={{ ...tdS, fontWeight: 700 }}>{fmt(t.price_paid)}</td>
-                                            <td style={{ ...tdS, color: 'var(--text-secondary)' }}>{fmtDate(t.sold_at)}</td>
+                                            <td style={{ color: 'var(--text-secondary)' }}>{fmtDate(t.valid_from)} → {fmtDate(t.valid_until)}</td>
+                                            <td className="tabular-nums" style={{ fontWeight: 700, textAlign: 'right' }}>{fmt(t.price_paid)}</td>
+                                            <td style={{ color: 'var(--text-secondary)' }}>{fmtDate(t.sold_at)}</td>
                                         </tr>
                                     );
                                 })}
@@ -1215,6 +1165,91 @@ export default function CustomerPage() {
                     </div>
                 </>
             )}
+
+            {/* SLIDE-OVER CUSTOMER PROFILE DRAWER */}
+            <Drawer
+                open={Boolean(activeCustomerDrawer)}
+                onClose={() => { setExpandedId(null); setEditingCardPkgId(null); setNewCardCode(''); }}
+                title={activeCustomerDrawer?.name || 'Hồ sơ khách hàng'}
+                subtitle={activeCustomerDrawer ? `Thẻ: ${maskCardCode(activeCustomerDrawer.card_code)} · SĐT: ${activeCustomerDrawer.phone || '—'}` : undefined}
+                width={520}
+                footer={
+                    activeCustomerDrawer ? (
+                        <>
+                            {canEditCustomer && (
+                                <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={() => openEditCustomer(activeCustomerDrawer)}>
+                                    ✏️ Sửa thông tin
+                                </button>
+                            )}
+                            {canDeleteCustomer && (
+                                <button type="button" className="btn btn-danger" onClick={() => handleDeleteCustomer(activeCustomerDrawer)}>
+                                    🗑️ Xóa KH
+                                </button>
+                            )}
+                        </>
+                    ) : undefined
+                }
+            >
+                {activeCustomerDrawer && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div className="ui-callout">
+                            <div className="ui-detail-list">
+                                <div className="ui-detail-row"><span className="ui-detail-label">Họ tên</span><strong>{activeCustomerDrawer.name}</strong></div>
+                                <div className="ui-detail-row"><span className="ui-detail-label">Số điện thoại</span><strong className="tabular-nums">{activeCustomerDrawer.phone || '—'}</strong></div>
+                                <div className="ui-detail-row"><span className="ui-detail-label">Mã thẻ</span><code>{maskCardCode(activeCustomerDrawer.card_code)}</code></div>
+                                <div className="ui-detail-row"><span className="ui-detail-label">Gói đang dùng</span><strong>{activeCustomerDrawer.activePackages} / {activeCustomerDrawer.totalPackages}</strong></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '10px' }}>
+                                📦 Danh sách gói thẻ ({activeCustomerDrawer.totalPackages})
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {activeCustomerDrawer.packages.map(p => {
+                                    const pst = getStatusBadge(p.status);
+                                    return (
+                                        <div key={p.id} className="ui-card" style={{ padding: '14px', cursor: 'pointer' }} onClick={() => setSelectedPkg(p)}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                                <strong style={{ fontSize: '14px' }}>{p.type_name}</strong>
+                                                <span className="ui-badge" style={{ background: pst.bg, color: pst.color }}>{pst.text}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', color: 'var(--text-secondary)', flexWrap: 'wrap', gap: '6px' }}>
+                                                <span>{fmtDate(p.valid_from)} → {fmtDate(p.valid_until)}</span>
+                                                <span className="tabular-nums" style={{ fontWeight: 700, color: p.remaining_sessions !== null && p.remaining_sessions <= 3 ? 'var(--accent-red)' : 'var(--text-primary)' }}>
+                                                    {p.remaining_sessions !== null ? `${p.remaining_sessions}/${p.total_sessions ?? p.remaining_sessions} lượt` : '∞ lượt'}
+                                                </span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', fontSize: '12px' }}>
+                                                <span className="tabular-nums" style={{ fontWeight: 700 }}>{fmt(p.price_paid)}</span>
+                                                <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>Chi tiết →</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {isAdmin && (
+                            <div className="ui-callout">
+                                {editingCardPkgId && activeCustomerDrawer.packages.some(p => p.id === editingCardPkgId) ? (
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <input type="text" className="input" value={newCardCode} onChange={e => setNewCardCode(normalizeScannerInput(e.target.value))}
+                                            placeholder="Quét hoặc nhập mã thẻ mới" autoFocus style={{ flex: 1, minWidth: '160px', fontWeight: 700 }} />
+                                        <button type="button" className="btn btn-primary btn-sm" onClick={() => handleUpdateCardCode(editingCardPkgId)}>Lưu</button>
+                                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditingCardPkgId(null); setNewCardCode(''); }}>Hủy</button>
+                                    </div>
+                                ) : (
+                                    <button type="button" className="btn btn-outline btn-sm btn-full"
+                                        onClick={() => { setEditingCardPkgId(activeCustomerDrawer.packages[0]?.id || null); setNewCardCode(activeCustomerDrawer.packages[0]?.card_code || ''); }}>
+                                        ✏️ Đổi mã thẻ (mất thẻ)
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </Drawer>
 
             {/* Detail Modal */}
             {selectedPkg && (
@@ -1266,30 +1301,30 @@ export default function CustomerPage() {
                         </div>
 
                         {/* Promotion breakdown */}
-                        <div style={{ marginTop: '16px', padding: '14px', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                            <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px', color: '#475569' }}>🎁 Thông tin gói & KM</div>
+                        <div className="ui-callout" style={{ marginTop: '16px' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px', color: 'var(--text-secondary)' }}>🎁 Thông tin gói &amp; KM</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: '#64748b' }}>Gói gốc</span>
+                                    <span style={{ color: 'var(--text-secondary)' }}>Gói gốc</span>
                                     <span>{selectedPkg.type_name} — {fmt(selectedPkg.original_price)}{selectedPkg.original_sessions ? ` (${selectedPkg.original_sessions} lượt)` : ''}</span>
                                 </div>
                                 {selectedPkg.promo_name ? (
                                     <>
                                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                            <span style={{ color: '#64748b' }}>Khuyến mãi</span>
-                                            <span style={{ color: '#059669', fontWeight: 600 }}>
+                                            <span style={{ color: 'var(--text-secondary)' }}>Khuyến mãi</span>
+                                            <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>
                                                 🎉 {selectedPkg.promo_name}
                                             </span>
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                            <span style={{ color: '#64748b' }}>Ưu đãi</span>
-                                            <span style={{ color: '#059669', fontWeight: 700 }}>
+                                            <span style={{ color: 'var(--text-secondary)' }}>Ưu đãi</span>
+                                            <span style={{ color: 'var(--accent-green)', fontWeight: 700 }}>
                                                 {selectedPkg.promo_type === 'AMOUNT' && `−${fmt(selectedPkg.promo_value!)}`}
                                                 {selectedPkg.promo_type === 'PERCENT' && `−${selectedPkg.promo_value}%`}
                                                 {selectedPkg.promo_type === 'BONUS_SESSION' && `+${selectedPkg.promo_value} lượt`}
                                             </span>
                                         </div>
-                                        <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                                        <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
                                             <span>Sau KM</span>
                                             <span>
                                                 {fmt(selectedPkg.price_paid)}
@@ -1298,7 +1333,7 @@ export default function CustomerPage() {
                                         </div>
                                     </>
                                 ) : (
-                                    <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>Không áp dụng khuyến mãi</div>
+                                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Không áp dụng khuyến mãi</div>
                                 )}
                             </div>
                         </div>
@@ -1307,43 +1342,42 @@ export default function CustomerPage() {
                         <div style={{ marginTop: '16px' }}>
                             {!showPkgHistory ? (
                                 <button
-                                    className="btn btn-outline"
-                                    style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 600, color: '#0369a1', background: '#e0f2fe', border: '1px solid #7dd3fc', borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    type="button"
+                                    className="btn btn-secondary btn-full"
                                     onClick={() => fetchPkgCheckinHistory(selectedPkg.id)}
                                     disabled={loadingPkgHistory}
                                 >
                                     📋 {loadingPkgHistory ? 'Đang tải...' : 'Tra cứu lịch sử Check-in'}
                                 </button>
                             ) : (
-                                <div style={{ padding: '14px', borderRadius: '10px', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                                <div className="ui-callout ui-callout-blue">
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                             📋 Lịch sử Check-in
-                                            <span style={{ background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
-                                                {pkgCheckinHistory.filter(h => h.status !== 'CANCELLED').length} lượt
-                                            </span>
+                                            <Badge variant="blue">{pkgCheckinHistory.filter(h => h.status !== 'CANCELLED').length} lượt</Badge>
                                         </div>
                                         <button
+                                            type="button"
                                             onClick={() => { setShowPkgHistory(false); setPkgCheckinHistory([]); }}
-                                            style={{ background: 'none', border: 'none', fontSize: '14px', cursor: 'pointer', color: '#94a3b8', padding: '2px 6px' }}
+                                            style={{ background: 'none', border: 'none', fontSize: '14px', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px 6px' }}
                                         >✕</button>
                                     </div>
                                     {loadingPkgHistory ? (
-                                        <div style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: '13px' }}>⏳ Đang tải...</div>
+                                        <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: '13px' }}>⏳ Đang tải...</div>
                                     ) : pkgCheckinHistory.length === 0 ? (
-                                        <div style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: '13px' }}>
+                                        <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
                                             <div style={{ fontSize: '24px', marginBottom: '6px' }}>📭</div>
                                             Chưa có lượt check-in nào cho gói thẻ này.
                                         </div>
                                     ) : (
                                         <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
-                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                            <table>
                                                 <thead>
-                                                    <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                                                        <th style={{ textAlign: 'left', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>#</th>
-                                                        <th style={{ textAlign: 'left', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>Thời gian</th>
-                                                        <th style={{ textAlign: 'center', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>Trạng thái</th>
-                                                        <th style={{ textAlign: 'left', padding: '6px 4px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>NV</th>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>Thời gian</th>
+                                                        <th style={{ textAlign: 'center' }}>Trạng thái</th>
+                                                        <th>NV</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1353,29 +1387,18 @@ export default function CustomerPage() {
                                                         const staffName = (h.profiles as any)?.full_name || '—';
                                                         const displayIdx = pkgCheckinHistory.filter((x, i) => i >= idx && x.status !== 'CANCELLED').length;
                                                         return (
-                                                            <tr key={h.id} style={{
-                                                                borderBottom: '1px solid #f1f5f9',
-                                                                background: isCancelled ? '#fef2f2' : (idx % 2 === 0 ? '#fff' : '#f8fafc'),
-                                                            }}>
-                                                                <td style={{ padding: '6px 4px', color: isCancelled ? '#94a3b8' : '#475569', fontWeight: 600 }}>
-                                                                    {isCancelled ? '—' : displayIdx}
-                                                                </td>
-                                                                <td style={{ padding: '6px 4px', whiteSpace: 'nowrap' }}>
-                                                                    <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                                                                        {t.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                                                                    </span>
-                                                                    <span style={{ color: '#94a3b8', marginLeft: '4px', fontSize: '10px' }}>
+                                                            <tr key={h.id} style={{ opacity: isCancelled ? 0.7 : 1 }}>
+                                                                <td style={{ fontWeight: 600 }}>{isCancelled ? '—' : displayIdx}</td>
+                                                                <td style={{ whiteSpace: 'nowrap' }} className="tabular-nums">
+                                                                    <strong>{t.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</strong>
+                                                                    <span style={{ color: 'var(--text-muted)', marginLeft: '4px', fontSize: '11px' }}>
                                                                         {t.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit' })}
                                                                     </span>
                                                                 </td>
-                                                                <td style={{ padding: '6px 4px', textAlign: 'center' }}>
-                                                                    {isCancelled ? (
-                                                                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700 }}>🔄 Đã hủy</span>
-                                                                    ) : (
-                                                                        <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700 }}>✅</span>
-                                                                    )}
+                                                                <td style={{ textAlign: 'center' }}>
+                                                                    {isCancelled ? <Badge variant="red">🔄 Đã hủy</Badge> : <Badge variant="green">✅</Badge>}
                                                                 </td>
-                                                                <td style={{ padding: '6px 4px', color: '#64748b', fontSize: '11px' }}>{staffName}</td>
+                                                                <td style={{ color: 'var(--text-secondary)', fontSize: '11.5px' }}>{staffName}</td>
                                                             </tr>
                                                         );
                                                     })}
@@ -1389,9 +1412,10 @@ export default function CustomerPage() {
 
                         {/* Cập nhật HLV */}
                         {selectedPkg.category === 'LESSON' && (
-                            <div style={{ marginTop: '16px', padding: '14px', borderRadius: '10px', background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                                <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px', color: '#1e40af' }}>🏊 Cập nhật Huấn luyện viên</div>
+                            <div className="ui-callout ui-callout-blue" style={{ marginTop: '16px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px', color: 'var(--accent-blue)' }}>🏊 Cập nhật Huấn luyện viên</div>
                                 <select
+                                    className="input"
                                     value={selectedPkg.coach_id || ''}
                                     onChange={async (e) => {
                                         const newCoachId = e.target.value || null;
@@ -1405,7 +1429,6 @@ export default function CustomerPage() {
                                             alert('✅ Đã cập nhật HLV thành công!');
                                         }
                                     }}
-                                    style={{ width: '100%', padding: '10px 14px', fontSize: '14px', borderRadius: '8px', border: '1px solid #93c5fd', outline: 'none', background: '#fff', boxSizing: 'border-box' }}
                                 >
                                     <option value="">-- Chưa gán HLV --</option>
                                     {coaches
@@ -1417,28 +1440,32 @@ export default function CustomerPage() {
                             </div>
                         )}
 
-                        {/* Admin Action Buttons */}
-                        {isAdmin && !isEditingPkg && (
+                        {/* Action Buttons theo ma trận phân quyền */}
+                        {!isEditingPkg && (
                             <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
-                                <button className="btn btn-outline" style={{ flex: 1, color: '#475569', background: '#f8fafc', border: '1px solid #cbd5e1' }}
+                                <button type="button" className="btn btn-outline" style={{ flex: 1 }}
                                     onClick={() => setPrintTicket(selectedPkg as any)}>
                                     🖨️ In thẻ QR
                                 </button>
-                                <button className="btn btn-ghost" style={{ flex: 1, color: '#0369a1', background: '#e0f2fe' }}
-                                    onClick={() => {
-                                        setEditSessions(selectedPkg.remaining_sessions !== null ? selectedPkg.remaining_sessions : '');
-                                        setEditTotalSessions(selectedPkg.total_sessions !== null ? selectedPkg.total_sessions : '');
-                                        setEditValidFrom(selectedPkg.valid_from || '');
-                                        setEditValidUntil(selectedPkg.valid_until || '');
-                                        setEditPricePaid(selectedPkg.price_paid);
-                                        setEditSoldAt(selectedPkg.sold_at ? selectedPkg.sold_at.split('T')[0] : '');
-                                        setIsEditingPkg(true);
-                                    }}>
-                                    ✏️ Sửa gói
-                                </button>
-                                <button className="btn btn-primary" style={{ flex: 1, background: '#ef4444' }} onClick={handleDeletePackage}>
-                                    🗑️ Xóa gói
-                                </button>
+                                {canEditPackage && (
+                                    <button type="button" className="btn btn-secondary" style={{ flex: 1 }}
+                                        onClick={() => {
+                                            setEditSessions(selectedPkg.remaining_sessions !== null ? selectedPkg.remaining_sessions : '');
+                                            setEditTotalSessions(selectedPkg.total_sessions !== null ? selectedPkg.total_sessions : '');
+                                            setEditValidFrom(selectedPkg.valid_from || '');
+                                            setEditValidUntil(selectedPkg.valid_until || '');
+                                            setEditPricePaid(selectedPkg.price_paid);
+                                            setEditSoldAt(selectedPkg.sold_at ? selectedPkg.sold_at.split('T')[0] : '');
+                                            setIsEditingPkg(true);
+                                        }}>
+                                        ✏️ Sửa gói
+                                    </button>
+                                )}
+                                {canDeletePackage && (
+                                    <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={handleDeletePackage}>
+                                        🗑️ Xóa gói
+                                    </button>
+                                )}
                             </div>
                         )}
 
@@ -1502,9 +1529,9 @@ export default function CustomerPage() {
 
             {/* ===== IMPORT MODAL ===== */}
             {showImportModal && (
-                <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', maxWidth: '800px', width: '95%', maxHeight: '80vh', overflow: 'auto' }}>
-                        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>📥 Import Khách Hàng Cũ</h2>
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '800px' }}>
+                        <h2 style={{ fontSize: '19px', marginBottom: '16px' }}>📥 Import Khách Hàng Cũ</h2>
 
                         {!importResult ? (
                             <>
@@ -1671,11 +1698,11 @@ export default function CustomerPage() {
 
             {/* ===== BULK EDIT MODAL ===== */}
             {showBulkModal && (
-                <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                    <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', maxWidth: '600px', width: '95%', maxHeight: '80vh', overflow: 'auto' }}>
-                        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>✏️ Đổi loại gói hàng loạt</h2>
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ maxWidth: '580px' }}>
+                        <h2 style={{ fontSize: '19px', marginBottom: '16px' }}>✏️ Đổi loại gói hàng loạt</h2>
 
-                        <div style={{ padding: '12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#1e40af' }}>
+                        <div className="ui-callout ui-callout-blue" style={{ marginBottom: '16px' }}>
                             Đang chọn <b>{bulkSelected.size}</b> gói thẻ để đổi loại gói.
                         </div>
 

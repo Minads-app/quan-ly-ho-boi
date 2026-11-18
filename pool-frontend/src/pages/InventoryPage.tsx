@@ -1,9 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/immutability */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { RetailProduct, InventoryAudit } from '../types';
 import * as XLSX from 'xlsx';
+import { PageHeader, SegmentedTabs } from '../components/ui';
 
 interface InventoryLog {
     id: string;
@@ -408,18 +409,54 @@ export default function InventoryPage() {
     }
 
     async function handleSubmitSlip() {
-        if (!profile || slipItems.length === 0) return;
+        if (!profile || slipItems.length === 0 || isSaving) return;
         if (slipMode === 'EXPORT' && !slipNote.trim()) {
             alert('Vui lòng nhập ghi chú cho phiếu xuất kho!');
             return;
         }
 
+        // Kiểm tra tồn kho trước trên Frontend đối với phiếu xuất
+        if (slipMode === 'EXPORT') {
+            for (const item of slipItems) {
+                if (item.quantity > item.product.stock_quantity) {
+                    alert(`❌ Sản phẩm "${item.product.name}" không đủ tồn kho để xuất (Tồn: ${item.product.stock_quantity}, Xuất: ${item.quantity}).`);
+                    return;
+                }
+            }
+        }
+
         setIsSaving(true);
+        const type = slipMode === 'IMPORT' ? 'IMPORT' : 'EXPORT_ADJUST';
+
+        // Ưu tiên gọi RPC nguyên tử process_inventory_slip (migration 058)
+        const { data: batchRes, error: batchErr } = await supabase.rpc('process_inventory_slip', {
+            p_type: type,
+            p_items: slipItems.map(i => ({ product_id: i.product.id, quantity: i.quantity })),
+            p_note: slipNote || null,
+            p_user_id: profile.id
+        });
+
+        if (!batchErr && batchRes) {
+            setIsSaving(false);
+            if (!batchRes.success) {
+                alert(`❌ Lỗi lập phiếu kho: ${batchRes.error}`);
+                return;
+            }
+            alert(`✅ ${slipMode === 'IMPORT' ? 'Nhập kho' : 'Xuất kho'} ${slipItems.length} sản phẩm thành công!`);
+            if (window.confirm('Bạn có muốn in phiếu này không?')) {
+                printInventorySlip(slipMode as 'IMPORT' | 'EXPORT', slipItems, slipNote);
+            }
+            closeSlip();
+            fetchProducts();
+            return;
+        }
+
+        // Fallback từng mặt hàng (loại bỏ các mặt hàng đã xử lý thành công khỏi slipItems nếu gián đoạn để tránh nhân đôi khi thử lại)
         let hasError = false;
+        const completedIds = new Set<string>();
 
         for (const item of slipItems) {
             const finalQty = slipMode === 'IMPORT' ? item.quantity : -item.quantity;
-            const type = slipMode === 'IMPORT' ? 'IMPORT' : 'EXPORT_ADJUST';
 
             const { data, error } = await rpcWithRetry('adjust_inventory', {
                 p_product_id: item.product.id,
@@ -429,19 +466,21 @@ export default function InventoryPage() {
                 p_user_id: profile.id
             });
 
-            if (error) {
-                alert(`❌ Lỗi xử lý "${item.product.name}": ${error.message}`);
-                hasError = true;
-                break;
-            } else if (data && !data.success) {
-                alert(`❌ Lỗi "${item.product.name}": ${data.error}`);
+            if (error || (data && !data.success)) {
+                alert(`❌ Lỗi xử lý "${item.product.name}": ${error?.message || data?.error}. Các mặt hàng trước đó đã được ghi nhận và loại khỏi danh sách chờ.`);
                 hasError = true;
                 break;
             }
+            completedIds.add(item.product.id);
         }
 
         setIsSaving(false);
-        if (!hasError) {
+        if (hasError) {
+            if (completedIds.size > 0) {
+                setSlipItems(prev => prev.filter(i => !completedIds.has(i.product.id)));
+                fetchProducts();
+            }
+        } else {
             alert(`✅ ${slipMode === 'IMPORT' ? 'Nhập kho' : 'Xuất kho'} ${slipItems.length} sản phẩm thành công!`);
             if (window.confirm('Bạn có muốn in phiếu này không?')) {
                 printInventorySlip(slipMode as 'IMPORT' | 'EXPORT', slipItems, slipNote);
@@ -1191,53 +1230,40 @@ export default function InventoryPage() {
     // ===================== MAIN VIEW =====================
     return (
         <div className="page-container">
-            <div className="page-header flex-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                    <h1>📦 Quản lý Kho Hàng</h1>
-                    <p>Theo dõi tồn kho, nhập hàng, xuất hủy và quản lý danh mục sản phẩm</p>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-primary" style={{ background: '#0ea5e9', borderColor: '#0ea5e9' }} onClick={() => openSlip('AUDIT')}>
-                        📝 Kiểm Kho
-                    </button>
-                    <button className="btn btn-primary" style={{ background: '#10b981', borderColor: '#10b981' }} onClick={() => openSlip('IMPORT')}>
-                        📥 Nhập Kho
-                    </button>
-                    <button className="btn btn-primary" style={{ background: '#f59e0b', borderColor: '#f59e0b' }} onClick={() => openSlip('EXPORT')}>
-                        📤 Xuất Kho
-                    </button>
-                </div>
-            </div>
+            <PageHeader
+                title="Quản lý Kho Hàng"
+                subtitle="Theo dõi tồn kho, nhập hàng, xuất hủy và quản lý danh mục sản phẩm"
+                actions={
+                    <>
+                        <button type="button" className="btn btn-outline" onClick={() => openSlip('AUDIT')}>
+                            📝 Kiểm Kho
+                        </button>
+                        <button type="button" className="btn btn-primary" style={{ background: 'var(--accent-green)' }} onClick={() => openSlip('IMPORT')}>
+                            📥 Nhập Kho
+                        </button>
+                        <button type="button" className="btn btn-warning" onClick={() => openSlip('EXPORT')}>
+                            📤 Xuất Kho
+                        </button>
+                    </>
+                }
+            />
 
-            <div style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--border-color)', marginBottom: '24px' }}>
-                <button
-                    className={`btn ${activeTab === 'STOCK' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('STOCK')}
-                >
-                    Danh sách Tồn kho
-                </button>
-                <button
-                    className={`btn ${activeTab === 'HISTORY' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => { setActiveTab('HISTORY'); fetchLogs(); }}
-                >
-                    Lịch sử Nhập/Xuất
-                </button>
-                <button
-                    className={`btn ${activeTab === 'AUDITS' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => { setActiveTab('AUDITS'); fetchAudits(); }}
-                >
-                    Phiếu Kiểm Kho
-                </button>
-                <button
-                    className={`btn ${activeTab === 'CATALOG' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: '8px 8px 0 0', padding: '12px 24px', margin: 0 }}
-                    onClick={() => setActiveTab('CATALOG')}
-                >
-                    🛍️ Danh mục Sản phẩm
-                </button>
+            <div style={{ marginBottom: '18px' }}>
+                <SegmentedTabs
+                    tabs={[
+                        { key: 'STOCK', label: 'Danh sách Tồn kho', icon: '📦' },
+                        { key: 'HISTORY', label: 'Lịch sử Nhập/Xuất', icon: '🔄' },
+                        { key: 'AUDITS', label: 'Phiếu Kiểm Kho', icon: '📝' },
+                        { key: 'CATALOG', label: 'Danh mục Sản phẩm', icon: '🛍️' },
+                    ]}
+                    activeKey={activeTab}
+                    onChange={(k) => {
+                        const tab = k as 'STOCK' | 'HISTORY' | 'CATALOG' | 'AUDITS';
+                        setActiveTab(tab);
+                        if (tab === 'HISTORY') fetchLogs();
+                        if (tab === 'AUDITS') fetchAudits();
+                    }}
+                />
             </div>
 
             {loading ? (
@@ -1265,25 +1291,38 @@ export default function InventoryPage() {
                                             : parent.stock_quantity;
 
                                         return isParentWithVariants ? (
-                                            // Parent with variants: show parent row + indented variant rows
-                                            <tbody key={parent.id}>
-                                                <tr style={{ background: '#f8fafc', fontWeight: 600 }}>
+                                            <React.Fragment key={parent.id}>
+                                                <tr style={{ background: 'var(--bg-subtle)', fontWeight: 600 }}>
                                                     <td>
-                                                        <span style={{ fontSize: '15px' }}>📦 {parent.name}</span>
-                                                        <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({variants.length} biến thể)</span>
+                                                        <span style={{ fontSize: '14.5px' }}>📦 {parent.name}</span>
+                                                        <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginLeft: '8px' }}>({variants.length} biến thể)</span>
                                                     </td>
                                                     <td>
                                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                                                             <span className="badge badge-outline" style={{ fontSize: '13px', padding: '4px 8px' }}>
                                                                 Tổng: {totalStock.toLocaleString('vi-VN')}
                                                             </span>
-                                                            <span style={{ color: '#0ea5e9', fontSize: '12px', textDecoration: 'underline', cursor: 'pointer' }} onClick={() => { setActiveTab('CATALOG'); setTimeout(() => openEditProductModal(parent), 100); }}>Xem chi tiết →</span>
+                                                            <span style={{ color: 'var(--accent-blue)', fontSize: '12px', textDecoration: 'underline', cursor: 'pointer' }} onClick={() => { setActiveTab('CATALOG'); setTimeout(() => openEditProductModal(parent), 100); }}>Xem chi tiết →</span>
                                                         </div>
                                                     </td>
                                                     <td>{parent.unit}</td>
                                                     <td>{parent.is_active ? 'Đang bán' : 'Ngừng bán'}</td>
                                                 </tr>
-                                            </tbody>
+                                                {variants.map(v => (
+                                                    <tr key={v.id} style={{ opacity: v.is_active ? 1 : 0.55 }}>
+                                                        <td style={{ paddingLeft: '28px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                                            ↳ {v.name} {v.sku ? <code style={{ fontSize: '11px', marginLeft: '6px' }}>{v.sku}</code> : null}
+                                                        </td>
+                                                        <td>
+                                                            <span className={`badge ${v.stock_quantity <= 5 ? 'badge-error' : 'badge-success'}`} style={{ fontSize: '13px', padding: '3px 7px' }}>
+                                                                {v.stock_quantity.toLocaleString('vi-VN')}
+                                                            </span>
+                                                        </td>
+                                                        <td>{v.unit}</td>
+                                                        <td>{v.is_active ? 'Đang bán' : 'Ngừng bán'}</td>
+                                                    </tr>
+                                                ))}
+                                            </React.Fragment>
                                         ) : (
                                             // Standalone product
                                             <tr key={parent.id} style={{ opacity: parent.is_active ? 1 : 0.6 }}>
@@ -1330,7 +1369,7 @@ export default function InventoryPage() {
                                                 {log.type === 'EXPORT_ADJUST' && <span className="badge badge-warning">Xuất/Điều chỉnh</span>}
                                                 {log.type === 'SALE' && <span className="badge badge-outline">Bán hàng</span>}
                                             </td>
-                                            <td style={{ color: log.quantity > 0 ? 'var(--accent-green)' : 'var(--alert-red)', fontWeight: 'bold' }}>
+                                            <td className="tabular-nums" style={{ color: log.quantity > 0 ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 'bold' }}>
                                                 {log.quantity > 0 ? `+${log.quantity}` : log.quantity}
                                             </td>
                                             <td>{log.profiles?.full_name || 'Hệ thống'}</td>
@@ -1417,15 +1456,15 @@ export default function InventoryPage() {
                                             const variants = getVariants(p.id);
                                             return (
                                                 <React.Fragment key={p.id}>
-                                                    <tr style={{ opacity: p.is_active ? 1 : 0.5, background: variants.length > 0 ? '#f8fafc' : undefined }}>
+                                                    <tr style={{ opacity: p.is_active ? 1 : 0.5, background: variants.length > 0 ? 'var(--bg-subtle)' : undefined }}>
                                                         <td><strong>{p.name}</strong></td>
-                                                        <td style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
+                                                        <td className="tabular-nums" style={{ fontWeight: 600, color: 'var(--accent-green)' }}>
                                                             {p.price.toLocaleString('vi-VN')}đ
                                                         </td>
                                                         <td>{p.unit}</td>
                                                         <td>
                                                             {variants.length > 0
-                                                                ? <span style={{ color: '#0ea5e9', fontSize: '13px', textDecoration: 'underline', cursor: 'pointer' }} onClick={() => openEditProductModal(p)}>Xem biến thể ↓</span>
+                                                                ? <span style={{ color: 'var(--accent-blue)', fontSize: '13px', textDecoration: 'underline', cursor: 'pointer' }} onClick={() => openEditProductModal(p)}>Xem biến thể ↓</span>
                                                                 : p.stock_quantity.toLocaleString('vi-VN')
                                                             }
                                                         </td>
@@ -1446,7 +1485,7 @@ export default function InventoryPage() {
                                                             </button>
                                                             <button
                                                                 className="btn btn-ghost btn-sm"
-                                                                style={{ color: 'var(--alert-red)', marginLeft: '8px' }}
+                                                                style={{ color: 'var(--accent-red)', marginLeft: '8px' }}
                                                                 onClick={() => handleDeleteProduct(p.id)}
                                                             >
                                                                 🗑️ Xóa
@@ -1520,13 +1559,13 @@ export default function InventoryPage() {
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                         {getVariants(editingProduct.id).map(v => (
-                                            <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', opacity: v.is_active ? 1 : 0.6 }}>
+                                            <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--bg-subtle)', borderRadius: '8px', border: '1px solid var(--border-color)', opacity: v.is_active ? 1 : 0.6 }}>
                                                 <div>
-                                                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>
-                                                        {v.sku && <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', marginRight: '6px' }}>{v.sku}</span>}
+                                                    <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
+                                                        {v.sku && <span style={{ background: 'var(--accent-blue-soft)', color: 'var(--accent-blue)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', marginRight: '6px' }}>{v.sku}</span>}
                                                         {v.name.replace(editingProduct.name + ' — ', '')}
                                                     </div>
-                                                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                                                         Giá: {v.price.toLocaleString('vi-VN')}đ · Tồn kho: <strong>{v.stock_quantity.toLocaleString('vi-VN')}</strong> {v.unit}
                                                     </div>
                                                 </div>
@@ -1535,12 +1574,12 @@ export default function InventoryPage() {
                                                         {v.is_active ? '👁️' : '🙈'}
                                                     </button>
                                                     <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEditVariant(v, editingProduct)}>✏️</button>
-                                                    <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px', color: '#ef4444' }} onClick={() => handleDeleteVariant(v.id)}>🗑️</button>
+                                                    <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px', color: 'var(--accent-red)' }} onClick={() => handleDeleteVariant(v.id)}>🗑️</button>
                                                 </div>
                                             </div>
                                         ))}
                                         {getVariants(editingProduct.id).length === 0 && (
-                                            <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                                            <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic', background: 'var(--bg-subtle)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
                                                 Sản phẩm này chưa có biến thể nào.
                                             </div>
                                         )}

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, no-useless-escape, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,6 +6,8 @@ import * as XLSX from 'xlsx';
 import PrintTicketModal, { type PrintTicketData } from '../components/PrintTicketModal';
 import PnLReportTab from '../components/PnLReportTab';
 import { fetchAllSupabaseRows } from '../utils/financialService';
+import { formatPaymentMethod } from '../utils/helpers';
+import { PageHeader, SegmentedTabs, StatCard } from '../components/ui';
 
 type ReportTab = 'REVENUE' | 'PNL' | 'SESSIONS' | 'WARNINGS' | 'DAILY_PASSES' | 'MY_SALES' | 'LESSON_PACKAGES' | 'BASKETBALL';
 type DateRange = 'TODAY' | 'THIS_MONTH' | 'LAST_MONTH' | 'CUSTOM';
@@ -75,7 +77,6 @@ const fmtDateTime = (d: string) => { const dt = new Date(d); return dt.toLocaleT
 
 const thS: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-card)' };
 const tdS: React.CSSProperties = { padding: '8px 10px', fontSize: '13px', whiteSpace: 'nowrap' };
-const dateInputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: '13px' };
 
 function maskCardCode(code: string | null, isAdmin: boolean): string | null {
     if (!code) return null;
@@ -96,7 +97,7 @@ function TicketTable({ data, title, isAdmin, bizInfo }: { data: TicketRow[], tit
 
     return (
         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh', marginBottom: '24px' }}>
-            {title && <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🎟️ {title} ({data.length} vé)</h3>}
+            {title && <h3 style={{ fontSize: '15.5px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-primary)' }}>🎟️ {title} ({data.length} vé)</h3>}
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                     <tr>
@@ -119,7 +120,7 @@ function TicketTable({ data, title, isAdmin, bizInfo }: { data: TicketRow[], tit
                                 </td>
                                 <td style={tdS}>{t.customer_name || 'Khách lẻ'}</td>
                                 <td style={tdS}>{t.card_code ? <code style={{ background: 'var(--bg-hover)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>{maskCardCode(t.card_code, isAdmin || false)}</code> : '—'}</td>
-                                <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                <td style={tdS}>{formatPaymentMethod(t.payment_method, true)}</td>
                                 <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
                                 <td style={tdS}>{t.sold_by_name}</td>
                                 <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
@@ -170,7 +171,7 @@ function RetailTable({ data }: { data: RetailRow[] }) {
 
     return (
         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh', marginBottom: '24px' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>🛒 Sản Phẩm Bán Lẻ Đã Bán ({totalQty} món)</h3>
+            <h3 style={{ fontSize: '15.5px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-primary)' }}>🛒 Sản Phẩm Bán Lẻ Đã Bán ({totalQty} món)</h3>
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                     <tr>
@@ -187,7 +188,7 @@ function RetailTable({ data }: { data: RetailRow[] }) {
                                 <td style={tdS}>{actualIdx}</td>
                                 <td style={tdS}><span style={{ fontWeight: 500 }}>{r.product_name}</span></td>
                                 <td style={{ ...tdS, textAlign: 'center', fontWeight: 600 }}>{r.quantity}</td>
-                                <td style={tdS}>{r.payment_method === 'CASH' ? '💵 TM' : r.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                <td style={tdS}>{formatPaymentMethod(r.payment_method, true)}</td>
                                 <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(r.subtotal)}</td>
                                 <td style={tdS}>{r.sold_by_name}</td>
                                 <td style={tdS}>{fmtDateTime(r.sold_at)}</td>
@@ -723,19 +724,23 @@ export default function DashboardPage() {
     // --- RENDER HELPERS ---
     function renderDateFilter() {
         return (
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', alignItems: 'center' }}>
-                {(['TODAY', 'THIS_MONTH', 'LAST_MONTH', 'CUSTOM'] as DateRange[]).map(r => (
-                    <button key={r} className={`btn ${dateRange === r ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ padding: '6px 14px', fontSize: '13px' }}
-                        onClick={() => setDateRange(r)}>
-                        {r === 'TODAY' ? 'Hôm nay' : r === 'THIS_MONTH' ? 'Tháng này' : r === 'LAST_MONTH' ? 'Tháng trước' : 'Tùy chọn'}
-                    </button>
-                ))}
+            <div className="ui-filter-bar">
+                <SegmentedTabs
+                    size="sm"
+                    tabs={[
+                        { key: 'TODAY', label: 'Hôm nay' },
+                        { key: 'THIS_MONTH', label: 'Tháng này' },
+                        { key: 'LAST_MONTH', label: 'Tháng trước' },
+                        { key: 'CUSTOM', label: 'Tùy chọn' },
+                    ]}
+                    activeKey={dateRange}
+                    onChange={(k) => setDateRange(k as DateRange)}
+                />
                 {dateRange === 'CUSTOM' && (
                     <>
-                        <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={dateInputStyle} />
+                        <input type="date" className="ui-date-input" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
                         <span style={{ color: 'var(--text-secondary)' }}>→</span>
-                        <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={dateInputStyle} />
+                        <input type="date" className="ui-date-input" value={customTo} onChange={e => setCustomTo(e.target.value)} />
                     </>
                 )}
             </div>
@@ -755,7 +760,7 @@ export default function DashboardPage() {
 
         const tableHtml = `<table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>SĐT</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
             ${activeRevenueTickets.map((t, i) => {
-            const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
+            const paymentStr = formatPaymentMethod(t.payment_method);
             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
             return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${t.customer_phone || ''}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${t.sold_by_name}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
@@ -765,7 +770,7 @@ export default function DashboardPage() {
             ${retailItems.length > 0 ? `
             <h3 style="margin-top: 24px; margin-bottom: 8px;">🛒 Sản Phẩm Bán Lẻ</h3>
             <table><thead><tr><th>STT</th><th>Sản phẩm</th><th>Số lượng</th><th>H/T Thanh toán</th><th>Thành tiền</th><th>Người bán</th><th>Thời gian</th></tr></thead><tbody>
-            ${retailItems.map((r, i) => `<tr><td>${i + 1}</td><td>${r.product_name}</td><td>${r.quantity}</td><td>${r.payment_method === 'CASH' ? 'Tiền mặt' : r.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS'}</td><td style="text-align:right">${fmt(r.subtotal)}</td><td>${r.sold_by_name}</td><td>${fmtDateTime(r.sold_at)}</td></tr>`).join('')}
+            ${retailItems.map((r, i) => `<tr><td>${i + 1}</td><td>${r.product_name}</td><td>${r.quantity}</td><td>${formatPaymentMethod(r.payment_method)}</td><td style="text-align:right">${fmt(r.subtotal)}</td><td>${r.sold_by_name}</td><td>${fmtDateTime(r.sold_at)}</td></tr>`).join('')}
             <tr class="total-row"><td colspan="4">TỔNG CỘNG SẢN PHẨM (${countRetail} món)</td><td style="text-align:right">${fmt(totalRetailRevenue)}</td><td colspan="2"></td></tr>
             </tbody></table>
             ` : ''}
@@ -802,19 +807,13 @@ export default function DashboardPage() {
         return (
             <>
                 {renderDateFilter()}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-                    {[{ label: 'Thực thu (Đã trừ chi)', value: fmt(totalRevenue - totalExpenses), color: '#10b981' },
-                    { label: 'Doanh thu Vé', value: fmt(totalTicketRevenue), color: '#3b82f6' },
-                    { label: 'Doanh thu SP', value: fmt(totalRetailRevenue), color: '#8b5cf6' },
-                    { label: 'Thu tiền mặt', value: fmt(revCash), color: '#64748b' },
-                    { label: 'Thu CK & Thẻ', value: fmt(revTransfer + revTransferCompany + revCard), color: '#d97706' },
-                    { label: 'Chi tiền mặt', value: `-${fmt(totalExpenses)}`, color: '#ef4444' }
-                    ].map(k => (
-                        <div key={k.label} style={{ flex: 1, minWidth: '120px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px 16px' }}>
-                            <div style={{ fontSize: '18px', fontWeight: 700, color: k.color }}>{k.value}</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{k.label}</div>
-                        </div>
-                    ))}
+                <div className="stats-grid">
+                    <StatCard label="Thực thu (Đã trừ chi)" value={fmt(totalRevenue - totalExpenses)} tone="green" />
+                    <StatCard label="Doanh thu Vé" value={fmt(totalTicketRevenue)} tone="blue" />
+                    <StatCard label="Doanh thu SP" value={fmt(totalRetailRevenue)} tone="purple" />
+                    <StatCard label="Thu tiền mặt" value={fmt(revCash)} tone="neutral" />
+                    <StatCard label="Thu CK & Thẻ" value={fmt(revTransfer + revTransferCompany + revCard)} tone="amber" />
+                    <StatCard label="Chi tiền mặt" value={`-${fmt(totalExpenses)}`} tone="red" />
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                     <button className="btn btn-secondary" onClick={() => handlePrintReport(`Báo cáo Doanh thu (${from} → ${to})`, tableHtml)}>🖨️ In A4</button>
@@ -823,7 +822,7 @@ export default function DashboardPage() {
                             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
                             return [
                                 String(i + 1), displayType, t.customer_name || 'Khách lẻ', t.customer_phone || '', maskCardCode(t.card_code, isAdmin || false) || '',
-                                t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
+                                formatPaymentMethod(t.payment_method),
                                 String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at)
                             ]
                         })
@@ -897,7 +896,7 @@ export default function DashboardPage() {
         return (
             <>
                 {renderDateFilter()}
-                <div style={{ marginBottom: '16px', padding: '12px', background: '#dbeafe', borderRadius: '8px', color: '#1e40af', fontSize: '13px' }}>
+                <div className="ui-callout ui-callout-blue" style={{ marginBottom: '16px' }}>
                     ℹ️ Lượt khách: Đếm số người khách <strong>đã quét mã/quẹt thẻ qua cổng</strong> thành công (chỉ đếm lượt IN). Báo cáo liệt kê khách thực tế đến hồ bơi.
                 </div>
                 <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -1156,7 +1155,7 @@ export default function DashboardPage() {
                         filteredTickets.map((t, i) => [
                             String(i + 1), t.id.substring(0, 8).toUpperCase(), t.type_name,
                             t.status === 'UNUSED' ? 'Chưa quét' : t.status === 'EXPIRED' ? 'Hết hạn' : 'Đã quét',
-                            t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
+                            formatPaymentMethod(t.payment_method),
                             String(t.price_paid), t.sold_by_name || '', fmtDateTime(t.sold_at),
                             dailyScanMap[t.id] ? fmtDateTime(dailyScanMap[t.id]) : '—'
                         ])
@@ -1188,7 +1187,7 @@ export default function DashboardPage() {
                                             {t.status === 'UNUSED' ? '🔴 Chưa dùng' : t.status === 'EXPIRED' ? '⚫ Hết hạn' : t.status === 'CANCELLED' ? '🚫 Đã hủy' : '🟢 Đã quét cổng'}
                                         </span>
                                     </td>
-                                    <td style={tdS}>{t.payment_method === 'CASH' ? '💵 TM' : t.payment_method === 'TRANSFER' ? '🏦 CK' : '💳 POS'}</td>
+                                    <td style={tdS}>{formatPaymentMethod(t.payment_method, true)}</td>
                                     <td style={{ ...tdS, textAlign: 'right', fontWeight: 600 }}>{fmt(t.price_paid)}</td>
                                     <td style={tdS}>{t.sold_by_name}</td>
                                     <td style={tdS}>{fmtDateTime(t.sold_at)}</td>
@@ -1240,7 +1239,7 @@ export default function DashboardPage() {
             </div>
             <table><thead><tr><th>STT</th><th>Loại vé</th><th>Khách hàng</th><th>Mã thẻ</th><th>H/T Thanh toán</th><th>Giá bán</th><th>Thời gian</th></tr></thead><tbody>
             ${mySalesTickets.map((t, i) => {
-            const paymentStr = t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS';
+            const paymentStr = formatPaymentMethod(t.payment_method);
             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
             return `<tr><td>${i + 1}</td><td>${displayType}</td><td>${t.customer_name || 'Khách lẻ'}</td><td>${maskCardCode(t.card_code, isAdmin || false) || ''}</td><td>${paymentStr}</td><td style="text-align:right">${fmt(t.price_paid)}</td><td>${fmtDateTime(t.sold_at)}</td></tr>`;
         }).join('')}
@@ -1266,7 +1265,7 @@ export default function DashboardPage() {
                             const displayType = t.category === 'LESSON' ? `[Học Bơi] ${t.type_name}` : t.category === 'MULTI' ? `[Nhiều buổi] ${t.type_name}` : t.category === 'MONTHLY' ? `[Vé tháng] ${t.type_name}` : t.type_name;
                             return [
                                 String(i + 1), displayType, t.customer_name || 'Khách lẻ', maskCardCode(t.card_code, isAdmin || false) || '',
-                                t.payment_method === 'CASH' ? 'Tiền mặt' : t.payment_method === 'TRANSFER' ? 'Chuyển khoản' : 'Thẻ POS',
+                                formatPaymentMethod(t.payment_method),
                                 String(t.price_paid), fmtDateTime(t.sold_at)
                             ]
                         })
@@ -1402,22 +1401,18 @@ export default function DashboardPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                    <h1>📈 Báo Cáo</h1>
-                    <p>Xem doanh thu, kết quả kinh doanh, danh sách vé và cảnh báo</p>
-                </div>
-                <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-hover)', padding: '4px', borderRadius: '12px', flexWrap: 'wrap' }}>
-                    {tabs.filter(t => !t.adminOnly || isAdmin).map(t => (
-                        <button key={t.key}
-                            className={`btn ${activeTab === t.key ? 'btn-primary' : 'btn-ghost'}`}
-                            style={{ border: 'none', margin: 0, padding: '8px 14px', fontSize: '13px' }}
-                            onClick={() => setActiveTab(t.key)}>
-                            {t.icon} {t.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            <PageHeader
+                title="Báo Cáo Hoạt Động"
+                subtitle="Xem doanh thu, kết quả kinh doanh, lượt khách qua cổng và cảnh báo thẻ"
+                actions={
+                    <SegmentedTabs
+                        size="sm"
+                        tabs={tabs.filter(t => !t.adminOnly || isAdmin).map(t => ({ key: t.key, label: t.label, icon: t.icon }))}
+                        activeKey={activeTab}
+                        onChange={(k) => setActiveTab(k as ReportTab)}
+                    />
+                }
+            />
 
             {loading && activeTab !== 'PNL' && <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>Đang tải dữ liệu...</div>}
 
@@ -1441,8 +1436,8 @@ export default function DashboardPage() {
                             Thao tác này sẽ hủy vé lượt hiện tại và <strong>cộng trả lại 1 buổi</strong> cho gói bơi gốc của vị khách này (nếu có).
                         </p>
 
-                        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', border: '1px solid #e2e8f0' }}>
-                            <div style={{ marginBottom: '4px' }}><strong>Mã vé:</strong> <code style={{ background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>{ticketToCancel.id.substring(0, 8).toUpperCase()}</code></div>
+                        <div className="ui-callout" style={{ marginBottom: '16px' }}>
+                            <div style={{ marginBottom: '4px' }}><strong>Mã vé:</strong> <code style={{ background: 'var(--bg-card)', padding: '2px 6px', borderRadius: '4px' }}>{ticketToCancel.id.substring(0, 8).toUpperCase()}</code></div>
                             <div style={{ marginBottom: '4px' }}><strong>Khách:</strong> {ticketToCancel.customer_name || 'Khách lẻ'}</div>
                             <div><strong>Bán lúc:</strong> {fmtDateTime(ticketToCancel.sold_at)}</div>
                         </div>

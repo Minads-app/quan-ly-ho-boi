@@ -68,15 +68,6 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
     const { profile } = useAuth();
     const isAdmin = profile?.role === 'ADMIN';
 
-    // Strict Admin-only enforcement
-    if (!isAdmin) {
-        return (
-            <div className="alert alert-error" style={{ marginTop: '16px' }}>
-                🔒 Chức năng Báo cáo Kết quả Kinh doanh và Hạch toán Thu - Chi bổ sung chỉ dành riêng cho Quản trị viên (ADMIN).
-            </div>
-        );
-    }
-
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const currentMonthStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
@@ -312,8 +303,8 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
                     supabase
                         .from('coach_checkin_summary')
                         .select('checkin_log_id, checked_in_at, per_session_amount')
-                        .gte('checked_in_at', `${from}T00:00:00`)
-                        .lte('checked_in_at', `${to}T23:59:59`)
+                        .gte('checked_in_at', `${from}T00:00:00+07:00`)
+                        .lte('checked_in_at', `${to}T23:59:59.999+07:00`)
                         .order('checked_in_at', { ascending: false })
                         .order('checkin_log_id', { ascending: true })
                         .range(fromIdx, toIdx)
@@ -346,8 +337,10 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
     }
 
     useEffect(() => {
-        loadAllPnLData();
-    }, [periodMode, fromMonth, toMonth, customFromDate, customToDate]);
+        if (isAdmin) {
+            loadAllPnLData();
+        }
+    }, [isAdmin, periodMode, fromMonth, toMonth, customFromDate, customToDate]);
 
     // ============================================================
     // COMPUTE P&L NUMBERS
@@ -535,6 +528,15 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
         includeCoachPayroll,
         coachPayrollByMonth,
     ]);
+
+    // Strict Admin-only enforcement (placed after all React Hooks to satisfy Rules of Hooks)
+    if (!isAdmin) {
+        return (
+            <div className="alert alert-error" style={{ marginTop: '16px' }}>
+                🔒 Chức năng Báo cáo Kết quả Kinh doanh và Hạch toán Thu - Chi bổ sung chỉ dành riêng cho Quản trị viên (ADMIN).
+            </div>
+        );
+    }
 
     // ============================================================
     // HANDLERS FOR ADDING / EDITING TRANSACTIONS
@@ -1435,7 +1437,7 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
                                 </tr>
 
                                 {/* III. CHI PHÍ BIẾN ĐỔI (BIẾN PHÍ) */}
-                                <tr style={{ background: '#fffbeb', fontWeight: 700 }}>
+                                <tr style={{ background: 'var(--accent-orange-soft)', fontWeight: 700 }}>
                                     <td style={tdS}>
                                         III. CHI PHÍ BIẾN ĐỔI (BIẾN PHÍ — VARIABLE COSTS)
                                         <button
@@ -1489,15 +1491,15 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
                                 )}
 
                                 {/* LỢI NHUẬN GỘP (B) */}
-                                <tr style={{ background: '#eff6ff', fontWeight: 800 }}>
-                                    <td style={{ ...tdS, color: '#1e40af' }}>👉 LỢI NHUẬN GỘP / SỐ DƯ ĐẢM PHÍ (B = A - III)</td>
-                                    <td style={{ ...tdS, textAlign: 'center', color: '#1e40af' }}>LỢI NHUẬN GỘP</td>
-                                    <td style={{ ...tdS, textAlign: 'right', color: '#1e40af', fontSize: '15px' }}>{fmt(grossProfit)}</td>
-                                    <td style={{ ...tdS, textAlign: 'right', color: '#1e40af' }}>Margin: {grossMarginPct.toFixed(1)}%</td>
+                                <tr style={{ background: 'var(--accent-blue-soft)', fontWeight: 800 }}>
+                                    <td style={{ ...tdS, color: 'var(--accent-blue)' }}>👉 LỢI NHUẬN GỘP / SỐ DƯ ĐẢM PHÍ (B = A - III)</td>
+                                    <td style={{ ...tdS, textAlign: 'center', color: 'var(--accent-blue)' }}>LỢI NHUẬN GỘP</td>
+                                    <td style={{ ...tdS, textAlign: 'right', color: 'var(--accent-blue)', fontSize: '15px' }}>{fmt(grossProfit)}</td>
+                                    <td style={{ ...tdS, textAlign: 'right', color: 'var(--accent-blue)' }}>Margin: {grossMarginPct.toFixed(1)}%</td>
                                 </tr>
 
                                 {/* IV. CHI PHÍ CỐ ĐỊNH (ĐỊNH PHÍ) */}
-                                <tr style={{ background: '#fef2f2', fontWeight: 700 }}>
+                                <tr style={{ background: 'var(--accent-red-soft)', fontWeight: 700 }}>
                                     <td style={tdS}>
                                         IV. CHI PHÍ CỐ ĐỊNH HÀNG THÁNG (ĐỊNH PHÍ — FIXED COSTS)
                                         <button
@@ -1539,7 +1541,7 @@ export default function PnLReportTab({ onPrintReport }: PnLReportTabProps) {
                                 )}
 
                                 {/* TỔNG CHI PHÍ (C) */}
-                                <tr style={{ background: '#f8fafc', fontWeight: 800 }}>
+                                <tr style={{ background: 'var(--bg-subtle)', fontWeight: 800 }}>
                                     <td style={tdS}>👉 TỔNG CHI PHÍ HOẠT ĐỘNG (C = III + IV)</td>
                                     <td style={{ ...tdS, textAlign: 'center', color: '#dc2626' }}>TỔNG CHI</td>
                                     <td style={{ ...tdS, textAlign: 'right', color: '#dc2626', fontSize: '15px' }}>-{fmt(totalExpenses)}</td>

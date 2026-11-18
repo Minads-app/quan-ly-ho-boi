@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { createClient } from '@supabase/supabase-js';
 import type { PermissionsMatrix } from '../types';
+import { PageHeader } from '../components/ui';
 
 // Create a separate Supabase client that doesn't persist the session.
 // This allows the Admin to create new users without being logged out.
@@ -103,7 +104,24 @@ export default function StaffPage() {
         if (error) {
             alert('Lỗi khi cập nhật chức vụ: ' + error.message);
         } else {
-            // Update local state
+            const targetStaff = staffList.find(p => p.id === userId);
+            // Nếu đổi sang vai trò COACH thì tự động đảm bảo có hồ sơ trong bảng coaches
+            if (newRole === 'COACH' && targetStaff) {
+                const { data: existingCoach } = await supabase
+                    .from('coaches')
+                    .select('id')
+                    .eq('profile_id', userId)
+                    .maybeSingle();
+
+                if (!existingCoach) {
+                    await supabase.from('coaches').insert({
+                        profile_id: userId,
+                        full_name: targetStaff.full_name || 'HLV mới',
+                        phone: null,
+                        is_active: true
+                    });
+                }
+            }
             setStaffList(prev => prev.map(p => p.id === userId ? { ...p, role: newRole as any } : p));
         }
         setUpdatingId(null);
@@ -170,14 +188,15 @@ export default function StaffPage() {
         setIsCreating(true);
 
         try {
-            // 1. Create user in Supabase Auth using the temp client
             const cleanEmail = newEmail.trim();
+            const cleanName = newFullName.trim();
             const { data: authData, error: authError } = await tempSupabase.auth.signUp({
                 email: cleanEmail,
                 password: newPassword,
                 options: {
                     data: {
-                        full_name: newFullName
+                        full_name: cleanName,
+                        role: newRole
                     }
                 }
             });
@@ -185,30 +204,52 @@ export default function StaffPage() {
             if (authError) throw new Error(authError.message);
             if (!authData.user) throw new Error('Không thể tạo tài khoản');
 
-            // Wait a brief moment for the database trigger to insert the profile
-            await new Promise(resolve => setTimeout(resolve, 800));
+            const newUserId = authData.user.id;
 
-            // 2. The trigger created a 'STAFF' role profile. Now we update it to the selected role using the main Admin client.
-            const updatePayload: any = { full_name: newFullName };
-            if (newRole !== 'STAFF') {
-                updatePayload.role = newRole;
+            // Chờ có kiểm tra (polling tối đa 6 lần x 400ms) để đảm bảo trigger tạo profile đã hoàn tất
+            let profileReady = false;
+            for (let attempt = 0; attempt < 6; attempt++) {
+                const { data: existingProf } = await supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('id', newUserId)
+                    .maybeSingle();
+                if (existingProf) {
+                    profileReady = true;
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 400));
             }
 
-            const { error: updateError } = await supabase
-                .from('profiles')
-                .update(updatePayload)
-                .eq('id', authData.user.id);
+            if (profileReady) {
+                const { error: updateError } = await supabase
+                    .from('profiles')
+                    .update({ full_name: cleanName, role: newRole })
+                    .eq('id', newUserId);
+                if (updateError) throw new Error('Cập nhật quyền thất bại: ' + updateError.message);
+            } else {
+                const { error: upsertError } = await supabase
+                    .from('profiles')
+                    .upsert({ id: newUserId, full_name: cleanName, role: newRole }, { onConflict: 'id' });
+                if (upsertError) throw new Error('Khởi tạo hồ sơ quyền thất bại: ' + upsertError.message);
+            }
 
-            if (updateError) throw new Error('Cập nhật quyền thất bại: ' + updateError.message);
-
-            // 3. If role is COACH, auto-create a coaches record
+            // Nếu vai trò là COACH, tự động tạo bản ghi trong bảng coaches nếu chưa có
             if (newRole === 'COACH') {
-                await supabase.from('coaches').insert({
-                    profile_id: authData.user.id,
-                    full_name: newFullName,
-                    phone: null,
-                    is_active: true
-                });
+                const { data: existingCoach } = await supabase
+                    .from('coaches')
+                    .select('id')
+                    .eq('profile_id', newUserId)
+                    .maybeSingle();
+
+                if (!existingCoach) {
+                    await supabase.from('coaches').insert({
+                        profile_id: newUserId,
+                        full_name: cleanName,
+                        phone: null,
+                        is_active: true
+                    });
+                }
             }
 
             alert('Tạo tài khoản thành công!');
@@ -324,22 +365,22 @@ export default function StaffPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header flex-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                    <h1>👥 Tài khoản Nhân sự</h1>
-                    <p>Quản lý và phân quyền cho nhân viên bán vé, soát vé</p>
-                </div>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                    <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-                        ➕ Thêm nhân viên
-                    </button>
-                    <button className="btn btn-secondary" onClick={fetchStaff}>
-                        🔄 Làm mới
-                    </button>
-                </div>
-            </div>
+            <PageHeader
+                title="Tài khoản Nhân sự"
+                subtitle="Quản lý tài khoản, vai trò và phân quyền cho nhân viên bán vé, soát vé"
+                actions={
+                    <>
+                        <button type="button" className="btn btn-primary" onClick={() => setShowModal(true)}>
+                            ➕ Thêm nhân viên
+                        </button>
+                        <button type="button" className="btn btn-outline" onClick={fetchStaff}>
+                            🔄 Làm mới
+                        </button>
+                    </>
+                }
+            />
 
-            <div className="dashboard-content-card" style={{ marginTop: '2rem' }}>
+            <div className="dashboard-content-card">
                 <div className="table-responsive">
                     <table className="data-table">
                         <thead>

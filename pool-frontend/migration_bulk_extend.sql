@@ -21,6 +21,23 @@ CREATE TABLE IF NOT EXISTS public.ticket_extension_logs (
 CREATE INDEX IF NOT EXISTS idx_ticket_ext_ticket_id ON public.ticket_extension_logs(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_ext_bulk_id ON public.ticket_extension_logs(bulk_extension_id);
 
+ALTER TABLE public.bulk_extensions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ticket_extension_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "bulk_extensions_select_auth" ON public.bulk_extensions;
+DROP POLICY IF EXISTS "bulk_extensions_write_admin" ON public.bulk_extensions;
+CREATE POLICY "bulk_extensions_select_auth" ON public.bulk_extensions FOR SELECT TO authenticated USING (true);
+CREATE POLICY "bulk_extensions_write_admin" ON public.bulk_extensions FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
+
+DROP POLICY IF EXISTS "ticket_ext_logs_select_auth" ON public.ticket_extension_logs;
+DROP POLICY IF EXISTS "ticket_ext_logs_write_admin" ON public.ticket_extension_logs;
+CREATE POLICY "ticket_ext_logs_select_auth" ON public.ticket_extension_logs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "ticket_ext_logs_write_admin" ON public.ticket_extension_logs FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN'));
+
 -- ========== 3. RPC execute_bulk_extend ==========
 CREATE OR REPLACE FUNCTION execute_bulk_extend(
     p_start_date DATE, 

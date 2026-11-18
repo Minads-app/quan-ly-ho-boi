@@ -1,6 +1,6 @@
 export type UserRole = 'ADMIN' | 'STAFF' | 'CASHIER' | 'GATE_KEEPER' | 'COACH';
 export type TicketCategory = 'DAILY' | 'MONTHLY' | 'MULTI' | 'LESSON';
-export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'EXPIRED' | 'CANCELLED';
+export type TicketStatus = 'UNUSED' | 'IN' | 'OUT' | 'IN_USE' | 'EXPIRED' | 'CANCELLED';
 export type LessonClassType = 'GROUP' | 'ONE_ON_ONE' | 'ONE_ON_TWO' | 'PRIVATE';
 export type CardStatus = 'UNUSED' | 'USED' | 'REVOKED';
 
@@ -27,6 +27,11 @@ export interface Profile {
     permissions?: PermissionsMatrix;
 }
 
+export interface ExtraStudent {
+    name: string;
+    birthYear: number | null;
+}
+
 export interface TicketType {
     id: string;
     name: string;
@@ -41,8 +46,58 @@ export interface TicketType {
     lesson_class_type: LessonClassType | null;
     lesson_schedule_type: 'FIXED' | 'FLEXIBLE' | null;
     student_count: number | null;
-    age_price_tiers: { minAge: number, maxAge: number, price: number }[] | null;
+    age_price_tiers: { minAge: number; maxAge: number; price: number }[] | null;
     sport_type?: 'SWIMMING' | 'BASKETBALL';
+    requires_gate_ticket?: boolean;
+}
+
+export interface Promotion {
+    id: string;
+    name: string;
+    type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
+    value: number;
+    valid_from: string | null;
+    valid_until: string | null;
+    is_active: boolean;
+    applicable_ticket_types: string[] | null;
+    applicable_lesson_types: string[] | null;
+    customer_condition: 'ALL' | 'NEW_CUSTOMER' | 'OLD_CUSTOMER';
+    auto_apply: boolean;
+    combinable: boolean;
+}
+
+export interface Voucher {
+    id: string;
+    promotion_id: string;
+    code: string;
+    max_uses: number | null;
+    used_count: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ValidatedVoucher {
+    voucher_id: string;
+    promotion_id: string;
+    promo_name: string;
+    promo_type: 'AMOUNT' | 'PERCENT' | 'BONUS_SESSION';
+    promo_value: number;
+}
+
+export interface BusinessInfo {
+    business_name?: string;
+    business_address?: string;
+    business_phone?: string;
+    business_email?: string;
+    business_logo?: string;
+    bank_name?: string;
+    bank_account_number?: string;
+    bank_account_name?: string;
+    print_format?: 'K80' | 'A5';
+    pool_open_time?: string;
+    pool_close_time?: string;
+    gate_control_mode?: string;
 }
 
 export interface LessonSchedule {
@@ -69,6 +124,7 @@ export interface Ticket {
     last_scan_at: string | null;
     source?: 'POS' | 'IMPORT';
     coach_id?: string | null;
+    extra_students?: ExtraStudent[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -209,7 +265,6 @@ export interface TicketExtensionLog {
     created_at: string;
     bulk_extensions?: BulkExtension;
 }
-
 
 export type FinancialType = 'INCOME' | 'EXPENSE';
 export type CostType = 'FIXED' | 'VARIABLE' | null;
